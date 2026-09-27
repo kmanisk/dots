@@ -35,14 +35,10 @@ bindsym $mod+y exec --no-startup-id ~/.local/bin/fuzzel-clipboard
 bindsym $mod+b exec --no-startup-id brave-origin
 bindsym $mod+Shift+b split h
 
-# Wallpaper: Win+Shift+W = instant switch
-bindsym $mod+Shift+w exec --no-startup-id ~/.local/bin/random-wallpaper
+# Wallpaper: Win+Shift+W = fetch fresh Minecraft wallpaper set
+bindsym $mod+Shift+w exec --no-startup-id ~/.local/bin/minecraft-wallpaper --fresh
 # Minecraft wallpapers only, from r/MinecraftWallpapers (Alt + Shift + W)
 bindsym Mod1+Shift+w exec --no-startup-id ~/.local/bin/minecraft-wallpaper
-# Alt+Shift+u: "fresh set" — archive the current library, fetch a new batch,
-# inject into the local store, and apply one immediately. The saturation
-# popup's "Start a new set" action button also fires this.
-bindsym Alt+Shift+u exec --no-startup-id ~/.local/bin/minecraft-wallpaper --fresh
 
 # Browser on NVIDIA GPU (Windows + Alt + b) -> Brave on RTX 5050
 bindsym $mod+Mod1+b workspace number $ws2; exec brave-nvidia
