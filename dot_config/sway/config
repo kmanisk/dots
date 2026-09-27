@@ -46,7 +46,7 @@ bindsym $mod+Mod1+b workspace number $ws2; exec brave-nvidia
 # Text Editor & File Manager
 bindsym $mod+Shift+t exec alacritty -o font.size=20.5 -e nvim
 bindsym $mod+e exec thunar ~
-bindsym Mod1+z exec --no-startup-id zed
+bindsym $mod+z exec --no-startup-id zed
 
 # Time/date notification (Win + c)
 bindsym $mod+c exec notify-send "Clock" "$(date '+%A, %B %d%n%I:%M %P')"

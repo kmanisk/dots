@@ -1,3 +1,14 @@
 #!/usr/bin/env bash
-# Zed GPU Launcher (forces NVIDIA dedicated GPU for WGPU / Vulkan backend)
-exec "$HOME/.local/bin/prime-run" "$HOME/.local/zed.app/bin/zed" "$@"
+# ==============================================================================
+# Zed Editor Launcher — Dedicated NVIDIA RTX 5050 dGPU
+# Forces NVIDIA Vulkan ICD and PRIME offload so GPUI/WGPU selects and renders
+# exclusively on the dedicated GPU rather than defaulting to Intel iGPU.
+# ==============================================================================
+
+export __NV_PRIME_RENDER_OFFLOAD=1
+export __VK_LAYER_NV_optimus=NVIDIA_only
+export __GLX_VENDOR_LIBRARY_NAME=nvidia
+export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/nvidia_icd.json
+export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
+
+exec "$HOME/.local/zed.app/bin/zed" "$@"
