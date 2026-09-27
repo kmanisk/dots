@@ -76,11 +76,10 @@
 
 ## 9. CS2 Wayland setup (separate game, kept intact)
 
-- Legacy X11 launcher `~/.local/bin/cs2-launch` (xrandr 1344x1008, polybar hide, picom kill) is i3-only — segfaults under Wayland. **Untouched.**
-- Wayland launcher `~/.local/bin/cs2-launch-wayland`: native Wayland SDL3 (`SDL_VIDEO_DRIVER=wayland`), `SDL_VIDEO_WAYLAND_SCALE_TO_DISPLAY=1` for 1.2× fractional scale, NVIDIA offload (`LIBVA_DRIVER_NAME=iHD`), P-core pinning `taskset -c 0-11`, `gamemoderun`, optional Gamescope 4:3 stretch (`--stretch` / `CS2_STRETCH=1`).
+- Consolidated Wayland launcher `~/.local/bin/cs2-launch`: native Wayland SDL3 (`SDL_VIDEO_DRIVER=wayland`), `SDL_VIDEO_WAYLAND_SCALE_TO_DISPLAY=1` for 1.2× fractional scale, NVIDIA offload (`LIBVA_DRIVER_NAME=iHD`), P-core pinning `taskset -c 0-11`, `gamemoderun`, optional Gamescope 4:3 stretch (`--stretch` / `CS2_STRETCH=1`).
 - KWin: `[Wayland] AllowTearing=true` in `~/.config/kwinrc`, reloaded via D-Bus.
 - In-game (`cs2_video.txt`): exclusive fullscreen, 165Hz numerator/denominator.
-- Steam launch options: `$HOME/.local/bin/cs2-launch-wayland %command%` (+ `--stretch` variant).
+- Steam launch options: `$HOME/.local/bin/cs2-launch %command%` (+ `--stretch` variant).
 
 ## 10. Environment watch-items
 

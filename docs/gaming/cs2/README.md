@@ -1,7 +1,7 @@
 # Counter-Strike 2 (CS2) — Linux Status & Experience Log
 
 **Platform:** Native Linux (Vulkan)  
-**Runner:** Custom launcher `~/.local/bin/cs2launch`  
+**Runner:** Custom launcher `~/.local/bin/cs2-launch`\
 **Execution Environment:** i3wm (X11) / Sway (Wayland) · CachyOS rolling · NVIDIA RTX 5050 Mobile
 
 ---
@@ -31,7 +31,7 @@
 
 - **Issue: In-Menu GPU Choking / Thermal Spikes**
   - *Cause:* Having `+fps_max_ui 0` forced the GPU to render the 3D menu background at hundreds of FPS, spiking temperatures before matches.
-  - *Fix:* Set `+fps_max_ui 120` in `~/.local/bin/cs2launch`.
+  - *Fix:* Set `+fps_max_ui 120` in `~/.local/bin/cs2-launch`.
 - **Issue: Argv Token Concatenation in Bash**
   - *Cause:* Passing `"+fps_max $FPS_MAX"` as a single quoted array item prevented Source 2's command-line parser from seeing the flag.
   - *Fix:* Separated flags and arguments into distinct tokens (`+fps_max "$FPS_MAX"`).

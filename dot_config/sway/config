@@ -141,6 +141,7 @@ bindsym $mod+q kill
 bindsym $mod+Shift+q exec --no-startup-id ~/.local/bin/force-kill-window
 bindsym $mod+f fullscreen toggle
 bindsym $mod+Shift+space floating toggle
+bindsym Shift+space focus mode_toggle
 # bindsym $mod+space focus mode_toggle (disabled: collided with xremap RightCtrl/Space input in scratchpad)
 bindsym $mod+Shift+a focus parent
 bindsym $mod+w layout tabbed
@@ -301,14 +302,14 @@ bindgesture hold:4 exec --no-startup-id ~/.local/bin/powermenu
 seat seat0 xcursor_theme phinger-cursors-gruvbox-material-light 40
 
 # Output Configuration (Internal Display @ 165Hz, Native 1:1 hardware pixels)
-# Baseline: Adaptive Sync (VRR) enabled for tear-free, low-latency sync.
-# To test raw immediate-tearing instead: set adaptive_sync off, allow_tearing yes, max_render_time off.
+# Locked 165Hz tear-free presentation: adaptive_sync off prevents LCD voltage/gamma
+# fluctuation and corner backlight flickering on high-refresh laptop panels.
 output eDP-1 {
     mode 1920x1200@165.000Hz
     scale 1.0
-    adaptive_sync on
+    adaptive_sync off
     allow_tearing yes
-    max_render_time 1
+    max_render_time off
     background #1d2021 solid_color
 }
 
@@ -354,6 +355,8 @@ for_window [instance="(?i)^AppRun\.wrapped$"] floating enable, resize set 1200 7
 for_window [instance="(?i)^pkg-float$"] floating enable, resize set 1250 780, move position center
 for_window [app_id="(?i)^lsfg-vk-ui$"] floating enable, resize set 1250 820, move position center
 for_window [class="(?i)^lsfg-vk-ui$"] floating enable, resize set 1250 820, move position center
+for_window [app_id="(?i)^nmtui$"] floating enable, resize set 900 600, move position center
+for_window [class="(?i)^nmtui$"] floating enable, resize set 900 600, move position center
 for_window [app_id="(?i)^vkcube.*"] floating enable, resize set 900 650, move position center
 for_window [class="(?i)^vkcube.*"] floating enable, resize set 900 650, move position center
 
