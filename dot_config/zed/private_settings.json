@@ -4,110 +4,69 @@
     // ─────────────────────────────────────────────────────────────────────────────
     // 1. TYPOGRAPHY & FONTS (All Fonts in One Place)
     // ─────────────────────────────────────────────────────────────────────────────
-    // Active Editor (Buffer) Font
-    // "buffer_font_family": "CozetteVector",
-    // "buffer_font_family": "Departure Mono",
-    // "buffer_font_family": "Share Tech Mono",
-    "buffer_font_family": "Iosevka Nerd Font",
-    // "buffer_font_family": "FantasqueSansM Nerd Font Mono",
+    // Global Gold Standard Dimensions (Applies to all buffer fonts)
+    "buffer_font_size": 35.0, // <- Adjust once globally for all buffer fonts
+    "buffer_line_height": {
+        "custom": 1.40 // Gold standard line height (clean vertical rhythm for all fonts)
+    },
+    "buffer_font_weight": 400,
     "buffer_font_fallbacks": [
         "FantasqueSansM Nerd Font",
         "Aporetic Sans Mono",
         "FantasqueSansM Nerd Font Mono"
     ],
-    "buffer_font_size": 40.0, // <- Change this to adjust editor code size
-    // "buffer_font_size": 30.0, // <- Change this to adjust editor code size
-    "buffer_font_weight": 400, // Regular = 400, Medium = 500, SemiBold = 600, Bold = 700
-    "buffer_line_height": {
-        "custom": 1.43 // Line height spacing (1.35 - 1.4 sweet spot)
-    },
     "buffer_font_features": {
         "liga": true, // Enable standard ligatures
         "calt": true // Contextual alternates (coding ligatures: ->, =>, !=, ===)
     },
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // COMPLETE CODING & TERMINAL FONT PRESETS (Uncomment font + line-height pair)
+    // FONT SWITCHER (Uncomment any ONE line to switch font instantly)
     // ─────────────────────────────────────────────────────────────────────────────
-    // ── [BLOCK A: Size 24.0 | Line-Height 1.40] (Modern Crisp / Tall / Academic) ─
-    // "buffer_font_family": "Aporetic Sans Mono",         // Academic Vintage Vector Sans Mono
-    // "buffer_line_height": { "custom": 1.40 }, "buffer_font_size": 24.0,
-    // "buffer_font_family": "Aporetic Serif Mono",        // Academic Vintage Book Serif Mono
-    // "buffer_line_height": { "custom": 1.40 }, "buffer_font_size": 24.0,
-    // "buffer_font_family": "Iosevka Nerd Font Mono",     // Ultra Tall Condensed CRT Coding
-    // "buffer_line_height": { "custom": 1.40 }, "buffer_font_size": 24.0,
-    // "buffer_font_family": "Iosevka Nerd Font",          // Iosevka with wider symbols
-    // "buffer_line_height": { "custom": 1.40 }, "buffer_font_size": 24.0,
+    // ── [1] Modern Crisp / Tall / Academic Mono ──────────────────────────────────
+    "buffer_font_family": "Iosevka Nerd Font", // Active Default (Tall Condensed CRT)
+    // "buffer_font_family": "Iosevka Nerd Font Mono",
+    // "buffer_font_family": "Aporetic Sans Mono",         // Academic Vintage Vector Sans
+    // "buffer_font_family": "Aporetic Serif Mono",        // Academic Vintage Book Serif
     // "buffer_font_family": "JetBrains Mono",             // Modern High-Legibility JetBrains
-    // "buffer_line_height": { "custom": 1.40 }, "buffer_font_size": 24.0,
-    // "buffer_font_family": "JetBrainsMono NL",           // JetBrains Mono No Ligatures
-    // "buffer_line_height": { "custom": 1.40 }, "buffer_font_size": 24.0,
-    // "buffer_font_family": "Cascadia Mono",              // Microsoft Windows Terminal Cascadia
-    // "buffer_line_height": { "custom": 1.40 }, "buffer_font_size": 24.0,
-    // "buffer_font_family": "Consolas",                   // Classic Microsoft Clean Mono
-    // "buffer_line_height": { "custom": 1.40 }, "buffer_font_size": 24.0,
-    // "buffer_font_family": "psudoFont Liga Mono",        // Custom Ligature Coding Mono
-    // "buffer_line_height": { "custom": 1.40 }, "buffer_font_size": 24.0,
+    // "buffer_font_family": "JetBrainsMono NL",           // JetBrains Mono (No Ligatures)
+    // "buffer_font_family": "Cascadia Mono",              // Windows Terminal Standard
+    // "buffer_font_family": "Consolas",                   // Classic Clean Windows Mono
+    // "buffer_font_family": "psudoFont Liga Mono",        // Custom Ligature Mono
 
-    // ── [BLOCK B: Size 23.0 | Line-Height 1.35] (Mainframe / Cyberpunk / Script) ─
-    // "buffer_font_family": "3270 Nerd Font",             // IBM 3270 Mainframe Green Terminal
-    // "buffer_line_height": { "custom": 1.35 }, "buffer_font_size": 23.0,
+    // ── [2] Mainframe / Cyberpunk / Geometry / Cursive ───────────────────────────
     // "buffer_font_family": "Share Tech Mono",            // Cyberpunk / Matrix HUD Display
-    // "buffer_line_height": { "custom": 1.35 }, "buffer_font_size": 23.0,
+    // "buffer_font_family": "3270 Nerd Font",             // IBM 3270 Mainframe Green Terminal
     // "buffer_font_family": "Agave Nerd Font Mono",       // Retro Geometric CRT Terminal
-    // "buffer_line_height": { "custom": 1.35 }, "buffer_font_size": 23.0,
     // "buffer_font_family": "FantasqueSansM Nerd Font Mono", // 70s Typewriter / TTY Console
-    // "buffer_line_height": { "custom": 1.35 }, "buffer_font_size": 23.0,
     // "buffer_font_family": "Hurmit Nerd Font Mono",      // Hermit Clean Geometry Mono
-    // "buffer_line_height": { "custom": 1.35 }, "buffer_font_size": 23.0,
     // "buffer_font_family": "IntoneMono Nerd Font Mono",  // Intel One High-Clarity Mono
-    // "buffer_line_height": { "custom": 1.35 }, "buffer_font_size": 23.0,
-    // "buffer_font_family": "Victor Mono Nerd Font",      // Slanted Cursive Italic Script Mono
-    // "buffer_line_height": { "custom": 1.35 }, "buffer_font_size": 23.0,
+    // "buffer_font_family": "Victor Mono Nerd Font",      // Slanted Cursive Italic Script
     // "buffer_font_family": "DaddyTimeMono Nerd Font Mono", // Casual Retro Monospace
-    // "buffer_line_height": { "custom": 1.35 }, "buffer_font_size": 23.0,
 
-    // ── [BLOCK C: Size 22.0 | Line-Height 1.30] (Early Mac / 90s Pixel / Hacker) ─
+    // ── [3] Early Mac / 90s C++ / 8-Bit Pixel Hacker ─────────────────────────────
     // "buffer_font_family": "Departure Mono",             // Early Macintosh / DEC VT Hybrid
-    // "buffer_line_height": { "custom": 1.30 }, "buffer_font_size": 22.0,
     // "buffer_font_family": "ProggyClean Nerd Font",      // Classic 90s C/C++ Developer Console
-    // "buffer_line_height": { "custom": 1.30 }, "buffer_font_size": 22.0,
     // "buffer_font_family": "ProFontIIx Nerd Font",       // 1980s Mac / Atari ST Console
-    // "buffer_line_height": { "custom": 1.30 }, "buffer_font_size": 22.0,
     // "buffer_font_family": "Monocraft Nerd Font",        // Chunky 8-Bit Pixel Console
-    // "buffer_line_height": { "custom": 1.30 }, "buffer_font_size": 22.0,
     // "buffer_font_family": "Comic Mono",                 // Casual Legible Monospace
-    // "buffer_line_height": { "custom": 1.30 }, "buffer_font_size": 22.0,
     // "buffer_font_family": "Pixel Code",                 // Pixel Art Vector Coding Font
-    // "buffer_line_height": { "custom": 1.30 }, "buffer_font_size": 22.0,
     // "buffer_font_family": "OCR-A BT",                   // Classic Optical Character Recognition
-    // "buffer_line_height": { "custom": 1.30 }, "buffer_font_size": 22.0,
     // "buffer_font_family": "OCR-B 10 BT",                // European Standard OCR Monospace
-    // "buffer_line_height": { "custom": 1.30 }, "buffer_font_size": 22.0,
 
-    // ── [BLOCK D: Size 22.0 | Line-Height 1.25] (Linux TTY / X11 Console) ───────
+    // ── [4] Linux TTY / X11 Unix Bitmap Console ──────────────────────────────────
     // "buffer_font_family": "Terminess Nerd Font",        // Pure Linux TTY Console (Terminus)
-    // "buffer_line_height": { "custom": 1.25 }, "buffer_font_size": 22.0,
     // "buffer_font_family": "GohuFont 14 Nerd Font Mono", // Authentic X11 Unix Bitmap Console 14px
-    // "buffer_line_height": { "custom": 1.25 }, "buffer_font_size": 22.0,
     // "buffer_font_family": "GohuFont 11 Nerd Font Mono", // Ultra Compact X11 Bitmap Console 11px
-    // "buffer_line_height": { "custom": 1.25 }, "buffer_font_size": 22.0,
 
-    // ── [BLOCK E: Size 24.0 | Line-Height 1.35] (6x13 DOS / IRC Bitmap Pixel) ───
+    // ── [5] DOS 6x13 / IRC Bitmap Pixel Vectors ──────────────────────────────────
     // "buffer_font_family": "CozetteVector",              // 6x13 DOS / IRC Bitmap Pixel Vector
-    // "buffer_line_height": { "custom": 1.35 }, "buffer_font_size": 24.0,
     // "buffer_font_family": "CozetteCrossedSevenVector",  // Cozette with Crossed 7 & Z
-    // "buffer_line_height": { "custom": 1.35 }, "buffer_font_size": 24.0,
+    // "buffer_font_family": "VT323",                      // DEC VT320 Green CRT Terminal
 
-    // ── [BLOCK F: Size 26.0 | Line-Height 1.20] (DEC VT320 Scanlines) ───────────
-    // "buffer_font_family": "VT323",                      // Phosphor Green CRT Terminal
-    // "buffer_line_height": { "custom": 1.20 }, "buffer_font_size": 26.0,
-
-    // ── [BLOCK G: Size 21.0 | Line-Height 1.30] (Vintage Windows / Typewriter) ──
+    // ── [6] Vintage Windows / Mechanical Typewriter ──────────────────────────────
     // "buffer_font_family": "Lucida Console",             // Windows 95/NT System Console
-    // "buffer_line_height": { "custom": 1.30 }, "buffer_font_size": 21.0,
     // "buffer_font_family": "Courier New",                // Mechanical Typewriter Standard
-    // "buffer_line_height": { "custom": 1.30 }, "buffer_font_size": 21.0,
     // UI Font (Sidebars, Menus, Status Bar, Tabs)
     "ui_font_family": "Cantarell",
     "agent_ui_font_size": 27,
