@@ -9,6 +9,7 @@
     // "buffer_font_family": "Departure Mono",
     // "buffer_font_family": "Share Tech Mono",
     "buffer_font_family": "Iosevka Nerd Font",
+    // "buffer_font_family": "FantasqueSansM Nerd Font Mono",
     "buffer_font_fallbacks": [
         "FantasqueSansM Nerd Font",
         "Aporetic Sans Mono",
@@ -566,7 +567,7 @@
     // "buffer_line_height": { "custom": 1.35 },
     // ── [BLOCK F: Size 26.0 | Line-Height 1.20] (DEC VT320 Scanlines) ───────────
     // "buffer_font_family": "VT323",                      // Phosphor Green CRT Terminal
-    // "buffer_font_size": 16.0,
+    // "buffer_font_size": 26.0,
     // "buffer_line_height": { "custom": 1.20 },
     // ── [BLOCK G: Size 21.0 | Line-Height 1.30] (Vintage Windows / Typewriter) ──
     // "buffer_font_family": "Lucida Console",             // Windows 95/NT System Console
