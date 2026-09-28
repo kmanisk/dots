@@ -136,7 +136,7 @@ bindsym $mod+Control+l exec swaylock -f -c 000000
 bindsym $mod+q kill
 bindsym $mod+Shift+q exec --no-startup-id ~/.local/bin/force-kill-window
 bindsym $mod+f fullscreen toggle
-bindsym $mod+Shift+space floating toggle
+# bindsym $mod+Shift+space floating toggle
 bindsym Shift+space focus mode_toggle
 # bindsym $mod+space focus mode_toggle (disabled: collided with xremap RightCtrl/Space input in scratchpad)
 bindsym $mod+Shift+a focus parent
@@ -277,7 +277,7 @@ input type:pointer {
 # Workspaces & Window management (3 fingers)
 bindgesture swipe:3:right workspace prev
 bindgesture swipe:3:left workspace next
-bindgesture swipe:3:up floating toggle
+# bindgesture swipe:3:up floating toggle
 bindgesture swipe:3:down scratchpad show
 bindgesture pinch:3:outward fullscreen enable
 bindgesture pinch:3:inward fullscreen disable
@@ -295,7 +295,7 @@ bindgesture hold:4 exec --no-startup-id ~/.local/bin/powermenu
 
 # Cursor: explicit theme + size (37 -> 48); without this Sway falls back
 # to theme defaults and ignores Xcursor.size for Wayland surfaces
-seat seat0 xcursor_theme phinger-cursors-gruvbox-material-light 40
+seat seat0 xcursor_theme phinger-cursors-gruvbox-material 40
 
 # Output Configuration (Internal Display @ 165Hz, Native 1:1 hardware pixels)
 # Locked 165Hz tear-free presentation: adaptive_sync off prevents LCD voltage/gamma
@@ -323,6 +323,9 @@ default_floating_border pixel 1
 
 # Hide outer edge borders when tabs/windows fill the edge
 hide_edge_borders --i3 smart
+
+# Brave: always start tiled
+for_window [app_id="(?i)^brave(-browser|-origin)?$"] floating disable
 
 # Floating Window Rules (matched to i3 config)
 for_window [app_id="(?i)^dusky_audio_studio.*"] floating enable, move position center
@@ -450,14 +453,13 @@ for_window [workspace="^3$"] layout tabbed
 # Web Browser Rules (Workspace 2)
 assign [app_id="(?i)^(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)$"] workspace number $ws2
 assign [class="(?i)^(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)$"] workspace number $ws2
-for_window [app_id="(?i)^(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)$"] move to workspace number $ws2, floating disable
-for_window [class="(?i)^(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)$"] move to workspace number $ws2, floating disable
-# Browser popups, web app logins/dialogs float instead of being swallowed into tabbed view
+for_window [app_id="(?i)^(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)$"] move to workspace number $ws2, layout tabbed, floating disable
+for_window [class="(?i)^(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)$"] move to workspace number $ws2, layout tabbed, floating disable
+# Browser popups, web app dialogs float instead of being swallowed into tabbed view
 for_window [app_id="(?i)^(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)$" window_role="pop-up"] floating enable, move position center
 for_window [app_id="(?i)^(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)$" window_role="bubble"] floating enable, move position center
 for_window [app_id="(?i)^(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)$" window_type="dialog"] floating enable, move position center
 for_window [app_id="(?i)^brave-(?!origin$).+"] floating enable, move position center
-for_window [app_id="(?i)^(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)$" title="(?i).*(sign in|log in|login|oauth|authorize|authenticat).*"] floating enable, move position center
 
 # Steam & All Steam Dialogs (Workspace 3)
 assign [class="(?i)^steam$"] workspace number $ws3
