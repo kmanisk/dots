@@ -134,10 +134,15 @@ mode "gaming" {
     bindsym --inhibited $mod+0    workspace number $ws10
 
     # Exit gaming mode back to normal desktop mode
-    bindsym Mod1+Shift+f mode "default", exec notify-send -t 1500 -i input-gaming "Gaming Mode: OFF" "Desktop shortcuts restored"
-    bindsym --inhibited Mod1+Shift+f mode "default", exec notify-send -t 1500 -i input-gaming "Gaming Mode: OFF" "Desktop shortcuts restored"
+    bindsym --to-code Mod1+Shift+f mode "default", exec notify-send -t 1500 -i input-gaming "Gaming Mode: OFF" "Desktop shortcuts restored"
+    bindsym --to-code --inhibited Mod1+Shift+f mode "default", exec notify-send -t 1500 -i input-gaming "Gaming Mode: OFF" "Desktop shortcuts restored"
+    bindsym Mod1+Shift+F mode "default", exec notify-send -t 1500 -i input-gaming "Gaming Mode: OFF" "Desktop shortcuts restored"
+    bindsym --inhibited Mod1+Shift+F mode "default", exec notify-send -t 1500 -i input-gaming "Gaming Mode: OFF" "Desktop shortcuts restored"
 }
-bindsym Mod1+Shift+f mode "gaming", exec notify-send -t 1500 -i input-gaming "Gaming Mode: ON" "Only Win+u/i/o/p and Win+1..0 active"
+bindsym --to-code Mod1+Shift+f mode "gaming", exec notify-send -t 1500 -i input-gaming "Gaming Mode: ON" "Only Win+u/i/o/p and Win+1..0 active"
+bindsym --to-code --inhibited Mod1+Shift+f mode "gaming", exec notify-send -t 1500 -i input-gaming "Gaming Mode: ON" "Only Win+u/i/o/p and Win+1..0 active"
+bindsym Mod1+Shift+F mode "gaming", exec notify-send -t 1500 -i input-gaming "Gaming Mode: ON" "Only Win+u/i/o/p and Win+1..0 active"
+bindsym --inhibited Mod1+Shift+F mode "gaming", exec notify-send -t 1500 -i input-gaming "Gaming Mode: ON" "Only Win+u/i/o/p and Win+1..0 active"
 
 # System Utilities
 bindsym $mod+Mod1+1 exec $term --class nmtui -e nmtui
