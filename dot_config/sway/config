@@ -4,6 +4,9 @@
 # Display: eDP-1 1920x1200 @ 165Hz
 # ==============================================================================
 
+# Ensure QT and GTK theme environment variables in Sway session and child processes
+exec_always --no-startup-id sh -c "export QT_QPA_PLATFORMTHEME=\"qt5ct:qt6ct\"; systemctl --user import-environment QT_QPA_PLATFORMTHEME 2>/dev/null; dbus-update-activation-environment --systemd QT_QPA_PLATFORMTHEME 2>/dev/null"
+
 # Modifier key: Super / Windows key
 set $mod Mod4
 
@@ -45,6 +48,7 @@ bindsym $mod+Mod1+b workspace number $ws2; exec brave-nvidia
 
 # Text Editor & File Manager
 bindsym $mod+Shift+t exec alacritty -o font.size=20.5 -e nvim
+bindsym Mod1+Shift+t exec --no-startup-id ~/.local/bin/rofi-theme
 bindsym $mod+e exec thunar ~
 bindsym $mod+z exec --no-startup-id zed
 
@@ -185,10 +189,10 @@ set $ws9 "9"
 set $ws10 "10"
 
 # Top-Row Right-Hand Workspace Switching (Windows + u i o p)
-bindsym $mod+u workspace number $ws1
-bindsym $mod+i workspace number $ws2
-bindsym $mod+o workspace number $ws3
-bindsym $mod+p workspace number $ws4
+bindsym --inhibited $mod+u workspace number $ws1
+bindsym --inhibited $mod+i workspace number $ws2
+bindsym --inhibited $mod+o workspace number $ws3
+bindsym --inhibited $mod+p workspace number $ws4
 
 # Top-Row Right-Hand Move Window + follow (Windows + Shift + u i o p)
 bindsym $mod+Shift+u move container to workspace number $ws1; workspace number $ws1
@@ -203,16 +207,16 @@ bindsym $mod+Shift+braceleft move container to workspace number $ws5; workspace 
 bindsym $mod+Shift+braceright move container to workspace number $ws6; workspace number $ws6
 
 # Standard Number Workspace Switching
-bindsym $mod+1 workspace number $ws1
-bindsym $mod+2 workspace number $ws2
-bindsym $mod+3 workspace number $ws3
-bindsym $mod+4 workspace number $ws4
-bindsym $mod+5 workspace number $ws5
-bindsym $mod+6 workspace number $ws6
-bindsym $mod+7 workspace number $ws7
-bindsym $mod+8 workspace number $ws8
-bindsym $mod+9 workspace number $ws9
-bindsym $mod+0 workspace number $ws10
+bindsym --inhibited $mod+1 workspace number $ws1
+bindsym --inhibited $mod+2 workspace number $ws2
+bindsym --inhibited $mod+3 workspace number $ws3
+bindsym --inhibited $mod+4 workspace number $ws4
+bindsym --inhibited $mod+5 workspace number $ws5
+bindsym --inhibited $mod+6 workspace number $ws6
+bindsym --inhibited $mod+7 workspace number $ws7
+bindsym --inhibited $mod+8 workspace number $ws8
+bindsym --inhibited $mod+9 workspace number $ws9
+bindsym --inhibited $mod+0 workspace number $ws10
 
 # Move Window to Workspace
 bindsym $mod+Shift+1 move container to workspace number $ws1
@@ -295,7 +299,7 @@ bindgesture hold:4 exec --no-startup-id ~/.local/bin/powermenu
 
 # Cursor: explicit theme + size (37 -> 48); without this Sway falls back
 # to theme defaults and ignores Xcursor.size for Wayland surfaces
-seat seat0 xcursor_theme phinger-cursors-gruvbox-material 40
+seat seat0 xcursor_theme phinger-cursors-gruvbox-material-light 40
 
 # Output Configuration (Internal Display @ 165Hz, Native 1:1 hardware pixels)
 # Locked 165Hz tear-free presentation: adaptive_sync off prevents LCD voltage/gamma
@@ -312,11 +316,8 @@ output eDP-1 {
 # Notification Daemon
 exec --no-startup-id mako
 
-# Colors (Gruvbox Dark matching i3)
-client.focused          #fabd2f  #282828  #ebdbb2  #8ec07c    #fabd2f
-client.focused_inactive #3c3836  #282828  #a89984  #504945    #3c3836
-client.unfocused        #1d2021  #282828  #928374  #1d2021    #1d2021
-client.urgent           #fb4934  #cc241d  #ebdbb2  #fb4934    #fb4934
+# Dynamic Theme Colors (NvChad base46)
+include ~/.local/state/theme/sway.conf
 
 default_border pixel 1
 default_floating_border pixel 1
@@ -396,7 +397,10 @@ for_window [app_id="(?i)^peazip.*"] floating enable
 for_window [class="(?i)^peazip.*"] floating enable
 for_window [class="^steam_app_.*$"] fullscreen enable, allow_tearing yes, shortcuts_inhibitor enable, inhibit_idle focus
 for_window [class="(?i)^(cs2|gamescope|eldenring|steam_proton|farcry3|gtaiv|dyinglight.*)$"] fullscreen enable, allow_tearing yes, shortcuts_inhibitor enable, inhibit_idle focus
-for_window [app_id="(?i)^(cs2|gamescope|dyinglight.*)$"] fullscreen enable, allow_tearing yes, shortcuts_inhibitor enable, inhibit_idle focus
+for_window [app_id="(?i)^(cs2|gamescope|eldenring|steam_proton|farcry3|dyinglight.*)$"] fullscreen enable, allow_tearing yes, shortcuts_inhibitor enable, inhibit_idle focus
+for_window [class="(?i)^(cs2|gamescope|eldenring|steam_proton|farcry3|dyinglight.*)$"] fullscreen enable, allow_tearing yes, shortcuts_inhibitor enable, inhibit_idle focus
+for_window [class="^steam_app_.*$"] shortcuts_inhibitor enable
+for_window [app_id="^steam_app_.*$"] shortcuts_inhibitor enable
 for_window [title="(?i)^GTAIV$"] inhibit_idle focus
 for_window [title="(?i)^Grand Theft Auto IV$"] inhibit_idle focus
 for_window [workspace="^4$"] inhibit_idle visible
@@ -537,21 +541,6 @@ exec swayidle -w \
     resume 'swaymsg "output * dpms on"' \
     before-sleep 'swaylock -f -c 000000'
 
-# Status Bar (Swaybar — 0 extra daemons, Gruvbox theme, invisible by default per bar_state)
-bar {
-    id bar-0
-    mode invisible
-    position bottom
-    status_command ~/.local/bin/swaybar-status
-    font pango:Iosevka Nerd Font 11
-    colors {
-        background #1d2021
-        statusline #ebdbb2
-        separator #504945
-        focused_workspace #fabd2f #282828 #fabd2f
-        active_workspace #83a598 #282828 #ebdbb2
-        inactive_workspace #282828 #1d2021 #a89984
-        urgent_workspace #fb4934 #cc241d #ebdbb2
-    }
-}
+# Status Bar (Swaybar — 0 extra daemons, dynamic base46 theme)
+include ~/.local/state/theme/swaybar.conf
 exec_always --no-startup-id sh -c '[ "$(cat ~/.config/polybar/bar_state 2>/dev/null)" = "true" ] && swaymsg "bar bar-0 mode dock"'
