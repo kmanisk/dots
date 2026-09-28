@@ -88,6 +88,7 @@ def walk(node, cur_ws, out):
             "app_id": (node.get("app_id") or "").lower(),
             "class": str(props.get("class", "") or "").lower(),
             "instance": str(props.get("instance", "") or "").lower(),
+            "title": str(node.get("name") or ""),
         })
     for child in node.get("nodes", []) + node.get("floating_nodes", []):
         walk(child, cur_ws, out)
@@ -126,28 +127,107 @@ def child_pids(pid):
         return []
 
 
-def has_agy_child(pid):
-    """Return True if *pid* has agy running anywhere in its process subtree."""
+def deepest_foreground(pid):
+    """Walk the process tree from *pid* and return the comm of the deepest
+    single-child process (the actual foreground TUI app)."""
     if not pid:
-        return False
-    queue = list(child_pids(pid))
-    seen_pids = {pid}
-    while queue:
-        cpid = queue.pop()
-        if cpid in seen_pids:
-            continue
-        seen_pids.add(cpid)
-        try:
-            comm = Path(f"/proc/{cpid}/comm").read_text(errors="replace").strip()
-            if comm in ("agy",):
-                return True
-        except Exception:
-            pass
-        queue.extend(child_pids(cpid))
-    return False
+        return None
+    seen = {pid}
+    cur = pid
+    while True:
+        kids = [k for k in child_pids(cur) if k not in seen]
+        if len(kids) != 1:
+            # Leaf (nothing or multiple children — stop here).
+            break
+        seen.add(kids[0])
+        cur = kids[0]
+    if cur == pid:
+        return None
+    try:
+        return Path(f"/proc/{cur}/comm").read_text(errors="replace").strip()
+    except Exception:
+        return None
 
 
-def normalize(cmd, pid=None):
+# ---------------------------------------------------------------------------
+# Title-to-command mapping: ordered list of (title_substring, command_list).
+# Match is case-insensitive. First match wins.
+# Add new TUI apps here — no code changes needed elsewhere.
+# ---------------------------------------------------------------------------
+TITLE_TUI_MAP = [
+    # Exact / prefix patterns first (more specific → less specific)
+    ("opencode",         ["opencode"]),
+    ("claude",           ["claude"]),           # Claude Code CLI
+    ("aider",            ["aider"]),
+    ("agy",              ["agy"]),
+    ("nvim",             ["nvim"]),
+    ("neovim",           ["nvim"]),
+    ("vim",              ["vim"]),
+    ("helix",            ["hx"]),
+    ("lazygit",          ["lazygit"]),
+    ("lazydocker",       ["lazydocker"]),
+    ("yazi",             ["yazi"]),
+    ("ranger",           ["ranger"]),
+    ("nnn",              ["nnn"]),
+    ("lf",               ["lf"]),
+    ("btop",             ["btop"]),
+    ("htop",             ["htop"]),
+    ("top",              ["top"]),
+    ("bpytop",           ["bpytop"]),
+    ("ncdu",             ["ncdu"]),
+    ("cmus",             ["cmus"]),
+    ("ncmpcpp",          ["ncmpcpp"]),
+    ("pulsemixer",       ["pulsemixer"]),
+    ("neomutt",          ["neomutt"]),
+    ("mutt",             ["mutt"]),
+    ("aerc",             ["aerc"]),
+    ("newsboat",         ["newsboat"]),
+    ("calcurse",         ["calcurse"]),
+    ("taskwarrior",      ["task"]),
+]
+
+# Shell names that indicate "nothing interesting running".
+_SHELLS = {"fish", "bash", "zsh", "sh", "dash", "nu", "elvish", "ksh", "tcsh"}
+
+
+def detect_terminal_app(pid, title):
+    """Return the inner command to run inside the terminal on restore, or None
+    if the window is just a plain shell.
+
+    Strategy (in order):
+    1. Check window title against TITLE_TUI_MAP (fastest, most accurate).
+    2. Walk the process tree from *pid* to find the deepest foreground process
+       and match its comm against known TUI apps.
+    3. Return None → caller will decide (bare alacritty or -e agy).
+    """
+    t = title.lower()
+
+    # 1. Title-based detection.
+    for pattern, cmd in TITLE_TUI_MAP:
+        if pattern in t:
+            return cmd
+
+    # Title is just the app name "Alacritty" or a plain shell prompt like
+    # "~ - fish", "~", "user@host" — fall through to process tree.
+
+    # 2. Process-tree walk.
+    comm = deepest_foreground(pid)
+    if comm:
+        comm_l = comm.lower()
+        # Don't return shells as "TUI apps".
+        if comm_l not in _SHELLS:
+            for pattern, cmd in TITLE_TUI_MAP:
+                if pattern in comm_l:
+                    return cmd
+            # Unknown process running — use its name as the command.
+            # Only do this for short, safe-looking names (no paths, no args).
+            if comm and "/" not in comm and len(comm) < 40:
+                return [comm]
+
+    return None
+
+
+def normalize(cmd, pid=None, title=""):
     if not cmd:
         return []
     s = " ".join(cmd).lower()
@@ -160,9 +240,9 @@ def normalize(cmd, pid=None):
     if "zed" in s:
         return ["zed"]
     if "alacritty" in s:
-        # If agy is running inside this terminal, restore it with agy.
-        if has_agy_child(pid):
-            return ["alacritty", "-e", "agy"]
+        inner = detect_terminal_app(pid, title)
+        if inner:
+            return ["alacritty", "-e"] + inner
         return ["alacritty"]
     base = Path(cmd[0]).name
     kept = [base] + [a for a in cmd[1:]
@@ -280,7 +360,8 @@ def main():
         seen: dict = {}
         for w in wins:
             pid = w["pid"]
-            cmd = normalize(cmdline_of(pid), pid=pid) if pid else []
+            title = w.get("title", "")
+            cmd = normalize(cmdline_of(pid), pid=pid, title=title) if pid else []
             if not cmd:
                 cmd = fallback_launch(w)
             if not cmd:
