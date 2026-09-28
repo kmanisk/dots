@@ -77,10 +77,35 @@ bindsym Mod1+m exec --no-startup-id ~/.local/bin/hudtest
 # Spotify scratchpad
 bindsym --no-repeat $mod+m exec --no-startup-id ~/.local/bin/scratch-toggle spotify
 
-# Task Manager (btop in floating window: Ctrl+Shift+Esc, Win+Shift+Esc, Alt+Shift+Esc)
+# Task Manager (btop in floating window: Ctrl+Shift+Esc, Alt+Shift+Esc)
 bindsym Control+Shift+Escape exec --no-startup-id ~/.local/bin/toggle-btop
-bindsym $mod+Shift+Escape exec --no-startup-id ~/.local/bin/toggle-btop
 bindsym Mod1+Shift+Escape exec --no-startup-id ~/.local/bin/toggle-btop
+
+# ==============================================================================
+# Gaming Mode — Win+Shift+Escape to toggle
+# All Sway shortcuts muted. Only workspace switching (Win+u/i/o/p, Win+1..0) works.
+# Press Win+Shift+Escape again to return to normal desktop mode.
+# ==============================================================================
+mode "gaming" {
+    bindsym $mod+u    workspace number $ws1
+    bindsym $mod+i    workspace number $ws2
+    bindsym $mod+o    workspace number $ws3
+    bindsym $mod+p    workspace number $ws4
+    bindsym $mod+1    workspace number $ws1
+    bindsym $mod+2    workspace number $ws2
+    bindsym $mod+3    workspace number $ws3
+    bindsym $mod+4    workspace number $ws4
+    bindsym $mod+5    workspace number $ws5
+    bindsym $mod+6    workspace number $ws6
+    bindsym $mod+7    workspace number $ws7
+    bindsym $mod+8    workspace number $ws8
+    bindsym $mod+9    workspace number $ws9
+    bindsym $mod+0    workspace number $ws10
+
+    # Exit gaming mode
+    bindsym $mod+Shift+Escape mode "default"
+}
+bindsym $mod+Shift+Escape mode "gaming"
 
 # System Utilities
 bindsym $mod+Mod1+1 exec $term --class nmtui -e nmtui
