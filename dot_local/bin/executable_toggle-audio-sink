@@ -1,43 +1,118 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Toggle Audio Output Sink between Laptop Speakers and Bluetooth Audio Device
+# Cycle Audio Output Sink across all connected physical devices
+# Supports multiple Bluetooth headsets/speakers, analog speakers, USB, HDMI
+# Integrates seamlessly with Dusky Audio Studio DSP & PipeWire / PulseAudio
 # ==============================================================================
 export DISPLAY="${DISPLAY:-:0}"
 export PATH="$HOME/.gemini/antigravity-cli/bin:$HOME/.local/bin:$PATH"
 
-CURRENT_SINK=$(pactl get-default-sink 2>/dev/null)
-BT_SINK=$(pactl list short sinks 2>/dev/null | awk '{print $2}' | grep -E '^bluez_output\.' | head -n 1)
-SPEAKER_SINK=$(pactl list short sinks 2>/dev/null | awk '{print $2}' | grep -E '^alsa_output\.' | head -n 1)
+# Enumerate all valid physical output sinks (ignore virtual filters)
+mapfile -t PHYSICAL_SINKS < <(
+    pactl list short sinks 2>/dev/null | awk '{print $2}' | \
+    grep -v -E "ghelper|dusky|dolby|rnnoise|null|dummy" | \
+    grep -E "^(bluez_output|alsa_output)"
+)
 
-if [[ -z "$SPEAKER_SINK" ]]; then
-    SPEAKER_SINK=$(pactl list short sinks 2>/dev/null | awk '{print $2}' | grep -v -E '^bluez_output\.' | head -n 1)
+NUM_SINKS=${#PHYSICAL_SINKS[@]}
+
+if [[ $NUM_SINKS -eq 0 ]]; then
+    notify-send -u critical -t 2500 -i dialog-error "Audio Switcher" "No physical audio sinks found"
+    exit 1
 fi
 
+# Detect current physical audio output
+CURRENT_TARGET=""
+DUSKY_SOCK="$HOME/.config/dusky/settings/dusky_studio/dusky_audio.sock"
+
+if [[ -S "$DUSKY_SOCK" ]]; then
+    CURRENT_TARGET=$(pw-link -l 2>/dev/null | grep -A 2 'ghelper-audio-sink-out:output_FL' | grep '|->' | awk '{print $2}' | cut -d: -f1 | head -n 1)
+fi
+
+if [[ -z "$CURRENT_TARGET" ]]; then
+    CURRENT_TARGET=$(pactl get-default-sink 2>/dev/null)
+fi
+
+# Determine current sink index in the list
+CURRENT_INDEX=-1
+for i in "${!PHYSICAL_SINKS[@]}"; do
+    if [[ "${PHYSICAL_SINKS[$i]}" == "$CURRENT_TARGET" ]]; then
+        CURRENT_INDEX=$i
+        break
+    fi
+done
+
+# If only 1 sink is available, notify and exit
+if [[ $NUM_SINKS -eq 1 ]]; then
+    SINGLE_DESC=$(pactl list sinks 2>/dev/null | grep -A 25 "Name: ${PHYSICAL_SINKS[0]}" | grep -m 1 "Description:" | sed 's/^[ \t]*Description:[ \t]*//')
+    notify-send -u low -t 2000 -i dialog-information "Audio Switcher" "Only 1 device available: ${SINGLE_DESC:-${PHYSICAL_SINKS[0]}}"
+    exit 0
+fi
+
+# Cycle to next sink
+NEXT_INDEX=$(( (CURRENT_INDEX + 1) % NUM_SINKS ))
+NEXT_SINK="${PHYSICAL_SINKS[$NEXT_INDEX]}"
+
+# Update Dusky Audio DSP physical target if daemon is active
+if [[ -S "$DUSKY_SOCK" ]]; then
+    python3 -c "
+import socket, sys
+try:
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        s.connect('$DUSKY_SOCK')
+        s.sendall(f'CMD SINK_TGT {sys.argv[1]}\n'.encode('utf-8'))
+        s.recv(64)
+except Exception:
+    pass
+" "$NEXT_SINK" 2>/dev/null || true
+fi
+
+# Set global default sink
+pactl set-default-sink "$NEXT_SINK" 2>/dev/null || true
+
+# Also update PipeWire default sink via wpctl if possible
+SINK_WP_ID=$(pw-dump Node 2>/dev/null | jq -r --arg name "$NEXT_SINK" '.[] | select(.info.props["node.name"] == $name) | .id' 2>/dev/null | head -n 1)
+if [[ -n "$SINK_WP_ID" && "$SINK_WP_ID" != "null" ]]; then
+    wpctl set-default "$SINK_WP_ID" 2>/dev/null || true
+fi
+
+# Move regular application streams (skip virtual filters and Dusky streams)
 move_streams() {
-    local target_sink="$1"
-    for stream in $(pactl list short sink-inputs 2>/dev/null | cut -f1); do
-        pactl move-sink-input "$stream" "$target_sink" 2>/dev/null || true
+    local target="$1"
+    pactl list sink-inputs 2>/dev/null | awk '
+        /^Sink Input #[0-9]+/ { id = substr($3, 2) }
+        /node.name = / { name = $3 }
+        /media.name = / { media = $3 }
+        /application.name = / { app = $3 }
+        /^$/ {
+            if (id != "" && name !~ /ghelper|dusky|dolby|rnnoise/ && media !~ /ghelper|dusky|dolby/ && app !~ /cs2/) {
+                print id
+            }
+            id = ""; name = ""; media = ""; app = ""
+        }
+    ' | while read -r stream_id; do
+        [[ -n "$stream_id" ]] && pactl move-sink-input "$stream_id" "$target" 2>/dev/null || true
     done
 }
+move_streams "$NEXT_SINK"
 
-if [[ "$CURRENT_SINK" == "$BT_SINK"* ]] && [[ -n "$BT_SINK" ]]; then
-    # Currently on Bluetooth -> Switch to Laptop Speakers
-    if [[ -n "$SPEAKER_SINK" ]]; then
-        pactl set-default-sink "$SPEAKER_SINK"
-        move_streams "$SPEAKER_SINK"
-        notify-send -t 2000 -i audio-speakers "Audio Output Switched" "🔊 Laptop Speakers"
-    else
-        notify-send -u low -t 2000 -i dialog-warning "Audio Switcher" "No speaker output sink found"
-    fi
+# Get user-friendly name and appropriate icon
+DESC=$(pactl list sinks 2>/dev/null | grep -A 25 "Name: $NEXT_SINK" | grep -m 1 "Description:" | sed 's/^[ \t]*Description:[ \t]*//')
+[[ -z "$DESC" ]] && DESC="$NEXT_SINK"
+
+if [[ "$NEXT_SINK" == bluez_output* ]]; then
+    ICON="audio-headphones"
+    PREFIX="🎧 "
+elif [[ "$NEXT_SINK" == *hdmi* || "$NEXT_SINK" == *displayport* ]]; then
+    ICON="video-display"
+    PREFIX="🖥️ "
+elif [[ "$NEXT_SINK" == *usb* ]]; then
+    ICON="audio-card"
+    PREFIX="🔌 "
 else
-    # Currently on Speakers -> Switch to Bluetooth if connected
-    if [[ -n "$BT_SINK" ]]; then
-        pactl set-default-sink "$BT_SINK"
-        move_streams "$BT_SINK"
-        BT_DESC=$(pactl list sinks 2>/dev/null | grep -A 20 "$BT_SINK" | grep -m 1 "device.description" | cut -d'"' -f2)
-        BT_LABEL="${BT_DESC:-Bluetooth Audio}"
-        notify-send -t 2000 -i audio-headphones "Audio Output Switched" "🎧 ${BT_LABEL}"
-    else
-        notify-send -u low -t 2000 -i dialog-warning "Audio Switcher" "No Bluetooth audio device connected"
-    fi
+    ICON="audio-speakers"
+    PREFIX="🔊 "
 fi
+
+notify-send -t 2000 -i "$ICON" "Audio Output Switched" "${PREFIX}${DESC}"
