@@ -48,8 +48,6 @@ bindsym $mod+Mod1+b workspace number $ws2; exec brave-nvidia
 
 # Text Editor & File Manager
 bindsym $mod+Shift+t exec alacritty -o font.size=20.5 -e nvim
-bindsym Mod1+Shift+t exec --no-startup-id ~/.local/bin/rofi-theme
-bindsym $mod+Shift+m exec --no-startup-id ~/.local/bin/rofi-theme
 bindsym Mod1+Shift+m exec --no-startup-id ~/.local/bin/rofi-theme
 bindsym $mod+e exec thunar ~
 bindsym $mod+z exec --no-startup-id zed
@@ -79,15 +77,16 @@ bindsym Mod1+m exec --no-startup-id ~/.local/bin/hudtest
 # Spotify scratchpad
 bindsym --no-repeat $mod+m exec --no-startup-id ~/.local/bin/scratch-toggle spotify
 
-# Task Manager (btop in floating window: Ctrl+Shift+Esc, Alt+Shift+Esc)
+# Task Manager (btop in floating window: Ctrl+Shift+Esc, Win+Shift+Esc, Alt+Shift+Esc)
 bindsym Control+Shift+Escape exec --no-startup-id ~/.local/bin/toggle-btop
+bindsym $mod+Shift+Escape exec --no-startup-id ~/.local/bin/toggle-btop
 bindsym Mod1+Shift+Escape exec --no-startup-id ~/.local/bin/toggle-btop
 
 # ==============================================================================
-# Gaming Mode — Win+Shift+Escape to toggle
+# Gaming / Passthrough Mode — Alt+Shift+P to toggle
 # All Sway shortcuts muted. Only workspace switching (Win+u/i/o/p, Win+1..0) works.
 # --inhibited ensures these fire even if the game activates shortcuts inhibitor.
-# Press Win+Shift+Escape again to return to normal desktop mode.
+# Press Alt+Shift+P again to return to normal desktop mode.
 # ==============================================================================
 mode "gaming" {
     bindsym --inhibited $mod+u    workspace number $ws1
@@ -106,9 +105,9 @@ mode "gaming" {
     bindsym --inhibited $mod+0    workspace number $ws10
 
     # Exit gaming mode (--inhibited so it always works)
-    bindsym --inhibited $mod+Shift+Escape mode "default"
+    bindsym --inhibited Mod1+Shift+p mode "default", exec notify-send -t 1500 -i input-gaming "Gaming Mode: OFF" "Desktop shortcuts restored"
 }
-bindsym $mod+Shift+Escape mode "gaming"
+bindsym Mod1+Shift+p mode "gaming", exec notify-send -t 1500 -i input-gaming "Gaming Mode: ON" "Only Win+u/i/o/p and Win+1..0 active"
 
 # System Utilities
 bindsym $mod+Mod1+1 exec $term --class nmtui -e nmtui
