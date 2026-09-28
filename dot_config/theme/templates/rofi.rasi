@@ -1,0 +1,43 @@
+* {
+    gruvbox-bg0:          {{black}};
+    gruvbox-bg0-soft:     {{black2}};
+    gruvbox-bg0-hard:     {{darker_black}};
+    gruvbox-bg1:          {{one_bg}};
+    gruvbox-bg2:          {{one_bg2}};
+    gruvbox-bg3:          {{one_bg3}};
+    gruvbox-bg4:          {{grey}};
+
+    gruvbox-fg0:          {{white}};
+    gruvbox-fg1:          {{base05}};
+    gruvbox-fg2:          {{base04}};
+    gruvbox-fg3:          {{base06}};
+    gruvbox-fg4:          {{grey_fg}};
+    gruvbox-gray:         {{grey}};
+
+    gruvbox-red-dark:     {{red}};
+    gruvbox-red-light:    {{red}};
+    gruvbox-green-dark:   {{green}};
+    gruvbox-green-light:  {{vibrant_green}};
+    gruvbox-yellow-dark:  {{yellow}};
+    gruvbox-yellow-light: {{base0a}};
+    gruvbox-blue-dark:    {{blue}};
+    gruvbox-blue-light:   {{nord_blue}};
+    gruvbox-purple-dark:  {{dark_purple}};
+    gruvbox-purple-light: {{purple}};
+    gruvbox-aqua-dark:    {{teal}};
+    gruvbox-aqua-light:   {{cyan}};
+    gruvbox-orange-dark:  {{orange}};
+    gruvbox-orange-light: {{orange}};
+
+    /* Theme roles */
+    background:          @gruvbox-bg0;
+    background-alt:      @gruvbox-bg1;
+    foreground:          @gruvbox-fg1;
+    foreground-alt:      @gruvbox-fg4;
+    accent:              {{accent}};
+    accent-bright:       {{base0a}};
+    border-col:          @gruvbox-bg2;
+    border-focus:        {{accent}};
+    urgent:              @gruvbox-red-dark;
+    urgent-bright:       @gruvbox-red-light;
+}

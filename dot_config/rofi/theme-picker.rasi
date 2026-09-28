@@ -1,0 +1,78 @@
+/**
+ * Dedicated Modal Theme for Theme Selector
+ */
+@import "~/.config/rofi/gruvbox-colors.rasi"
+
+configuration {
+    show-icons: false;
+}
+
+window {
+    background-color:    @background;
+    text-color:          @foreground;
+    border:              2px;
+    border-color:        @border-focus;
+    border-radius:       @modal-radius;
+    width:               @modal-width;
+    location:            center;
+    anchor:              center;
+    padding:             @modal-padding;
+}
+
+mainbox {
+    background-color:    transparent;
+    children:            [ inputbar, listview ];
+    spacing:             10px;
+}
+
+inputbar {
+    background-color:    @background-alt;
+    border-radius:       6px;
+    padding:             8px 14px;
+    children:            [ prompt, entry ];
+    spacing:             10px;
+}
+
+prompt {
+    background-color:    transparent;
+    text-color:          @accent-bright;
+    font:                @modal-font-bold;
+}
+
+entry {
+    background-color:    transparent;
+    text-color:          @foreground;
+    placeholder:         "Filter themes...";
+    placeholder-color:   @foreground-alt;
+    font:                @modal-font;
+}
+
+listview {
+    background-color:    transparent;
+    columns:             1;
+    lines:               10;
+    spacing:             4px;
+    cycle:               true;
+    dynamic:             true;
+    layout:              vertical;
+    scrollbar:           false;
+}
+
+element {
+    background-color:    transparent;
+    text-color:          @foreground;
+    border-radius:       5px;
+    padding:             6px 12px;
+    children:            [ element-text ];
+}
+
+element selected {
+    background-color:    @accent;
+    text-color:          #1d2021;
+}
+
+element-text {
+    background-color:    inherit;
+    text-color:          inherit;
+    font:                @modal-font;
+}

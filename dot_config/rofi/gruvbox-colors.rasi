@@ -1,51 +1,6 @@
-/**
- * Gruvbox Dark Color Palette for Rofi
- * Matches i3wm & polybar system colors
- */
+@import "~/.local/state/theme/rofi.rasi"
+
 * {
-    /* Base colors */
-    gruvbox-bg0:          #282828;
-    gruvbox-bg0-soft:     #32302f;
-    gruvbox-bg0-hard:     #1d2021;
-    gruvbox-bg1:          #3c3836;
-    gruvbox-bg2:          #504945;
-    gruvbox-bg3:          #665c54;
-    gruvbox-bg4:          #7c6f64;
-
-    gruvbox-fg0:          #fbf1c7;
-    gruvbox-fg1:          #ebdbb2;
-    gruvbox-fg2:          #d5c4a1;
-    gruvbox-fg3:          #bdae93;
-    gruvbox-fg4:          #a89984;
-    gruvbox-gray:         #928374;
-
-    gruvbox-red-dark:     #cc241d;
-    gruvbox-red-light:    #fb4934;
-    gruvbox-green-dark:   #98971a;
-    gruvbox-green-light:  #b8bb26;
-    gruvbox-yellow-dark:  #d79921;
-    gruvbox-yellow-light: #fabd2f;
-    gruvbox-blue-dark:    #458588;
-    gruvbox-blue-light:   #83a598;
-    gruvbox-purple-dark:  #b16286;
-    gruvbox-purple-light: #d3869b;
-    gruvbox-aqua-dark:    #689d6a;
-    gruvbox-aqua-light:   #8ec07c;
-    gruvbox-orange-dark:  #d65d0e;
-    gruvbox-orange-light: #fe8019;
-
-    /* Theme roles */
-    background:          @gruvbox-bg0;
-    background-alt:      @gruvbox-bg1;
-    foreground:          @gruvbox-fg1;
-    foreground-alt:      @gruvbox-fg4;
-    accent:              @gruvbox-yellow-dark;
-    accent-bright:       @gruvbox-yellow-light;
-    border-col:          @gruvbox-bg2;
-    border-focus:        @gruvbox-yellow-dark;
-    urgent:              @gruvbox-red-dark;
-    urgent-bright:       @gruvbox-red-light;
-
     /* Central Control: Typography & Modal Dimensions */
     font:                "Iosevka Nerd Font 13";
     modal-font:          "Noto Sans 15";

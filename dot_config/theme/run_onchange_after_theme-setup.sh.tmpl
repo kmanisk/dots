@@ -1,0 +1,13 @@
+{{ if eq .chezmoi.os "linux" -}}
+#!/usr/bin/env bash
+# Initialize theme cache and set default theme if not set
+set -euo pipefail
+
+if [ -x "$HOME/.local/bin/theme-sync" ]; then
+    "$HOME/.local/bin/theme-sync" >/dev/null 2>&1 || true
+fi
+
+if [ ! -f "$HOME/.local/state/theme/name" ] && [ -x "$HOME/.local/bin/theme-set" ]; then
+    "$HOME/.local/bin/theme-set" gruvchad >/dev/null 2>&1 || true
+fi
+{{ end -}}

@@ -51,3 +51,10 @@ GTAIV_WORKING_CONFIG.md
 .config/xremap/**
 {{-   end }}
 {{- end }}
+
+{{ if ne .chezmoi.os "linux" }}
+.config/theme
+.local/bin/theme-set
+.local/bin/theme-sync
+.local/bin/rofi-theme
+{{ end }}

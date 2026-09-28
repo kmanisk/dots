@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# rofi-theme: Instant system-wide theme selector for NvChad base46 themes
+# ==============================================================================
+set -euo pipefail
+export PATH="$HOME/.local/bin:$PATH"
+
+THEME_SET="$HOME/.local/bin/theme-set"
+CACHE_DIR="$HOME/.cache/theme/themes"
+THEME_RASI="$HOME/.config/rofi/theme-picker.rasi"
+
+if [ ! -x "$THEME_SET" ]; then
+    echo "Error: $THEME_SET not found or not executable" >&2
+    exit 1
+fi
+
+CURRENT=$("$THEME_SET" --current 2>/dev/null || echo "gruvchad")
+ALL_THEMES=$("$THEME_SET" --list 2>/dev/null || true)
+
+if [ -z "$ALL_THEMES" ]; then
+    ~/.local/bin/theme-sync >/dev/null 2>&1
+    ALL_THEMES=$("$THEME_SET" --list 2>/dev/null || true)
+fi
+
+[ -z "$ALL_THEMES" ] && exit 1
+
+# Build formatted menu items with (dark) or (light)
+MENU_ITEMS=""
+SELECTED_ROW=0
+ROW=0
+
+while IFS= read -r theme; do
+    [ -z "$theme" ] && continue
+    type="dark"
+    if [ -f "$CACHE_DIR/$theme.json" ]; then
+        t=$(jq -r '.type // "dark"' "$CACHE_DIR/$theme.json" 2>/dev/null || echo "dark")
+        [ -n "$t" ] && type="$t"
+    fi
+    item=$(printf "%-22s (%s)" "$theme" "$type")
+    if [ "$theme" = "$CURRENT" ]; then
+        SELECTED_ROW=$ROW
+    fi
+    MENU_ITEMS="${MENU_ITEMS}${item}\n"
+    ROW=$((ROW + 1))
+done <<< "$ALL_THEMES"
+
+# Prompt user via rofi
+CHOICE=$(echo -e -n "$MENU_ITEMS" | rofi -dmenu -i \
+    -p "🎨 Theme" \
+    -no-custom \
+    -format s \
+    -selected-row "$SELECTED_ROW" \
+    -theme "$THEME_RASI" || true)
+
+# If canceled or empty selection, exit cleanly
+[ -z "$CHOICE" ] && exit 0
+
+# Extract clean theme name
+CHOSEN_THEME=$(echo "$CHOICE" | awk '{print $1}')
+
+# Validate that chosen theme exists in cache
+if [ -n "$CHOSEN_THEME" ] && [ -f "$CACHE_DIR/$CHOSEN_THEME.json" ]; then
+    "$THEME_SET" "$CHOSEN_THEME"
+fi

@@ -1,11 +1,16 @@
-general.import = ["alacritty-colors.toml"]
+general.import = ["/home/manisk/.local/state/theme/alacritty.toml"]
 
 [font]
-size = 19.5
-normal = { family = "Iosevka Nerd Font", style = "Regular" }
-bold = { family = "Iosevka Nerd Font", style = "Bold" }
-italic = { family = "Iosevka Nerd Font", style = "Italic" }
-bold_italic = { family = "Iosevka Nerd Font", style = "Bold Italic" }
+size = 21.5
+# normal = { family = "Departure Mono", style = "Normal" }
+# bold = { family = "Departure Mono", style = "Bold" }
+# italic = { family = "Departure Mono", style = "Normal" }
+# bold_italic = { family = "Departure Mono", style = "Bold" }
+
+normal = { family = "VictorMono Nerd Font", style = "Bold" }
+bold = { family = "VictorMono Nerd Font", style = "Bold" }
+italic = { family = "VictorMono Nerd Font", style = "Bold" }
+bold_italic = { family = "VictorMono Nerd Font", style = "Bold" }
 
 [cursor]
 style = { shape = "Block", blinking = "Off" }

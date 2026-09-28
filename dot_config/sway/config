@@ -49,6 +49,8 @@ bindsym $mod+Mod1+b workspace number $ws2; exec brave-nvidia
 # Text Editor & File Manager
 bindsym $mod+Shift+t exec alacritty -o font.size=20.5 -e nvim
 bindsym Mod1+Shift+t exec --no-startup-id ~/.local/bin/rofi-theme
+bindsym $mod+Shift+m exec --no-startup-id ~/.local/bin/rofi-theme
+bindsym Mod1+Shift+m exec --no-startup-id ~/.local/bin/rofi-theme
 bindsym $mod+e exec thunar ~
 bindsym $mod+z exec --no-startup-id zed
 

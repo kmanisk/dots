@@ -1,0 +1,191 @@
+#!/usr/bin/env python3
+"""
+theme-sync: Parses NvChad base46 lua themes and custom json themes into ~/.cache/theme/themes/<name>.json.
+No daemons. Fast, precomputed JSON cache.
+"""
+import os
+import sys
+import glob
+import json
+import re
+import subprocess
+import tempfile
+
+CACHE_DIR = os.path.expanduser("~/.cache/theme/themes")
+BASE46_DIR = os.path.expanduser("~/.config/theme/base46/lua/base46/themes")
+CUSTOM_DIR = os.path.expanduser("~/.config/theme/custom")
+
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+B16_KEYS = [f"base0{i:X}" for i in range(16)]
+HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+def parse_with_regex(filepath):
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            content = f.read()
+    except Exception:
+        return None
+
+    # Find M.type
+    theme_type = "dark"
+    m_type = re.search(r'M\.type\s*=\s*["\'](dark|light)["\']', content)
+    if m_type:
+        theme_type = m_type.group(1)
+
+    # Find base_16
+    base_16 = {}
+    m16 = re.search(r'M\.base_16\s*=\s*\{([^}]+)\}', content, re.DOTALL)
+    if m16:
+        for k, v in re.findall(r'(base0[0-9A-Fa-f])\s*=\s*["\'](#[0-9a-fA-F]{6})["\']', m16.group(1)):
+            base_16[k.upper()] = v.lower()
+
+    # Find base_30
+    base_30 = {}
+    m30 = re.search(r'M\.base_30\s*=\s*\{([^}]+)\}', content, re.DOTALL)
+    if m30:
+        for k, v in re.findall(r'([a-zA-Z0-9_]+)\s*=\s*["\'](#[0-9a-fA-F]{6})["\']', m30.group(1)):
+            base_30[k] = v.lower()
+
+    if len(base_16) == 16 and len(base_30) >= 15:
+        return {
+            "type": theme_type,
+            "base_16": base_16,
+            "base_30": base_30
+        }
+    return None
+
+def parse_with_nvim(filepath):
+    lua_code = f"""
+package.path = package.path .. ";/home/manisk/.config/theme/base46/lua/?.lua;/home/manisk/.config/theme/base46/lua/?/init.lua"
+package.loaded["base46"] = {{
+  override_theme = function(m, name) return m end
+}}
+package.loaded["nvconfig"] = {{
+  ui = {{
+    telescope = {{ style = "bordered" }},
+    cmp = {{ style = "default" }},
+    statusline = {{ theme = "default" }}
+  }},
+  base46 = {{ transparency = false }}
+}}
+local ok, m = pcall(dofile, "{filepath}")
+if not ok or type(m) ~= "table" then
+  os.exit(1)
+end
+local res = {{
+  type = m.type or "dark",
+  base_16 = m.base_16 or {{}},
+  base_30 = m.base_30 or {{}}
+}}
+io.stdout:write(vim.fn.json_encode(res))
+"""
+    try:
+        proc = subprocess.run(
+            ["nvim", "--headless", "-l", "-"],
+            input=lua_code,
+            text=True,
+            capture_output=True,
+            timeout=5
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            data = json.loads(proc.stdout)
+            # normalize keys
+            b16 = {k.upper(): v.lower() for k, v in data.get("base_16", {}).items() if HEX_RE.match(str(v))}
+            b30 = {k: v.lower() for k, v in data.get("base_30", {}).items() if HEX_RE.match(str(v))}
+            return {
+                "type": data.get("type", "dark"),
+                "base_16": b16,
+                "base_30": b30
+            }
+    except Exception:
+        pass
+    return None
+
+def ensure_fallbacks(data):
+    b16 = data.get("base_16", {})
+    b30 = data.get("base_30", {})
+
+    # Derive missing base_30 from base_16 if needed
+    derivation = {
+        "black": b16.get("BASE00", "#1e2122"),
+        "darker_black": b16.get("BASE00", "#1e2122"),
+        "black2": b16.get("BASE01", "#282b2c"),
+        "one_bg": b16.get("BASE01", "#282b2c"),
+        "one_bg2": b16.get("BASE02", "#393c3d"),
+        "one_bg3": b16.get("BASE03", "#404344"),
+        "grey": b16.get("BASE03", "#484b4c"),
+        "grey_fg": b16.get("BASE04", "#575a5b"),
+        "white": b16.get("BASE05", "#c7b89d"),
+        "red": b16.get("BASE08", "#ec6b64"),
+        "orange": b16.get("BASE09", "#e78a4e"),
+        "yellow": b16.get("BASE0A", "#d6b676"),
+        "sun": b16.get("BASE0A", "#d6b676"),
+        "green": b16.get("BASE0B", "#89b482"),
+        "vibrant_green": b16.get("BASE0B", "#a9b665"),
+        "cyan": b16.get("BASE0C", "#82b3a8"),
+        "teal": b16.get("BASE0C", "#749689"),
+        "blue": b16.get("BASE0D", "#6d8dad"),
+        "nord_blue": b16.get("BASE0D", "#6f8faf"),
+        "purple": b16.get("BASE0E", "#9385b4"),
+        "dark_purple": b16.get("BASE0E", "#887aa9"),
+    }
+    for k, v in derivation.items():
+        if k not in b30:
+            b30[k] = v
+
+    data["base_16"] = b16
+    data["base_30"] = b30
+    return data
+
+def write_atomic(filepath, content):
+    dirname = os.path.dirname(filepath)
+    with tempfile.NamedTemporaryFile("w", dir=dirname, delete=False) as tf:
+        tf.write(content)
+        temp_name = tf.name
+    os.replace(temp_name, filepath)
+
+def main():
+    cached_count = 0
+    skipped = []
+
+    # 1. Process base46 themes
+    lua_files = sorted(glob.glob(os.path.join(BASE46_DIR, "*.lua")))
+    for lf in lua_files:
+        theme_name = os.path.splitext(os.path.basename(lf))[0]
+        data = parse_with_regex(lf)
+        if not data:
+            data = parse_with_nvim(lf)
+        
+        if not data or len(data.get("base_16", {})) != 16:
+            skipped.append(theme_name)
+            continue
+
+        data = ensure_fallbacks(data)
+        data["name"] = theme_name
+        cache_path = os.path.join(CACHE_DIR, f"{theme_name}.json")
+        write_atomic(cache_path, json.dumps(data, indent=2))
+        cached_count += 1
+
+    # 2. Process custom themes (overrides base46)
+    custom_files = sorted(glob.glob(os.path.join(CUSTOM_DIR, "*.json")))
+    for cf in custom_files:
+        try:
+            with open(cf, "r", encoding="utf-8") as f:
+                cdata = json.load(f)
+            cname = cdata.get("name") or os.path.splitext(os.path.basename(cf))[0]
+            cdata["name"] = cname
+            cdata = ensure_fallbacks(cdata)
+            cache_path = os.path.join(CACHE_DIR, f"{cname}.json")
+            write_atomic(cache_path, json.dumps(cdata, indent=2))
+            cached_count += 1
+        except Exception as e:
+            print(f"Error loading custom theme {cf}: {e}", file=sys.stderr)
+
+    print(f"Successfully cached {cached_count} themes.")
+    if skipped:
+        print(f"Skipped {len(skipped)} themes: {', '.join(skipped)}")
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())

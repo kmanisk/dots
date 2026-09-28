@@ -1,0 +1,36 @@
+@define-color window_bg_color {{black}};
+@define-color window_fg_color {{white}};
+@define-color view_bg_color {{black}};
+@define-color view_fg_color {{white}};
+@define-color headerbar_bg_color {{one_bg}};
+@define-color headerbar_fg_color {{white}};
+@define-color card_bg_color {{one_bg}};
+@define-color card_fg_color {{white}};
+@define-color popover_bg_color {{one_bg}};
+@define-color popover_fg_color {{white}};
+@define-color sidebar_bg_color {{black}};
+@define-color accent_bg_color {{accent}};
+@define-color accent_color {{accent}};
+@define-color destructive_bg_color {{red}};
+@define-color destructive_color {{red}};
+
+@define-color theme_bg_color {{black}};
+@define-color theme_fg_color {{white}};
+@define-color theme_base_color {{black}};
+@define-color theme_text_color {{white}};
+@define-color theme_selected_bg_color {{one_bg2}};
+@define-color theme_selected_fg_color {{white}};
+@define-color borders {{one_bg}};
+@define-color content_view_bg {{black}};
+@define-color text_view_bg {{black}};
+
+/* Thunar-only font: Iosevka Nerd Font */
+.thunar, .thunar *, window.thunar, window.thunar * {
+  font-family: "Iosevka Nerd Font Mono", monospace;
+  font-size: 16.5pt;
+}
+
+/* File Chooser & Portal Dialogs */
+filechooser, filechooser *, .file-chooser, .file-chooser *, window.dialog, window.dialog * {
+  font-size: 16.5pt;
+}
