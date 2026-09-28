@@ -57,14 +57,26 @@ fi
 
 CS2_FLAGS=(-vulkan -threads 7 -mainthreadpriority 2 -nojoy -novid +fps_max 0 +fps_max_ui 0)
 
-# 4. Mode Selection: Native Wayland (Default, Rock-solid)
+# 4. Sway Gaming Mode Integration (Auto-mute desktop shortcuts while CS2 runs)
+if [ -n "$SWAYSOCK" ] && command -v swaymsg >/dev/null 2>&1; then
+    swaymsg 'mode "gaming", exec notify-send -t 2000 -i input-gaming "CS2: Gaming Mode Active" "Desktop shortcuts muted | Win+u/i/o/p active"' 2>/dev/null || true
+fi
+
+cleanup() {
+    if [ -n "$SWAYSOCK" ] && command -v swaymsg >/dev/null 2>&1; then
+        swaymsg 'mode "default", exec notify-send -t 2000 -i input-gaming "CS2: Gaming Mode Inactive" "Desktop shortcuts restored"' 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT INT TERM
+
+# 5. Mode Selection: Native Wayland (Default, Rock-solid)
 # Gamescope in nested Wayland mode on NVIDIA Optimus causes DRM kernel panics / freezes.
 # Only enabled if explicitly forced via USE_GAMESCOPE=1.
 USE_GAMESCOPE="${USE_GAMESCOPE:-0}"
 
 if [ "$USE_GAMESCOPE" = "1" ] && command -v gamescope >/dev/null 2>&1; then
     echo "==> Launching CS2 via Gamescope (Caution: May freeze on NVIDIA hybrid)..."
-    exec taskset -c 0-11 gamescope \
+    taskset -c 0-11 gamescope \
         -w "$TARGET_W" -h "$TARGET_H" \
         -W 1920 -H 1200 \
         -r 165 -o 165 \
@@ -74,5 +86,5 @@ if [ "$USE_GAMESCOPE" = "1" ] && command -v gamescope >/dev/null 2>&1; then
         gamemoderun "$@" "${CS2_FLAGS[@]}"
 else
     echo "==> Launching CS2 natively via Direct SDL Wayland on RTX 5050 (P-cores 0-11)..."
-    exec taskset -c 0-11 gamemoderun "$@" "${CS2_FLAGS[@]}"
+    taskset -c 0-11 gamemoderun "$@" "${CS2_FLAGS[@]}"
 fi
