@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Night Light Toggle (Persistent, Flicker-Free)
+# Unified with wl-gammarelay-rs (handles both Night Light and Sub-Zero Brightness)
 # Persistent State: ~/.config/nightlight_state
 # Supports: toggle-nightlight [on|off|toggle] [--silent] [--auto]
 # ==============================================================================
@@ -47,7 +48,11 @@ notify_osd() {
             -h string:x-canonical-private-synchronous:nightlight \
             -h string:x-dunst-stack-tag:nightlight \
             -h int:value:"$pct" \
-            "$text"
+            "$text" 2>/dev/null || \
+        dunstify -a "Night Light" -u low -i preferences-desktop-display \
+            -h string:x-dunst-stack-tag:nightlight \
+            -h int:value:"$pct" \
+            "$text" 2>/dev/null
     fi
 }
 
@@ -58,14 +63,10 @@ turn_on() {
     echo "$CURRENT_TEMP" > "$TEMP_FILE"
 
     if [ -n "$WAYLAND_DISPLAY" ] || [ -n "$SWAYSOCK" ]; then
-        pkill -9 -x gammastep >/dev/null 2>&1 || true
-        if pgrep -x wlsunset >/dev/null 2>&1; then
-            pkill -USR2 -x wlsunset
-        elif [ -n "$SWAYSOCK" ] && command -v swaymsg >/dev/null 2>&1; then
-            swaymsg exec "$HOME/.local/bin/wlsunset -m $CURRENT_TEMP" >/dev/null 2>&1
-        else
-            setsid -f "$HOME/.local/bin/wlsunset" -m "$CURRENT_TEMP" </dev/null >/dev/null 2>&1
+        if ! systemctl --user is-active --quiet wl-gammarelay.service 2>/dev/null; then
+            systemctl --user start wl-gammarelay.service 2>/dev/null || true
         fi
+        busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Temperature q "$CURRENT_TEMP" 2>/dev/null || true
     else
         pkill -9 -x gammastep >/dev/null 2>&1 || true
         redshift -r -P -m randr -O "$CURRENT_TEMP" >/dev/null 2>&1
@@ -77,8 +78,10 @@ turn_on() {
 
 turn_off() {
     if [ -n "$WAYLAND_DISPLAY" ] || [ -n "$SWAYSOCK" ]; then
-        pkill -x wlsunset >/dev/null 2>&1 || true
-        pkill -9 -x gammastep >/dev/null 2>&1 || true
+        if ! systemctl --user is-active --quiet wl-gammarelay.service 2>/dev/null; then
+            systemctl --user start wl-gammarelay.service 2>/dev/null || true
+        fi
+        busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Temperature q 6500 2>/dev/null || true
     else
         pkill -9 -x redshift >/dev/null 2>&1 || true
         pkill -9 -x gammastep >/dev/null 2>&1 || true

@@ -2,6 +2,7 @@
 # ==============================================================================
 # Adjust Night Light Color Temperature Up/Down (Flicker-Free)
 # Range: 2000K (Warm Amber) - 6500K (Daylight Neutral)
+# Unified with wl-gammarelay-rs
 # ==============================================================================
 export PATH="$HOME/.local/bin:$PATH"
 
@@ -30,19 +31,11 @@ echo "$NEW_TEMP" > "$TEMP_FILE"
 PERCENT=$(( (NEW_TEMP - 2000) * 100 / 4500 ))
 
 if [ -n "$WAYLAND_DISPLAY" ] || [ -n "$SWAYSOCK" ]; then
-    # Kill stale gammastep if present
-    pkill -9 -x gammastep >/dev/null 2>&1 || true
-
-    # Flicker-free dynamic Wayland adjustment via wlsunset
-    if pgrep -x wlsunset >/dev/null 2>&1; then
-        pkill -USR2 -x wlsunset
-    elif [ -n "$SWAYSOCK" ] && command -v swaymsg >/dev/null 2>&1; then
-        swaymsg exec "$HOME/.local/bin/wlsunset -m $NEW_TEMP" >/dev/null 2>&1
-    else
-        setsid -f "$HOME/.local/bin/wlsunset" -m "$NEW_TEMP" </dev/null >/dev/null 2>&1
+    if ! systemctl --user is-active --quiet wl-gammarelay.service 2>/dev/null; then
+        systemctl --user start wl-gammarelay.service 2>/dev/null || true
     fi
+    busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Temperature q "$NEW_TEMP" 2>/dev/null || true
 else
-    # X11 atomic update
     redshift -r -P -m randr -O "$NEW_TEMP" >/dev/null 2>&1
 fi
 
@@ -59,4 +52,8 @@ notify-send -a "Night Light" -u low -i preferences-desktop-display \
     -h string:x-canonical-private-synchronous:nightlight \
     -h string:x-dunst-stack-tag:nightlight \
     -h int:value:"$PERCENT" \
-    "$MSG"
+    "$MSG" 2>/dev/null || \
+dunstify -a "Night Light" -u low -i preferences-desktop-display \
+    -h string:x-dunst-stack-tag:nightlight \
+    -h int:value:"$PERCENT" \
+    "$MSG" 2>/dev/null
