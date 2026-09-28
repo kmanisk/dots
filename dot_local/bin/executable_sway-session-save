@@ -109,7 +109,45 @@ def cwd_of(pid):
         return str(Path.home())
 
 
-def normalize(cmd):
+def child_pids(pid):
+    """Return direct child PIDs of *pid* from /proc."""
+    try:
+        return [
+            int(p.name)
+            for p in Path("/proc").iterdir()
+            if p.name.isdigit()
+            and (p / "status").exists()
+            and any(
+                line.startswith("PPid:") and line.split()[1] == str(pid)
+                for line in (p / "status").read_text(errors="replace").splitlines()
+            )
+        ]
+    except Exception:
+        return []
+
+
+def has_agy_child(pid):
+    """Return True if *pid* has agy running anywhere in its process subtree."""
+    if not pid:
+        return False
+    queue = list(child_pids(pid))
+    seen_pids = {pid}
+    while queue:
+        cpid = queue.pop()
+        if cpid in seen_pids:
+            continue
+        seen_pids.add(cpid)
+        try:
+            comm = Path(f"/proc/{cpid}/comm").read_text(errors="replace").strip()
+            if comm in ("agy",):
+                return True
+        except Exception:
+            pass
+        queue.extend(child_pids(cpid))
+    return False
+
+
+def normalize(cmd, pid=None):
     if not cmd:
         return []
     s = " ".join(cmd).lower()
@@ -122,6 +160,9 @@ def normalize(cmd):
     if "zed" in s:
         return ["zed"]
     if "alacritty" in s:
+        # If agy is running inside this terminal, restore it with agy.
+        if has_agy_child(pid):
+            return ["alacritty", "-e", "agy"]
         return ["alacritty"]
     base = Path(cmd[0]).name
     kept = [base] + [a for a in cmd[1:]
@@ -229,18 +270,30 @@ def main():
     sys_state = capture_system_state(sock)
     if sys_state:
         snapshot["system_state"] = sys_state
+
+    # Apps that can legitimately have multiple windows open at once.
+    MULTI_INSTANCE = {"alacritty", "ghostty"}
+
     for ws, wins in targets.items():
-        entries, seen = [], set()
+        entries = []
+        # seen maps cmd_tuple -> count, so multi-instance apps can repeat.
+        seen: dict = {}
         for w in wins:
-            cmd = normalize(cmdline_of(w["pid"])) if w["pid"] else []
+            pid = w["pid"]
+            cmd = normalize(cmdline_of(pid), pid=pid) if pid else []
             if not cmd:
                 cmd = fallback_launch(w)
-            if not cmd or tuple(cmd) in seen:
+            if not cmd:
                 continue
-            seen.add(tuple(cmd))
+            key = tuple(cmd)
+            base = Path(cmd[0]).name.lower()
+            if base not in MULTI_INSTANCE and key in seen:
+                # Single-instance app already recorded — skip duplicate.
+                continue
+            seen[key] = seen.get(key, 0) + 1
             entries.append({
                 "command": cmd,
-                "working_directory": cwd_of(w["pid"]) if w["pid"] else str(Path.home()),
+                "working_directory": cwd_of(pid) if pid else str(Path.home()),
                 "app_id": w["app_id"], "class": w["class"],
             })
         if entries:

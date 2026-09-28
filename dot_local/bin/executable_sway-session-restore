@@ -255,6 +255,10 @@ def restore_system_state(sock, saved, dry):
 
 
 def restore_ws(sock, ws, entries, present, dry, steam_killed=False):
+    # Apps that can legitimately have multiple windows open at once.
+    MULTI_INSTANCE = {"alacritty", "ghostty"}
+    # Track per-app launch count for multi-instance apps this call.
+    launched_count: dict = {}
     launched = 0
     for e in entries:
         cmd = e.get("command", []) if isinstance(e, dict) else []
@@ -265,8 +269,18 @@ def restore_ws(sock, ws, entries, present, dry, steam_killed=False):
         if "steam" in base and steam_killed:
             continue
         key = "brave" if "brave" in base else base
-        if any(key in c or base in c for c in present):
-            continue
+        if base in MULTI_INSTANCE:
+            # For multi-instance apps: count how many are already running
+            # globally, and only skip if we've already launched >= that many.
+            already = sum(1 for c in present if key in c or base in c)
+            this_idx = launched_count.get(base, 0)
+            if this_idx < already:
+                # One pre-existing instance covers this slot — skip it.
+                launched_count[base] = this_idx + 1
+                continue
+        else:
+            if any(key in c or base in c for c in present):
+                continue
         workdir = e.get("working_directory") or str(Path.home())
         if not Path(workdir).is_dir():
             workdir = str(Path.home())
@@ -280,6 +294,7 @@ def restore_ws(sock, ws, entries, present, dry, steam_killed=False):
             print(exec_cmd)
         else:
             run(sock, exec_cmd)
+        launched_count[base] = launched_count.get(base, 0) + 1
         present.add(base)
         launched += 1
     return launched
