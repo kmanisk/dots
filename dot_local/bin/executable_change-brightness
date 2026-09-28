@@ -1,19 +1,119 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Adjust Brightness and update on-screen slider (xob + dunst)
+# Adjust Brightness: Hardware Backlight (0% - 100%) + Sub-Zero Software Dimming
+# Allows dimming below 0% for dark room usage without screen flashing or lag.
+# Software dimming uses wl-gammarelay-rs (Wayland wlr-gamma-control via D-Bus).
 # ==============================================================================
 export PATH="$HOME/.gemini/antigravity-cli/bin:$HOME/.local/bin:/usr/bin:$PATH"
-STEP="${1:-+5%}"
 
-brightnessctl set "$STEP" >/dev/null 2>&1
-PERCENT=$(brightnessctl -m 2>/dev/null | cut -d, -f4 | tr -d '%')
+ARG="${1:-+5%}"
+DIRECTION="up"
+STEP=5
 
-if [[ -n "$PERCENT" ]]; then
-    notify-send -a "Brightness" -u low -i display-brightness \
-        -h string:x-canonical-private-synchronous:brightness \
-        -h string:x-dunst-stack-tag:brightness \
-        -h int:value:"$PERCENT" "Brightness: ${PERCENT}%" 2>/dev/null || \
-    dunstify -a "Brightness" -u low -i display-brightness \
-        -h string:x-dunst-stack-tag:brightness \
-        -h int:value:"$PERCENT" "Brightness: ${PERCENT}%" 2>/dev/null
+if [[ "$ARG" =~ -|down ]]; then
+    DIRECTION="down"
 fi
+
+NUM=$(echo "$ARG" | grep -o -E '[0-9]+' | head -n 1)
+if [[ -n "$NUM" && "$NUM" -gt 0 ]]; then
+    STEP="$NUM"
+fi
+
+# Ensure wl-gammarelay daemon is running for software dimming
+if ! systemctl --user is-active --quiet wl-gammarelay.service 2>/dev/null; then
+    systemctl --user start wl-gammarelay.service 2>/dev/null || true
+fi
+
+# Read current hardware brightness (0 - 100)
+HW_PERCENT=$(brightnessctl -m 2>/dev/null | cut -d, -f4 | tr -d '%')
+[[ -z "$HW_PERCENT" ]] && HW_PERCENT=0
+
+# Read current software brightness (0.15 - 1.0)
+SW_BRIGHTNESS=$(busctl --user get-property rs.wl-gammarelay / rs.wl.gammarelay Brightness 2>/dev/null | awk '{print $2}')
+if [[ -z "$SW_BRIGHTNESS" ]]; then
+    SW_BRIGHTNESS="1"
+fi
+
+# Convert software brightness to integer percentage (15 to 100)
+SW_PCT=$(python3 -c "import sys; print(int(round(float('$SW_BRIGHTNESS') * 100)))" 2>/dev/null || echo 100)
+
+OSD_LABEL=""
+OSD_VAL=0
+ICON="display-brightness"
+
+if [[ "$DIRECTION" == "down" ]]; then
+    if (( HW_PERCENT > 0 )); then
+        # 1. Hardware Backlight Dimming
+        brightnessctl set "${STEP}%-" >/dev/null 2>&1
+        HW_PERCENT=$(brightnessctl -m 2>/dev/null | cut -d, -f4 | tr -d '%')
+        [[ -z "$HW_PERCENT" ]] && HW_PERCENT=0
+
+        # Ensure software brightness is full (1.0) while above 0%
+        if (( SW_PCT < 100 )); then
+            busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Brightness d 1.0 2>/dev/null || true
+            SW_PCT=100
+        fi
+
+        OSD_LABEL="Brightness: ${HW_PERCENT}%"
+        OSD_VAL="$HW_PERCENT"
+        ICON="display-brightness"
+    else
+        # 2. Sub-Zero Software Dimming (Hardware is at 0%)
+        NEW_SW=$(( SW_PCT - STEP ))
+        # Minimum safe software floor: 15% (avoids complete blackout)
+        if (( NEW_SW < 15 )); then
+            NEW_SW=15
+        fi
+
+        FLOAT_VAL=$(python3 -c "print(round($NEW_SW / 100.0, 2))")
+        busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Brightness d "$FLOAT_VAL" 2>/dev/null || true
+
+        SUB_PERCENT=$(( 100 - NEW_SW ))
+        OSD_LABEL="🌙 Sub-Zero: -${SUB_PERCENT}%"
+        OSD_VAL="$NEW_SW"
+        ICON="weather-clear-night"
+    fi
+else
+    # DIRECTION == "up"
+    if (( SW_PCT < 100 )); then
+        # 1. Recovering from Sub-Zero Software Dimming
+        NEW_SW=$(( SW_PCT + STEP ))
+        if (( NEW_SW >= 100 )); then
+            NEW_SW=100
+            busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Brightness d 1.0 2>/dev/null || true
+            OSD_LABEL="Brightness: 0%"
+            OSD_VAL=0
+            ICON="display-brightness-low"
+        else
+            FLOAT_VAL=$(python3 -c "print(round($NEW_SW / 100.0, 2))")
+            busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Brightness d "$FLOAT_VAL" 2>/dev/null || true
+            SUB_PERCENT=$(( 100 - NEW_SW ))
+            OSD_LABEL="🌙 Sub-Zero: -${SUB_PERCENT}%"
+            OSD_VAL="$NEW_SW"
+            ICON="weather-clear-night"
+        fi
+    else
+        # 2. Hardware Backlight Increasing
+        # Ensure software brightness is 1.0
+        busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Brightness d 1.0 2>/dev/null || true
+
+        brightnessctl set "+${STEP}%" >/dev/null 2>&1
+        HW_PERCENT=$(brightnessctl -m 2>/dev/null | cut -d, -f4 | tr -d '%')
+        [[ -z "$HW_PERCENT" ]] && HW_PERCENT=100
+
+        OSD_LABEL="Brightness: ${HW_PERCENT}%"
+        OSD_VAL="$HW_PERCENT"
+        ICON="display-brightness"
+    fi
+fi
+
+# Send synchronized OSD notification (Mako / Dunst)
+notify-send -a "Brightness" -u low -i "$ICON" \
+    -h string:x-canonical-private-synchronous:brightness \
+    -h string:x-dunst-stack-tag:brightness \
+    -h int:value:"$OSD_VAL" \
+    "$OSD_LABEL" 2>/dev/null || \
+dunstify -a "Brightness" -u low -i "$ICON" \
+    -h string:x-dunst-stack-tag:brightness \
+    -h int:value:"$OSD_VAL" \
+    "$OSD_LABEL" 2>/dev/null
