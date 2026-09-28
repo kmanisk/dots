@@ -83,10 +83,10 @@ bindsym $mod+Shift+Escape exec --no-startup-id ~/.local/bin/toggle-btop
 bindsym Mod1+Shift+Escape exec --no-startup-id ~/.local/bin/toggle-btop
 
 # ==============================================================================
-# Gaming / Passthrough Mode — Alt+Shift+P to toggle
+# Gaming / Passthrough Mode — Alt+Shift+F to toggle
 # All Sway shortcuts muted. Only workspace switching (Win+u/i/o/p, Win+1..0) works.
 # --inhibited ensures these fire even if the game activates shortcuts inhibitor.
-# Press Alt+Shift+P again to return to normal desktop mode.
+# Press Alt+Shift+F again to return to normal desktop mode.
 # ==============================================================================
 mode "gaming" {
     bindsym --inhibited $mod+u    workspace number $ws1
@@ -105,9 +105,9 @@ mode "gaming" {
     bindsym --inhibited $mod+0    workspace number $ws10
 
     # Exit gaming mode (--inhibited so it always works)
-    bindsym --inhibited Mod1+Shift+p mode "default", exec notify-send -t 1500 -i input-gaming "Gaming Mode: OFF" "Desktop shortcuts restored"
+    bindsym --inhibited Mod1+Shift+f mode "default", exec notify-send -t 1500 -i input-gaming "Gaming Mode: OFF" "Desktop shortcuts restored"
 }
-bindsym Mod1+Shift+p mode "gaming", exec notify-send -t 1500 -i input-gaming "Gaming Mode: ON" "Only Win+u/i/o/p and Win+1..0 active"
+bindsym Mod1+Shift+f mode "gaming", exec notify-send -t 1500 -i input-gaming "Gaming Mode: ON" "Only Win+u/i/o/p and Win+1..0 active"
 
 # System Utilities
 bindsym $mod+Mod1+1 exec $term --class nmtui -e nmtui
