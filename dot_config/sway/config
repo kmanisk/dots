@@ -83,6 +83,12 @@ bindsym Mod1+g exec --no-startup-id ~/.local/bin/rofi-games
 bindsym $mod+Shift+g exec --no-startup-id "prime-run ~/.local/bin/steam-workspace"
 bindsym Mod1+Shift+s exec --no-startup-id "STEAM_DGPU=1 ~/.local/bin/steam-workspace"
 
+# OBS Studio Hotkeys (Alt + Shift + R to Start, Alt + Shift + X to Stop)
+bindsym --to-code Mod1+Shift+r exec --no-startup-id obs --startrecording
+bindsym Mod1+Shift+R exec --no-startup-id obs --startrecording
+bindsym --to-code Mod1+Shift+x exec --no-startup-id obs --stoprecording
+bindsym Mod1+Shift+X exec --no-startup-id obs --stoprecording
+
 # MangoHud 3D Preview Toggle (Alt + m)
 bindsym Mod1+m exec --no-startup-id ~/.local/bin/hudtest
 
@@ -138,11 +144,27 @@ mode "gaming" {
     bindsym --to-code --inhibited Mod1+Shift+f mode "default", exec notify-send -t 1500 -i input-gaming "Gaming Mode: OFF" "Desktop shortcuts restored"
     bindsym Mod1+Shift+F mode "default", exec notify-send -t 1500 -i input-gaming "Gaming Mode: OFF" "Desktop shortcuts restored"
     bindsym --inhibited Mod1+Shift+F mode "default", exec notify-send -t 1500 -i input-gaming "Gaming Mode: OFF" "Desktop shortcuts restored"
+
+    # Screenshot in gaming mode (Win+Shift+S / Print)
+    bindsym $mod+Shift+s exec --no-startup-id ~/.local/bin/screenshot-fullscreen
+    bindsym --inhibited $mod+Shift+s exec --no-startup-id ~/.local/bin/screenshot-fullscreen
+    bindsym Print exec --no-startup-id ~/.local/bin/screenshot-fullscreen
+    bindsym --inhibited Print exec --no-startup-id ~/.local/bin/screenshot-fullscreen
+
+    # OBS Studio Hotkeys (Start Recording: Alt+Shift+R | Stop Recording: Alt+Shift+X)
+    bindsym --to-code Mod1+Shift+r exec --no-startup-id obs --startrecording
+    bindsym --to-code --inhibited Mod1+Shift+r exec --no-startup-id obs --startrecording
+    bindsym Mod1+Shift+R exec --no-startup-id obs --startrecording
+    bindsym --inhibited Mod1+Shift+R exec --no-startup-id obs --startrecording
+    bindsym --to-code Mod1+Shift+x exec --no-startup-id obs --stoprecording
+    bindsym --to-code --inhibited Mod1+Shift+x exec --no-startup-id obs --stoprecording
+    bindsym Mod1+Shift+X exec --no-startup-id obs --stoprecording
+    bindsym --inhibited Mod1+Shift+X exec --no-startup-id obs --stoprecording
 }
-bindsym --to-code Mod1+Shift+f mode "gaming", exec notify-send -t 1500 -i input-gaming "Gaming Mode: ON" "Only Win+u/i/o/p and Win+1..0 active"
-bindsym --to-code --inhibited Mod1+Shift+f mode "gaming", exec notify-send -t 1500 -i input-gaming "Gaming Mode: ON" "Only Win+u/i/o/p and Win+1..0 active"
-bindsym Mod1+Shift+F mode "gaming", exec notify-send -t 1500 -i input-gaming "Gaming Mode: ON" "Only Win+u/i/o/p and Win+1..0 active"
-bindsym --inhibited Mod1+Shift+F mode "gaming", exec notify-send -t 1500 -i input-gaming "Gaming Mode: ON" "Only Win+u/i/o/p and Win+1..0 active"
+bindsym --to-code Mod1+Shift+f mode "gaming", exec notify-send -t 1500 -i input-gaming "Gaming Mode: ON" "Workspaces, Screenshot & OBS hotkeys active"
+bindsym --to-code --inhibited Mod1+Shift+f mode "gaming", exec notify-send -t 1500 -i input-gaming "Gaming Mode: ON" "Workspaces, Screenshot & OBS hotkeys active"
+bindsym Mod1+Shift+F mode "gaming", exec notify-send -t 1500 -i input-gaming "Gaming Mode: ON" "Workspaces, Screenshot & OBS hotkeys active"
+bindsym --inhibited Mod1+Shift+F mode "gaming", exec notify-send -t 1500 -i input-gaming "Gaming Mode: ON" "Workspaces, Screenshot & OBS hotkeys active"
 
 # System Utilities
 bindsym $mod+Mod1+1 exec $term --class nmtui -e nmtui

@@ -59,7 +59,7 @@ CS2_FLAGS=(-vulkan -threads 7 -mainthreadpriority 2 -nojoy -novid +fps_max 0 +fp
 
 # 4. Sway Gaming Mode Integration (Auto-mute desktop shortcuts while CS2 runs)
 if [ -n "$SWAYSOCK" ] && command -v swaymsg >/dev/null 2>&1; then
-    swaymsg 'mode "gaming", exec notify-send -t 2000 -i input-gaming "CS2: Gaming Mode Active" "Desktop shortcuts muted | Win+u/i/o/p active"' 2>/dev/null || true
+    swaymsg 'mode "gaming", exec notify-send -t 2000 -i input-gaming "CS2: Gaming Mode Active" "Shortcuts muted | Win+u/i/o/p, Win+Shift+S, OBS hotkeys active"' 2>/dev/null || true
 fi
 
 cleanup() {
