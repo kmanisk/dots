@@ -227,7 +227,7 @@ bindsym $mod+Shift+BackSpace exec --no-startup-id ~/.local/bin/force-kill-window
 bindsym $mod+f fullscreen toggle
 bindsym Mod1+Shift+space floating toggle
 bindsym Shift+space focus mode_toggle
-# bindsym $mod+space focus mode_toggle (disabled: collided with xremap RightCtrl/Space input in scratchpad)
+bindsym $mod+space exec --no-startup-id ~/.local/bin/toggle-scratch-focus
 bindsym $mod+Shift+a focus parent
 bindsym $mod+w layout tabbed
 bindsym $mod+semicolon exec --no-startup-id ~/.local/bin/smart-layout-toggle
@@ -381,7 +381,7 @@ bindgesture hold:4 exec --no-startup-id ~/.local/bin/powermenu
 
 # Cursor: explicit theme + size (37 -> 48); without this Sway falls back
 # to theme defaults and ignores Xcursor.size for Wayland surfaces
-seat seat0 xcursor_theme phinger-cursors-gruvbox-material-light 40
+seat seat0 xcursor_theme phinger-cursors-gruvbox-material 40
 
 # Output Configuration (Internal Display @ 165Hz, Native 1:1 hardware pixels)
 # Locked 165Hz tear-free presentation: adaptive_sync off prevents LCD voltage/gamma

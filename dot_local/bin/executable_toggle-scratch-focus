@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+"""toggle-scratch-focus: Instantly toggle focus between scratchpad / floating windows and background tiled windows in Sway/i3."""
+import json
+import subprocess
+import sys
+
+def main():
+    try:
+        raw_tree = subprocess.check_output(["swaymsg", "-t", "get_tree"], stderr=subprocess.DEVNULL)
+        tree = json.loads(raw_tree)
+    except Exception:
+        sys.exit(0)
+
+    def find_focused(n):
+        if n.get("focused"):
+            return n
+        for c in n.get("nodes", []) + n.get("floating_nodes", []):
+            res = find_focused(c)
+            if res:
+                return res
+        return None
+
+    def find_active_ws(n):
+        if n.get("type") == "workspace" and not n.get("name", "").startswith("__"):
+            if find_focused(n):
+                return n
+        for c in n.get("nodes", []):
+            res = find_active_ws(c)
+            if res:
+                return res
+        return None
+
+    active_ws = find_active_ws(tree)
+    if not active_ws:
+        # Fallback to standard sway focus toggle
+        subprocess.run(["swaymsg", "focus", "mode_toggle"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return
+
+    focused = find_focused(tree)
+    if not focused:
+        return
+
+    def get_leaves(n):
+        leaves = []
+        nodes = n.get("nodes", [])
+        if not nodes:
+            if n.get("type") in ("con", "floating_con") and (n.get("app_id") or n.get("window") or n.get("name")):
+                leaves.append(n)
+        else:
+            for c in nodes:
+                leaves.extend(get_leaves(c))
+        return leaves
+
+    def get_floating_leaves(n):
+        leaves = []
+        for fn in n.get("floating_nodes", []):
+            # A floating_con might contain children nodes or be a leaf itself
+            fl_leaves = get_leaves(fn)
+            if fl_leaves:
+                leaves.extend(fl_leaves)
+            else:
+                leaves.append(fn)
+        return leaves
+
+    tiled_leaves = get_leaves(active_ws)
+    floating_leaves = get_floating_leaves(active_ws)
+
+    # Check if currently focused is floating/scratchpad
+    is_floating = False
+    focused_id = focused.get("id")
+    if focused.get("type") == "floating_con":
+        is_floating = True
+    elif any(focused_id == fl.get("id") for fl in floating_leaves):
+        is_floating = True
+
+    if is_floating:
+        # Currently focused on scratchpad/floating window -> Switch to background tiled window
+        # First priority: active_ws focus stack
+        target = None
+        focus_stack = active_ws.get("focus", [])
+        for fid in focus_stack:
+            for tl in tiled_leaves:
+                if tl.get("id") == fid:
+                    target = fid
+                    break
+            if target:
+                break
+        if not target and tiled_leaves:
+            target = tiled_leaves[0].get("id")
+
+        if target:
+            subprocess.run(["swaymsg", f"[con_id={target}] focus"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            subprocess.run(["swaymsg", "focus", "tiling"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        # Currently focused on background tiled window -> Switch to floating/scratchpad window
+        target = None
+        focus_stack = active_ws.get("focus", [])
+        for fid in focus_stack:
+            for fl in floating_leaves:
+                if fl.get("id") == fid:
+                    target = fid
+                    break
+            if target:
+                break
+        if not target and floating_leaves:
+            target = floating_leaves[-1].get("id")
+
+        if target:
+            subprocess.run(["swaymsg", f"[con_id={target}] focus"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            subprocess.run(["swaymsg", "focus", "floating"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+if __name__ == "__main__":
+    main()
