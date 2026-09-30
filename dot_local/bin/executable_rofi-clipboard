@@ -16,7 +16,7 @@ THEME="$HOME/.config/rofi/clipboard-floating.rasi"
 PIN_PREFIX="📌 [PIN] "
 
 notify() {
-    command -v dunstify >/dev/null 2>&1 && dunstify -a "Clipboard" -u low -i edit-paste "$1" "$2"
+    notify-send -a "Clipboard" -u low -i edit-paste "$1" "$2" 2>/dev/null
 }
 
 # Assemble display list: Pinned items first, then cliphist history
@@ -36,7 +36,7 @@ display_items() {
 while true; do
     chosen=$(display_items | rofi -dmenu \
         -p "Clipboard" \
-        -mesg "Enter: Copy & Close  |  Alt+p: Pin  |  Alt+x: Unpin  |  Alt+d: Delete" \
+        -mesg "Enter: Copy &amp; Close  │  Alt+p: Pin  │  Alt+x: Unpin  │  Alt+d: Delete" \
         -kb-delete-entry "" \
         -kb-custom-1 "Alt+d,Shift+Delete" \
         -kb-custom-2 "Alt+p" \

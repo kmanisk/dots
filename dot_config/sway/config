@@ -41,9 +41,9 @@ bindsym $mod+d exec "pkill fuzzel || fuzzel"
 bindsym Mod1+s exec --no-startup-id ~/.local/bin/rofi-websearch
 bindsym $mod+slash exec --no-startup-id ~/.local/bin/rofi-websearch
 
-# Clipboard History (Fuzzel + Cliphist)
-bindsym $mod+Shift+v exec --no-startup-id ~/.local/bin/fuzzel-clipboard
-bindsym $mod+y exec --no-startup-id ~/.local/bin/fuzzel-clipboard
+# Clipboard History (Rofi + Cliphist)
+bindsym $mod+Shift+v exec --no-startup-id ~/.local/bin/rofi-clipboard
+bindsym $mod+y exec --no-startup-id ~/.local/bin/rofi-clipboard
 
 # Browser (Windows + b) -> Brave on Intel iGPU
 bindsym $mod+b exec --no-startup-id brave-origin

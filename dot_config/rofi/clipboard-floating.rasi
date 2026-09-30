@@ -24,7 +24,7 @@ window {
 mainbox {
     background-color:    transparent;
     children:            [ inputbar, message, listview ];
-    spacing:             16px;
+    spacing:             14px;
 }
 
 inputbar {
@@ -53,14 +53,16 @@ entry {
 
 message {
     background-color:    @background-alt;
+    border:              1px;
+    border-color:        @accent;
     border-radius:       0px;
-    padding:             8px 12px;
+    padding:             8px 14px;
 }
 
 textbox {
     background-color:    transparent;
-    text-color:          @accent-bright;
-    font:                "VictorMono Nerd Font Mono Bold 14";
+    text-color:          @foreground;
+    font:                "VictorMono Nerd Font Mono 13";
 }
 
 listview {
