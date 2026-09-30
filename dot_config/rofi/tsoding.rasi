@@ -4,6 +4,13 @@
  */
 @import "~/.config/rofi/system.rasi"
 
+configuration {
+    sort:           true;
+    sorting-method: "fzf";
+    matching:       "fuzzy";
+    show-icons:     false;
+}
+
 * {
     background-color: @background;
     border-color:     @border-col;

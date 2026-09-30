@@ -3,7 +3,12 @@
 export PATH="$HOME/.local/bin:$PATH"
 
 options="✨ ELDEN RING + FG (2x)\n🗡️ ELDEN RING\n🧪 ELDEN RING (Gamescope test)\n🎮 Steam library\n⚙️ Configure LSFG (GUI)\n🛑 Kill game"
-chosen=$(echo -e "$options" | rofi -dmenu -i -p "Games")
+chosen=$(echo -e "$options" | rofi -dmenu -i \
+    -sort \
+    -sorting-method "fzf" \
+    -matching "fuzzy" \
+    -p "Games" \
+    -theme "$HOME/.config/rofi/games.rasi")
 
 case "$chosen" in
     *"Steam"*)          env STEAM_DGPU=1 steam-workspace ;;

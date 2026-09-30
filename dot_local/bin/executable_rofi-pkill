@@ -230,8 +230,8 @@ def main():
         try:
             p = subprocess.run(
                 ["rofi", "-dmenu", "-i", "-markup-rows", "-format", "i",
+                 "-sort", "-sorting-method", "fzf", "-matching", "fuzzy",
                  "-p", "Kill App",
-                 "-mesg", "Enter: Terminate (SIGTERM) | Alt+d: Force Kill (SIGKILL) | Esc: Cancel | Bold = foreground app, Dimmed = background service",
                  "-kb-delete-entry", "", "-kb-custom-1", "Alt+d,Shift+Delete",
                  "-theme", THEME],
                 input="\n".join(t for _, t in entries).encode(), stdout=subprocess.PIPE,

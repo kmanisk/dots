@@ -1,1 +1,8 @@
+configuration {
+    sort:           true;
+    sorting-method: "fzf";
+    matching:       "fuzzy";
+    show-icons:     false;
+}
+
 @theme "~/.config/rofi/tsoding.rasi"

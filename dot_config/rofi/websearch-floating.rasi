@@ -6,7 +6,10 @@
 @import "~/.config/rofi/system.rasi"
 
 configuration {
-    show-icons: false;
+    show-icons:     false;
+    sort:           true;
+    sorting-method: "fzf";
+    matching:       "fuzzy";
 }
 
 window {

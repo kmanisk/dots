@@ -28,6 +28,9 @@ ENTRIES=$(awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/, "", $1); print $1}' "$LIST_FILE")
 
 # Prompt user via Rofi (single primary mouse click opens immediately)
 SELECTED=$(echo "$ENTRIES" | rofi -dmenu -i \
+    -sort \
+    -sorting-method "fzf" \
+    -matching "fuzzy" \
     -p "⭐ Favorites" \
     -me-select-entry '' \
     -me-accept-entry 'MousePrimary' \

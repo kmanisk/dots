@@ -24,6 +24,9 @@ logout='󰍃   Logout'
 chosen=$(printf "%s\n%s\n%s\n%s\n%s" "$shutdown" "$reboot" "$lock" "$suspend" "$logout" | rofi \
     -dmenu \
     -i \
+    -sort \
+    -sorting-method "fzf" \
+    -matching "fuzzy" \
     -p "Power Menu" \
     -theme ~/.config/rofi/powermenu.rasi \
     -selected-row 0)

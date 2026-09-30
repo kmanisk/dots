@@ -43,7 +43,12 @@ status() {
 
 menu() {
     CURRENT=$(status)
-    CHOICE=$(printf "󰓃 Dolby Atmos (Speaker Optimized)\n󰋋 Raw Hardware DAC (Flat / Headphones)\n󰍬 Dusky Voice Studio (GUI)\n󰍮 Voice Enhancer: Crisp & Clean\n󰍮 Voice Enhancer: Broadcast Warmth\n󰍮 Voice Reset (Natural Clean)" | rofi -dmenu -i -p "Audio Hub [Speaker: $CURRENT]")
+    CHOICE=$(printf "󰓃 Dolby Atmos (Speaker Optimized)\n󰋋 Raw Hardware DAC (Flat / Headphones)\n󰍬 Dusky Voice Studio (GUI)\n󰍮 Voice Enhancer: Crisp & Clean\n󰍮 Voice Enhancer: Broadcast Warmth\n󰍮 Voice Reset (Natural Clean)" | rofi -dmenu -i \
+        -sort \
+        -sorting-method "fzf" \
+        -matching "fuzzy" \
+        -p "Audio Hub [Speaker: $CURRENT]" \
+        -theme "$HOME/.config/rofi/system-floating.rasi")
     case "$CHOICE" in
         *Dolby*)        set_dolby ;;
         *Raw*)          set_raw ;;

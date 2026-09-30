@@ -5,16 +5,16 @@
 export PATH="$HOME/.local/bin:$PATH"
 
 HINTS=$(cat <<'HINT_EOF'
-YouTube
-ArchWiki
-GitHub
-Wikipedia
-Amazon
-Reddit
-StackOverflow
-ProtonDB
-DuckDuckGo
-SteamDB
+!yt  YouTube
+!aw  ArchWiki
+!gh  GitHub
+!w   Wikipedia
+!rd  Reddit
+!so  StackOverflow
+!a   Amazon
+!pdb ProtonDB
+!ddg DuckDuckGo
+!sdb SteamDB
 Google (Default)
 HINT_EOF
 )
@@ -57,6 +57,9 @@ done
 # 1. First prompt: user types query
 # Control+Return (custom-1) triggers suggestions; Enter triggers instant search
 QUERY=$(echo "$HINTS" | rofi -dmenu -i -p "Search" \
+    -sort \
+    -sorting-method "fzf" \
+    -matching "fuzzy" \
     -kb-accept-custom "" \
     -kb-accept-alt "" \
     -kb-custom-1 "Control+Return" \
@@ -75,22 +78,25 @@ fi
 
 # If user clicked/selected a hint line without typing a query, prompt with that engine prefix
 case "$QUERY" in
-    *"YouTube"*)        PREFIX="!yt " ;;
-    *"ArchWiki"*)       PREFIX="!aw " ;;
-    *"GitHub"*)         PREFIX="!gh " ;;
-    *"Wikipedia"*)      PREFIX="!w " ;;
-    *"Amazon"*)         PREFIX="!a " ;;
-    *"Reddit"*)         PREFIX="!rd " ;;
-    *"StackOverflow"*)  PREFIX="!so " ;;
-    *"ProtonDB"*)       PREFIX="!pdb " ;;
-    *"DuckDuckGo"*)     PREFIX="!ddg " ;;
-    *"SteamDB"*)        PREFIX="!sdb " ;;
-    *"Google"*)         PREFIX="" ;;
-    *)                  PREFIX="" ;;
+    *"YouTube"*|*"!yt"*)        PREFIX="!yt " ;;
+    *"ArchWiki"*|*"!aw"*)       PREFIX="!aw " ;;
+    *"GitHub"*|*"!gh"*)         PREFIX="!gh " ;;
+    *"Wikipedia"*|*"!w "*)      PREFIX="!w " ;;
+    *"Amazon"*|*"!a "*)         PREFIX="!a " ;;
+    *"Reddit"*|*"!rd"*)         PREFIX="!rd " ;;
+    *"StackOverflow"*|*"!so"*)  PREFIX="!so " ;;
+    *"ProtonDB"*|*"!pdb"*)      PREFIX="!pdb " ;;
+    *"DuckDuckGo"*|*"!ddg"*)    PREFIX="!ddg " ;;
+    *"SteamDB"*|*"!sdb"*)       PREFIX="!sdb " ;;
+    *"Google"*)                 PREFIX="" ;;
+    *)                          PREFIX="" ;;
 esac
 
 if [ -n "$PREFIX" ]; then
     QUERY=$(rofi -dmenu -i -p "Enter query" -filter "$PREFIX" \
+        -sort \
+        -sorting-method "fzf" \
+        -matching "fuzzy" \
         -kb-accept-custom "" \
         -kb-accept-alt "" \
         -kb-custom-1 "Control+Return" \
@@ -185,6 +191,9 @@ if [ "$WANT_SUGGESTIONS" -eq 1 ]; then
     if [ -n "$SUGGESTIONS" ]; then
         # Present suggestions as horizontal chips right next to prompt
         CHOICE=$(printf "%s\n%s" "$RAW_QUERY" "$SUGGESTIONS" | rofi -dmenu -i \
+            -sort \
+            -sorting-method "fzf" \
+            -matching "fuzzy" \
             -p "💡 $ENGINE" \
             -theme "$THEME")
         if [ -n "$CHOICE" ]; then

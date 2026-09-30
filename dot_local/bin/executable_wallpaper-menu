@@ -3,7 +3,12 @@
 export PATH="$HOME/.local/bin:$PATH"
 
 options="🎲 Random\n🎮 Gaming\n💀 Creepy & Dark\n⬜ Minimal\n👾 Pixel Art\n🐧 Linux / Logos"
-chosen=$(echo -e "$options" | rofi -dmenu -i -p "Wallpaper genre")
+chosen=$(echo -e "$options" | rofi -dmenu -i \
+    -sort \
+    -sorting-method "fzf" \
+    -matching "fuzzy" \
+    -p "Wallpaper genre" \
+    -theme "$HOME/.config/rofi/system-floating.rasi")
 
 case "$chosen" in
     *"Random"*)  ~/.local/bin/random-wallpaper random ;;

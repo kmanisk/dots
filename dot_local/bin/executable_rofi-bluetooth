@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# rofi-bluetooth: Bluetooth device menu in the system rofi theme.
+# Win+Alt+2. Replaces blueman-manager (its window never maps under Sway/XWayland).
+#   Main menu -> pick device -> action menu (Connect/Disconnect/Pair/Remove)
+#   + Scan for new devices, + Toggle power. All control via bluetoothctl.
+# ==============================================================================
+export PATH="$HOME/.local/bin:$PATH"
+THEME="$HOME/.config/rofi/system-floating.rasi"
+
+notify() {
+    command -v notify-send >/dev/null 2>&1 && notify-send -a "Bluetooth" -u low "$1" "$2"
+}
+
+bt() { timeout 20 bluetoothctl "$@" 2>/dev/null; }
+
+is_connected() { bt info "$1" | grep -q "Connected: yes"; }
+is_paired()    { bt info "$1" | grep -q "Paired: yes"; }
+
+device_menu() {
+    bt power on >/dev/null
+    local rows="" mac name marker
+    while read -r _ mac name_rest; do
+        [ -z "$mac" ] && continue
+        name="$name_rest"
+        if is_connected "$mac"; then marker="●"; else marker="○"; fi
+        rows+="${marker} ${name}  [${mac}]"$'\n'
+    done < <(bt devices)
+    rows+="⟳  Scan for new devices"$'\n'
+    if bt show | grep -q "Powered: yes"; then
+        rows+="⏻  Turn Bluetooth off"
+    else
+        rows+="⏻  Turn Bluetooth on"
+    fi
+    printf "%s" "$rows" | rofi -dmenu -i -p "Bluetooth" -theme "$THEME"
+}
+
+action_menu() { # $1 = mac, $2 = name
+    local mac="$1" opts=""
+    if is_connected "$mac"; then
+        opts="Disconnect"
+    else
+        opts="Connect"
+    fi
+    is_paired "$mac" || opts+=$'\n'"Pair + Trust"
+    opts+=$'\n'"Remove device"
+    printf "%s" "$opts" | rofi -dmenu -i -p "$2" -theme "$THEME"
+}
+
+main() {
+    local chosen mac name action
+    chosen=$(device_menu)
+    [ -z "$chosen" ] && exit 0
+
+    case "$chosen" in
+        *"Scan for new devices"*)
+            notify "Scanning…" "Looking for nearby devices (12s)"
+            timeout 12 bt scan on >/dev/null
+            bt scan off >/dev/null
+            exec "$0" ;;
+        *"Turn Bluetooth off"*)
+            bt power off >/dev/null && notify "Bluetooth" "Powered off" ;;
+        *"Turn Bluetooth on"*)
+            bt power on >/dev/null && notify "Bluetooth" "Powered on" ;;
+        *)
+            mac=$(echo "$chosen" | grep -oE '([0-9A-F]{2}:){5}[0-9A-F]{2}')
+            [ -z "$mac" ] && exit 0
+            name=$(echo "$chosen" | sed -E 's/^[●○] //; s/  \[.*//')
+            action=$(action_menu "$mac" "$name")
+            case "$action" in
+                Connect*)    bt connect "$mac" >/dev/null && notify "Connected" "$name" ;;
+                Disconnect*) bt disconnect "$mac" >/dev/null && notify "Disconnected" "$name" ;;
+                Pair*)       bt pair "$mac" >/dev/null && bt trust "$mac" >/dev/null \
+                             && notify "Paired" "$name" ;;
+                Remove*)     bt remove "$mac" >/dev/null && notify "Removed" "$name" ;;
+            esac ;;
+    esac
+}
+
+main
