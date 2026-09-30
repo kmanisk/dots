@@ -90,5 +90,11 @@ rules = [
 	{ mime = "application/pdf", fg = "{{orange}}" },
 	# Fallback
 	{ mime = "*", fg = "{{fg}}" },
-	{ mime = "*/", fg = "{{blue}}" },
+	{ mime = "*/", fg = "{{folder_bg}}" },
+]
+
+[icon]
+prepend_conds = [
+	{ if = "dir & hovered", text = "", fg = "{{accent}}" },
+	{ if = "dir", text = "", fg = "{{folder_bg}}" },
 ]
