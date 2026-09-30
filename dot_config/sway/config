@@ -494,11 +494,11 @@ assign [class="^steam_app_.*$"] workspace number $ws4
 assign [app_id="^steam_app_.*$"] workspace number $ws4
 assign [class="(?i)^(cs2|gamescope|eldenring|steam_proton|farcry3|dyinglight.*)$"] workspace number $ws4
 assign [app_id="(?i)^(cs2|gamescope|eldenring|steam_proton|farcry3|dyinglight.*)$"] workspace number $ws4
-for_window [class="^steam_app_.*$"] move to workspace number $ws4
-for_window [app_id="^steam_app_.*$"] move to workspace number $ws4
-for_window [title="^GTAIV$"] move to workspace number $ws4
-for_window [class="(?i)^(cs2|gamescope|eldenring|steam_proton|farcry3|dyinglight.*)$"] move to workspace number $ws4
-for_window [app_id="(?i)^(cs2|gamescope|eldenring|steam_proton|farcry3|dyinglight.*)$"] move to workspace number $ws4
+for_window [class="^steam_app_.*$"] move to workspace number $ws4, focus
+for_window [app_id="^steam_app_.*$"] move to workspace number $ws4, focus
+for_window [title="^GTAIV$"] move to workspace number $ws4, focus
+for_window [class="(?i)^(cs2|gamescope|eldenring|steam_proton|farcry3|dyinglight.*)$"] move to workspace number $ws4, focus
+for_window [app_id="(?i)^(cs2|gamescope|eldenring|steam_proton|farcry3|dyinglight.*)$"] move to workspace number $ws4, focus
 
 # Rockstar Games Launcher & GTA IV (Workspace 4)
 assign [class="(?i)^(launcher\.exe|socialclubhelper\.exe|playgtaiv\.exe|gtaiv\.exe|gtaiv)$"] workspace number $ws4
