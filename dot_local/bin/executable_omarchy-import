@@ -128,33 +128,85 @@ def convert_catalog_entry(entry):
 
     return normalize_theme(raw_theme, default_name=f"omarchy-{slug}", default_provider="omarchy")
 
-def import_catalog(limit=None):
+def check_status():
+    print(f"Fetching Omarchy catalog from {CATALOG_URL}...")
+    req = urllib.request.Request(CATALOG_URL, headers={"User-Agent": "Antigravity-OmarchyImporter/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        print(f"Error fetching catalog: {e}", file=sys.stderr)
+        return False
+
+    themes = data.get("themes", [])
+    total_catalog = len(themes)
+    imported = 0
+    missing = []
+    rejected = 0
+    metadata_ok = 0
+
+    for entry in themes:
+        slug = entry.get("slug")
+        if not slug:
+            rejected += 1
+            continue
+        dest_file = os.path.join(IMPORTED_OMARCHY_DIR, f"omarchy-{slug}.json")
+        if not os.path.exists(dest_file):
+            missing.append(slug)
+        else:
+            try:
+                with open(dest_file, "r", encoding="utf-8") as f:
+                    theme_data = json.load(f)
+                src = theme_data.get("source", {})
+                if src.get("provider") == "omarchy" and src.get("repository") and src.get("commit"):
+                    metadata_ok += 1
+                imported += 1
+            except Exception:
+                rejected += 1
+
+    print("\nOmarchy Official Catalog Status:")
+    print(f"  catalog entries       = {total_catalog}")
+    print(f"  successfully imported = {imported}")
+    print(f"  with full provenance  = {metadata_ok}")
+    print(f"  rejected              = {rejected}")
+    print(f"  missing               = {len(missing)}")
+    if missing:
+        print(f"  missing slugs:         {missing}")
+    return len(missing) == 0 and rejected == 0
+
+def import_catalog(limit=None, dry_run=False):
     print(f"Fetching Omarchy catalog from {CATALOG_URL}...")
     req = urllib.request.Request(CATALOG_URL, headers={"User-Agent": "Antigravity-OmarchyImporter/1.0"})
     with urllib.request.urlopen(req, timeout=15) as resp:
         data = json.loads(resp.read().decode("utf-8"))
 
     themes = data.get("themes", [])
-    print(f"Discovered {len(themes)} themes in official catalog.")
+    print(f"Discovered {len(themes)} themes in official catalog (dry_run={dry_run}).")
 
     if limit:
         themes = themes[:limit]
 
     count = 0
+    errors = 0
     for entry in themes:
         slug = entry.get("slug")
         if not slug:
             continue
         try:
             canonical = convert_catalog_entry(entry)
-            dest_file = os.path.join(IMPORTED_OMARCHY_DIR, f"omarchy-{slug}.json")
-            with open(dest_file, "w", encoding="utf-8") as f:
-                json.dump(canonical, f, indent=2)
+            if not dry_run:
+                dest_file = os.path.join(IMPORTED_OMARCHY_DIR, f"omarchy-{slug}.json")
+                with open(dest_file, "w", encoding="utf-8") as f:
+                    json.dump(canonical, f, indent=2)
             count += 1
         except Exception as e:
+            errors += 1
             print(f"Error importing {slug}: {e}", file=sys.stderr)
 
-    print(f"Successfully imported {count} Omarchy themes into {IMPORTED_OMARCHY_DIR}")
+    if dry_run:
+        print(f"Dry-run complete: {count} verified, {errors} errors.")
+    else:
+        print(f"Successfully imported {count} Omarchy themes into {IMPORTED_OMARCHY_DIR} ({errors} errors)")
     return count
 
 def import_local_dir(source_dir):
@@ -218,22 +270,28 @@ def import_local_dir(source_dir):
 def main():
     if len(sys.argv) < 2:
         print("Usage:")
-        print("  omarchy-import --catalog [--limit N]")
+        print("  omarchy-import --status")
+        print("  omarchy-import --catalog [--dry-run] [--limit N]")
         print("  omarchy-import <directory_path>")
         print("  omarchy-import <git_url>")
         sys.exit(1)
 
     arg = sys.argv[1]
 
-    if arg in ("--catalog", "--all", "--registry"):
+    if arg in ("--status", "status"):
+        ok = check_status()
+        sys.exit(0 if ok else 1)
+    elif arg in ("--catalog", "--all", "--registry"):
+        dry_run = "--dry-run" in sys.argv
         limit = None
         if "--limit" in sys.argv:
             idx = sys.argv.index("--limit")
             if idx + 1 < len(sys.argv):
                 limit = int(sys.argv[idx + 1])
-        imported = import_catalog(limit=limit)
-        print("Triggering theme-sync to build cache...")
-        subprocess.run([os.path.expanduser("~/.local/bin/theme-sync")], check=True)
+        imported = import_catalog(limit=limit, dry_run=dry_run)
+        if not dry_run:
+            print("Triggering theme-sync to build cache...")
+            subprocess.run([os.path.expanduser("~/.local/bin/theme-sync")], check=True)
     elif arg.startswith("http://") or arg.startswith("https://") or arg.startswith("git@"):
         with tempfile.TemporaryDirectory() as td:
             print(f"Cloning {arg}...")

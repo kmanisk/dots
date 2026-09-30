@@ -58,3 +58,5 @@ GTAIV_WORKING_CONFIG.md
 .local/bin/theme-sync
 .local/bin/rofi-theme
 {{ end }}
+**/*.pyc
+**/__pycache__/**

@@ -72,15 +72,18 @@ def main():
     files_to_check = []
 
     if "--all" in args:
-        for d in ("~/.config/theme/custom", "~/.config/theme/imported"):
-            files_to_check.extend(glob.glob(os.path.expanduser(f"{d}/**/*.json"), recursive=True))
+        cache_files = glob.glob(os.path.expanduser("~/.cache/theme/themes/*.json"))
+        if cache_files:
+            files_to_check = sorted(cache_files)
+        else:
+            for d in ("~/.config/theme/custom", "~/.config/theme/imported"):
+                files_to_check.extend(glob.glob(os.path.expanduser(f"{d}/**/*.json"), recursive=True))
     else:
         target = [a for a in args if a != "--strict"][0]
         expanded = os.path.expanduser(target)
         if os.path.exists(expanded):
             files_to_check.append(expanded)
         else:
-            # Check by theme name in config dirs or cache
             candidates = [
                 os.path.expanduser(f"~/.config/theme/custom/{target}.json"),
                 os.path.expanduser(f"~/.config/theme/imported/omarchy/{target}.json"),
@@ -99,29 +102,52 @@ def main():
     passed = 0
     warned = 0
     failed = 0
+    provider_counts = {}
 
     print(f"Validating {total} theme(s) (strict={strict})...\n")
 
     for f in sorted(files_to_check):
-        rel = os.path.relpath(f, os.path.expanduser("~/.config/theme"))
+        fname = os.path.basename(f)
         errors, warnings = check_theme_file(f, strict=strict)
+
+        # Count providers if available
+        try:
+            with open(f, "r", encoding="utf-8") as jf:
+                td = json.load(jf)
+                p = td.get("source", {}).get("provider", "other")
+                provider_counts[p] = provider_counts.get(p, 0) + 1
+        except Exception:
+            pass
 
         if errors or (strict and warnings):
             failed += 1
-            print(f"FAIL: {rel}")
+            print(f"FAIL: {fname}")
             for e in errors:
                 print(f"  [ERROR] {e}")
             for w in warnings:
                 print(f"  [WARN]  {w}")
         elif warnings:
             warned += 1
-            print(f"WARN: {rel}")
+            print(f"WARN: {fname}")
             for w in warnings:
                 print(f"  [WARN]  {w}")
         else:
             passed += 1
 
-    print(f"\nResults: {passed} passed, {warned} warnings, {failed} failed (total {total})")
+    print("\nSource Breakdown:")
+    print(f"  Omarchy imported:   {provider_counts.get('omarchy', 0)}")
+    print(f"  Base46 (NvChad):    {provider_counts.get('base46', 0)}")
+    print(f"  Custom themes:      {provider_counts.get('custom', 0)}")
+    other = sum(v for k, v in provider_counts.items() if k not in ('omarchy', 'base46', 'custom'))
+    if other:
+        print(f"  Other:              {other}")
+    print("  -------------------------")
+    print(f"  Total:              {total}")
+
+    print(f"\nValidation Results:")
+    print(f"  Passed:             {passed}")
+    print(f"  Warnings:           {warned}")
+    print(f"  Failed:             {failed}")
     sys.exit(1 if failed > 0 else 0)
 
 if __name__ == "__main__":
