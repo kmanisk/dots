@@ -19,8 +19,8 @@ Usage: vibrance-ctl [get | set <val> | off | inspect]
 
 Commands:
   get             Show configured saturation and current hardware DRM CTM status
-  set <val>       Set default saturation (e.g., 1.2, 1.3, 1.4)
-  off             Reset saturation back to 1.0 (identity/normal)
+  set <val>       Set saturation: supports Linux scalar (e.g., 1.30, 1.60) or Windows % (e.g., 65%, 80%, or 65, 80)
+  off             Reset saturation back to 1.0 (identity/normal / 50%)
   inspect         Read live Intel DRM CRTC CTM matrix (read-only, works inside Sway)
 
 Note on Hardware CTM Architecture:
@@ -51,13 +51,59 @@ case "${cmd}" in
             echo "Error: Missing saturation value. Example: vibrance-ctl set 1.3" >&2
             exit 1
         fi
-        val="$2"
-        # Validate number between 0.0 and 4.0
-        if ! awk -v v="$val" 'BEGIN { exit !(v >= 0.0 && v <= 4.0) }'; then
-            echo "Error: Saturation value must be a number between 0.0 and 4.0" >&2
+        raw_val="$2"
+        # Check if user passed a percentage (e.g. 65%, 80%, or integer > 4 like 65, 80)
+        # Windows scale: 0% = 0.00, 50% = 1.00, 100% = 2.00
+        val=$(awk -v input="$raw_val" 'BEGIN {
+            # Strip trailing % if present
+            gsub(/%/, "", input)
+            if (input ~ /^[0-9]+([.][0-9]+)?$/) {
+                num = input + 0.0
+                # If strictly greater than 4.0, interpret as Windows percentage (0-100)
+                if (num > 4.0) {
+                    if (num > 100.0) {
+                        print "ERR_PCT_RANGE"
+                        exit
+                    }
+                    scalar = 1.0 + ((num - 50.0) / 50.0)
+                    printf "%.2f\n", scalar
+                    exit
+                }
+                # Otherwise, if input ended with % explicitly (e.g. 4%, 0%)
+                # check ARGV or original input
+            }
+        }')
+
+        # If user explicitly supplied "%", always treat as percentage even if <= 4
+        if [[ "$raw_val" =~ %$ ]]; then
+            val=$(awk -v input="${raw_val%%%}" 'BEGIN {
+                num = input + 0.0
+                if (num < 0.0 || num > 100.0) {
+                    print "ERR_PCT_RANGE"
+                    exit
+                }
+                scalar = 1.0 + ((num - 50.0) / 50.0)
+                printf "%.2f\n", scalar
+            }')
+        elif [[ -z "$val" ]]; then
+            val="$raw_val"
+        fi
+
+        if [[ "$val" == "ERR_PCT_RANGE" ]]; then
+            echo "Error: Percentage must be between 0% and 100%" >&2
             exit 1
         fi
+
+        # Validate number between 0.0 and 4.0
+        if ! awk -v v="$val" 'BEGIN { exit !(v >= 0.0 && v <= 4.0) }'; then
+            echo "Error: Saturation value must be a scalar between 0.0 and 4.0, or percentage 0% to 100%" >&2
+            exit 1
+        fi
+
         echo "${val}" > "${CONFIG_FILE}"
+        if [[ "$raw_val" != "$val" ]]; then
+            echo "Translated ${raw_val} -> Linux scalar ${val}."
+        fi
         echo "Saved saturation ${val} to ${CONFIG_FILE}."
 
         # If --restart / -r requested, save session and restart Sway to latch immediately
