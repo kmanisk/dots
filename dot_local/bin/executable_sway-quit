@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# sway-quit: Safely and reliably exit Sway from any TTY or script,
+# automatically discovering the correct SWAYSOCK even when run outside of Wayland.
+set -euo pipefail
+
+UID_NUM="$(id -u)"
+RUNDIR="${XDG_RUNTIME_DIR:-/run/user/${UID_NUM}}"
+
+# 1. Find running Sway process
+SWAY_PID="$(pgrep -x sway -u "${UID_NUM}" 2>/dev/null | head -n1 || true)"
+
+if [[ -z "${SWAY_PID}" ]]; then
+    echo "sway-quit: Sway is not currently running."
+    exit 0
+fi
+
+# 2. Locate Sway IPC socket
+SOCK=""
+if [[ -n "${SWAYSOCK:-}" && -S "${SWAYSOCK}" ]]; then
+    SOCK="${SWAYSOCK}"
+elif [[ -S "${RUNDIR}/sway-ipc.${UID_NUM}.${SWAY_PID}.sock" ]]; then
+    SOCK="${RUNDIR}/sway-ipc.${UID_NUM}.${SWAY_PID}.sock"
+else
+    # Fallback to newest socket file matching pattern
+    SOCK="$(ls -t "${RUNDIR}"/sway-ipc.*.sock 2>/dev/null | head -n1 || true)"
+fi
+
+# 3. Attempt graceful exit via swaymsg
+if [[ -n "${SOCK}" && -S "${SOCK}" ]]; then
+    echo "sway-quit: Requesting Sway (PID ${SWAY_PID}) exit via ${SOCK}..."
+    timeout 3 swaymsg -s "${SOCK}" exit >/dev/null 2>&1 || true
+fi
+
+# 4. Wait up to 3 seconds for Sway to terminate
+for _ in {1..30}; do
+    if ! kill -0 "${SWAY_PID}" 2>/dev/null; then
+        echo "sway-quit: Sway exited cleanly."
+        exit 0
+    fi
+    sleep 0.1
+done
+
+# 5. If still alive, send SIGTERM to allow wlroots to release DRM master cleanly
+echo "sway-quit: Sway still active, sending SIGTERM to PID ${SWAY_PID}..."
+kill -TERM "${SWAY_PID}" 2>/dev/null || true
+
+for _ in {1..30}; do
+    if ! kill -0 "${SWAY_PID}" 2>/dev/null; then
+        echo "sway-quit: Sway terminated cleanly via SIGTERM."
+        exit 0
+    fi
+    sleep 0.1
+done
+
+# 6. If it still didn't exit, report warning
+echo "sway-quit: Warning: Sway (PID ${SWAY_PID}) is still running." >&2
+exit 1

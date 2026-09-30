@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# vibrance-ctl: Control Intel hardware DRM CTM vibrance/saturation
+set -euo pipefail
+
+CONFIG_FILE="${HOME}/.config/vibrance"
+CTM_BIN="${HOME}/.local/bin/ctm-test"
+
+get_current_config() {
+    if [[ -f "${CONFIG_FILE}" ]]; then
+        cat "${CONFIG_FILE}" | tr -d '[:space:]'
+    else
+        echo "1.0"
+    fi
+}
+
+usage() {
+    cat <<EOF
+Usage: vibrance-ctl [get | set <val> | off | inspect]
+
+Commands:
+  get             Show configured saturation and current hardware DRM CTM status
+  set <val>       Set default saturation (e.g., 1.2, 1.3, 1.4)
+  off             Reset saturation back to 1.0 (identity/normal)
+  inspect         Read live Intel DRM CRTC CTM matrix (read-only, works inside Sway)
+
+Note on Hardware CTM Architecture:
+  Intel CTM is executed entirely in display controller hardware (CRTC 151)
+  with 0% shader cost and 0 latency. It applies across all workspaces, TTYs,
+  and prime-run games.
+  The value in ~/.config/vibrance is latched into hardware automatically
+  by sway-run before Sway claims exclusive DRM master.
+EOF
+}
+
+cmd="${1:-get}"
+
+case "${cmd}" in
+    get)
+        cfg="$(get_current_config)"
+        echo "Configured saturation : ${cfg} (~/.config/vibrance)"
+        echo "--- Live Hardware State ---"
+        if [[ -x "${CTM_BIN}" ]]; then
+            "${CTM_BIN}" --inspect
+        else
+            echo "ctm-test binary not found at ${CTM_BIN}"
+        fi
+        ;;
+
+    set)
+        if [[ $# -lt 2 ]]; then
+            echo "Error: Missing saturation value. Example: vibrance-ctl set 1.3" >&2
+            exit 1
+        fi
+        val="$2"
+        # Validate number between 0.0 and 4.0
+        if ! awk -v v="$val" 'BEGIN { exit !(v >= 0.0 && v <= 4.0) }'; then
+            echo "Error: Saturation value must be a number between 0.0 and 4.0" >&2
+            exit 1
+        fi
+        echo "${val}" > "${CONFIG_FILE}"
+        echo "Saved saturation ${val} to ${CONFIG_FILE}."
+
+        # If --restart / -r requested, save session and restart Sway to latch immediately
+        if [[ "${3:-}" == "-r" || "${3:-}" == "--restart" ]]; then
+            if pgrep -x sway >/dev/null 2>&1; then
+                echo "Saving Sway session and restarting to latch new hardware vibrance..."
+                if [[ -x "${HOME}/.local/bin/sway-session-save" ]]; then
+                    "${HOME}/.local/bin/sway-session-save" --all --quiet 2>/dev/null || true
+                fi
+                if [[ -x "${HOME}/.local/bin/sway-quit" ]]; then
+                    "${HOME}/.local/bin/sway-quit"
+                else
+                    swaymsg exit
+                fi
+                exit 0
+            fi
+        fi
+
+        # If not inside active Sway holding DRM master, apply directly to hardware now
+        if [[ -z "${SWAYSOCK:-}" ]] || ! pgrep -x sway >/dev/null 2>&1; then
+            if [[ -x "${CTM_BIN}" ]]; then
+                "${CTM_BIN}" --set "${val}"
+            fi
+        else
+            echo "Note: Sway is currently running and holds DRM master."
+            echo "Hardware vibrance is automatically latched on Sway startup (sway-run)."
+            echo "Tip: Run 'vibrance-ctl set ${val} -r' to auto-save and restart Sway instantly."
+        fi
+        ;;
+
+    off|reset)
+        echo "1.0" > "${CONFIG_FILE}"
+        echo "Reset saturation to 1.0 in ${CONFIG_FILE}."
+        if [[ -z "${SWAYSOCK:-}" ]] || ! pgrep -x sway >/dev/null 2>&1; then
+            if [[ -x "${CTM_BIN}" ]]; then
+                "${CTM_BIN}" --identity
+            fi
+        else
+            echo "Note: Next Sway launch will boot with identity 1.0."
+        fi
+        ;;
+
+    inspect)
+        if [[ -x "${CTM_BIN}" ]]; then
+            "${CTM_BIN}" --inspect
+        else
+            echo "ctm-test binary not found at ${CTM_BIN}" >&2
+            exit 1
+        fi
+        ;;
+
+    -h|--help|help)
+        usage
+        ;;
+
+    *)
+        usage
+        exit 1
+        ;;
+esac
