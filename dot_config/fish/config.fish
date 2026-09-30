@@ -64,9 +64,9 @@ alias dsp="dsp-stat"
 alias dspstat="dsp-stat"
 
 # Modern CLI Replacements
-if type -q bat
-    alias cat="bat"
-end
+# if type -q bat
+#     alias cat="bat"
+# end
 if type -q lsd
     alias ls="lsd"
     alias la="lsd -A"
@@ -97,6 +97,17 @@ alias pkr="pkg remove"
 alias pkc="pkg clean"
 alias pkl="pkg list"
 alias pku="pkg update"
+
+# Theme Management
+alias thrm="theme-rm"
+alias theme_rm="theme-rm"
+alias thls="theme-ls"
+alias theme_ls="theme-ls"
+alias thset="theme-set"
+alias theme_set="theme-set"
+alias thmenu="rofi-theme"
+alias thsync="theme-sync"
+alias theme_sync="theme-sync"
 
 # ------------------------------------------------------------------------------
 # Functions Ported from PowerShell Profile

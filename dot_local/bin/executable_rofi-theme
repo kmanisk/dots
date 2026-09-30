@@ -154,7 +154,7 @@ def output_theme_rows(current):
     # Keep active theme at top (index 0)
     theme_files.sort(
         key=lambda tf: (
-            0 if os.path.splitext(os.path.basename(tf))[0] in (current, f"omarchy-{current}") else 1,
+            0 if os.path.splitext(os.path.basename(tf))[0] == current else 1,
             os.path.basename(tf),
         )
     )
@@ -181,7 +181,7 @@ def output_theme_rows(current):
             c = b16.get(k.upper(), "#777777")
             swatches += f"<span foreground=\"{c}\" size=\"large\">● </span>"
 
-        is_current = (theme_name == current or (theme_name.startswith("omarchy-") and theme_name[8:] == current))
+        is_current = (theme_name == current)
         active_col = b16.get("BASE0B", "#a7c080")
         badge = (
             f" <span foreground=\"{active_col}\" weight=\"bold\" size=\"small\">[ACTIVE]</span>"
