@@ -212,6 +212,7 @@ bindsym XF86AudioMicMute exec --no-startup-id pactl set-source-mute @DEFAULT_SOU
 bindsym $mod+s exec --no-startup-id ~/.local/bin/screenshot-region
 bindsym Print exec --no-startup-id ~/.local/bin/screenshot-region
 bindsym Shift+Print exec --no-startup-id ~/.local/bin/screenshot-fullscreen
+bindsym Sys_Req exec --no-startup-id ~/.local/bin/screenshot-fullscreen
 bindsym $mod+Shift+s exec --no-startup-id ~/.local/bin/screenshot-fullscreen
 bindsym $mod+Print exec --no-startup-id ~/.local/bin/screenshot-fullscreen
 
