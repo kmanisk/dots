@@ -11,15 +11,6 @@ modmap:
       RightCtrl: RightMeta
 
 keymap:
-  # --- Alacritty Universal Copy / Paste / Cut (Safe against SIGINT) ---
-  - name: Alacritty Universal Clipboard
-    application:
-      only: ["Alacritty", "scratch-term", "scratch-notes"]
-    exact_match: true
-    remap:
-      Super-c: C-S-c # Win+C -> Ctrl+Shift+C (safe copy without killing running processes)
-      Super-v: C-S-v # Win+V -> Ctrl+Shift+V (safe paste)
-
   # --- General Universal Copy / Paste / Cut (All GUI Applications) ---
   - name: Universal Copy Paste
     application:

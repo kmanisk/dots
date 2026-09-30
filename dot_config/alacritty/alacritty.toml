@@ -1,7 +1,7 @@
 general.import = ["/home/manisk/.local/state/theme/alacritty.toml"]
 
 [font]
-size = 21.5
+size = 19.5
 # normal = { family = "Departure Mono", style = "Normal" }
 # bold = { family = "Departure Mono", style = "Bold" }
 # italic = { family = "Departure Mono", style = "Normal" }
@@ -28,6 +28,8 @@ binding = { key = "O", mods = "Control|Shift" }
 
 [keyboard]
 bindings = [
+  { key = "C", mods = "Super", action = "Copy" },
+  { key = "V", mods = "Super", action = "Paste" },
   { key = "U", mods = "Alt|Shift", action = "IncreaseFontSize" },
   { key = "Y", mods = "Alt|Shift", action = "DecreaseFontSize" }
 ]
