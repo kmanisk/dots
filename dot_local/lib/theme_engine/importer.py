@@ -822,32 +822,40 @@ def print_theme_analysis(summary, branch="master", commit=""):
     print(f"Branch: {branch}")
     print(f"Commit: {commit[:7] if commit else 'unknown'}")
 
-    print("\nAnalyzing theme...")
+    print("\nUpstream Repository Assets (shipped in git):")
     caps = summary["capabilities"]
     for cap_name in ["palette", "wallpaper", "cava", "gtk", "waybar", "alacritty", "btop", "neovim", "mako", "kitty", "ghostty", "foot", "swayosd", "walker", "steam", "vencord", "zed"]:
         if cap_name in caps:
             has_cap = caps.get(cap_name, False)
             if cap_name == "cava":
-                c_status = f"yes ({summary.get('cava_gradient_count', 8)} colors)" if has_cap else "no"
+                c_status = f"yes ({summary.get('cava_gradient_count', 8)} colors)" if has_cap else "no (system synthesizes 8 colors)"
                 print(f"  {cap_name.capitalize():<12} {c_status}")
             elif cap_name == "wallpaper":
                 w_status = f"yes ({summary.get('wallpapers_count', 0)} found)" if has_cap else "no"
                 print(f"  {cap_name.capitalize():<12} {w_status}")
+            elif cap_name == "zed":
+                status = "yes (upstream file)" if has_cap else "no (system generates template)"
+                print(f"  {cap_name.capitalize():<12} {status}")
             else:
                 status = "yes" if has_cap else "no"
                 print(f"  {cap_name.capitalize():<12} {status}")
 
-    print("\nEnvironment Adaptation:")
-    print("  Sway:        generated from palette")
+    print("\nDesktop Adaptation (System Generated & Synchronized):")
+    print("  Zed:         generated from palette (~/.config/zed/themes/nvchad-system.json)")
+    print("  Sway:        generated from palette (~/.config/sway/)")
+    print("  Alacritty:   generated from palette (~/.config/alacritty/)")
+    print("  Cava:        generated from palette (~/.config/cava/config)")
+    print("  GTK / Rofi:  generated from palette")
     print("  Hyprland:    ignored (Sway environment authority)")
     print("  Hyprlock:    ignored (Sway environment authority)")
 
     if summary["ignored_files"]:
-        print("\nIgnored files (non-portable/behavioral):")
+        print("\nIgnored upstream files (foreign/behavioral):")
         for ig in summary["ignored_files"][:6]:
             print(f"  - {ig}")
         if len(summary["ignored_files"]) > 6:
             print(f"  ... and {len(summary['ignored_files']) - 6} more")
+
 
 
 
