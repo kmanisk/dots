@@ -6,7 +6,14 @@
 @import "~/.config/rofi/system.rasi"
 
 configuration {
-    show-icons: false;
+    show-icons:             false;
+    kb-remove-char-forward: "Delete";
+    kb-custom-1:            "Control+d,Control+Shift+D";
+    kb-custom-2:            "Control+r";
+    kb-custom-3:            "Control+i";
+    sort:                   true;
+    sorting-method:         "fzf";
+    matching:               "fuzzy";
 }
 
 window {
@@ -23,8 +30,8 @@ window {
 
 mainbox {
     background-color:    transparent;
-    children:            [ inputbar, listview ];
-    spacing:             16px;
+    children:            [ inputbar, message, listview ];
+    spacing:             14px;
 }
 
 inputbar {
@@ -49,6 +56,20 @@ entry {
     placeholder:         "Search themes...";
     placeholder-color:   @foreground-alt;
     font:                "VictorMono Nerd Font Mono Bold 15";
+}
+
+message {
+    background-color:    @background-alt;
+    border:              1px;
+    border-color:        @accent;
+    border-radius:       0px;
+    padding:             8px 14px;
+}
+
+textbox {
+    background-color:    transparent;
+    text-color:          @foreground;
+    font:                "VictorMono Nerd Font Mono 13";
 }
 
 listview {
