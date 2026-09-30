@@ -69,8 +69,9 @@ bindsym $mod+c exec notify-send "Clock" "$(date '+%A, %B %d%n%I:%M %P')"
 # Bluetooth battery notification (Win + v)
 bindsym $mod+v exec --no-startup-id ~/.local/bin/bt-battery-notify
 
-# Process Killer Menu (Alt + Escape)
+# Process Killer Menu (Alt + Escape, Win + ')
 bindsym Mod1+Escape exec --no-startup-id ~/.local/bin/rofi-pkill
+bindsym $mod+apostrophe exec --no-startup-id ~/.local/bin/rofi-pkill
 # Power menu on Win+Esc
 bindsym $mod+Escape exec --no-startup-id ~/.local/bin/powermenu
 # Quit ROG Center (it hides to a nonexistent tray instead of exiting)
@@ -338,8 +339,7 @@ bindsym --no-repeat Mod1+grave exec --no-startup-id ~/.local/bin/scratch-toggle 
 bindsym --no-repeat Control+space exec --no-startup-id env SCRATCH_GAME_GUARD=1 ~/.local/bin/scratch-toggle term
 bindsym --no-repeat $mod+n exec --no-startup-id ~/.local/bin/scratch-toggle notes
 
-# Session control (Win+Shift+e = process killer)
-bindsym $mod+Shift+e exec --no-startup-id ~/.local/bin/rofi-pkill
+# Session control
 bindsym $mod+Shift+c reload
 
 # Session save/restore (on-demand, no daemon, stdlib-only)

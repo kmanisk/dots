@@ -3,7 +3,7 @@ Description=xremap key remapper
 After=graphical-session.target
 
 [Service]
-ExecStart=/usr/bin/xremap --watch %h/.config/xremap/config.yml
+ExecStart=/usr/bin/xremap --watch --allow-launch true %h/.config/xremap/config.yml
 Restart=always
 RestartSec=2
 StandardOutput=null

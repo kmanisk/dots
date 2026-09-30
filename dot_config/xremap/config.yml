@@ -90,6 +90,10 @@ keymap:
       CapsLock-Shift-q: Super-Shift-q
       CapsLock-Shift-BackSpace: Super-Shift-BackSpace
 
+      # Process Killer Menu (formerly Win+Shift+e):
+      CapsLock-w:
+        launch: ["/home/manisk/.local/bin/rofi-pkill"]
+
       # Passthrough
       CapsLock-a: a
       CapsLock-b: b
@@ -97,7 +101,6 @@ keymap:
       CapsLock-e: e
       CapsLock-t: t
       CapsLock-v: v
-      CapsLock-w: w
       CapsLock-x: x
       CapsLock-z: z
 
