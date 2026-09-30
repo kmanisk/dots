@@ -20,6 +20,9 @@ export XDG_SESSION_TYPE=wayland
 export SDL_VIDEO_DRIVER=wayland
 export SDL_VIDEODRIVER=wayland
 export SDL_VIDEO_WAYLAND_SCALE_TO_DISPLAY=1
+# Non-native fullscreen modes fill the display (SDL 3.2+); test A keeps
+# SCALE_TO_DISPLAY=1, test B flips only this to 0.
+export SDL_VIDEO_WAYLAND_MODE_SCALING=stretch
 export __NV_PRIME_RENDER_OFFLOAD=1
 export __GLX_VENDOR_LIBRARY_NAME=nvidia
 export __VK_LAYER_NV_optimus=NVIDIA_only
@@ -27,12 +30,14 @@ export LIBVA_DRIVER_NAME=iHD
 
 # Vibrance via vkBasalt (in-process shader: no extra present hop, scanout
 # stays eligible). Config: ~/.config/vkBasalt/vkBasalt.conf
-export ENABLE_VKBASALT=1
+# Temporarily disabled to isolate random CS2 Vulkan layer crashes.
+export ENABLE_VKBASALT=0
 
-# 2. Resolution Configuration
-TARGET_RES="${CS2_RES:-1440x1080}"
-TARGET_W=1440
-TARGET_H=1080
+
+# 2. Resolution Configuration (first test: 1600x1200, full vertical res)
+TARGET_RES="${CS2_RES:-1600x1200}"
+TARGET_W=1600
+TARGET_H=1200
 case "$TARGET_RES" in
     1600|1600x1200) TARGET_W=1600; TARGET_H=1200 ;;
     1440|1440x1080) TARGET_W=1440; TARGET_H=1080 ;;
@@ -55,7 +60,7 @@ if [ $# -eq 0 ]; then
     exit 1
 fi
 
-CS2_FLAGS=(-vulkan -threads 7 -mainthreadpriority 2 -nojoy -novid +fps_max 0 +fps_max_ui 0)
+CS2_FLAGS=(-vulkan -fullscreen -w "$TARGET_W" -h "$TARGET_H" -threads 7 -mainthreadpriority 2 -nojoy -novid +fps_max 0 +fps_max_ui 0)
 
 # 4. Sway Gaming Mode Integration (Auto-mute desktop shortcuts while CS2 runs)
 if [ -n "$SWAYSOCK" ] && command -v swaymsg >/dev/null 2>&1; then
