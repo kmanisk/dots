@@ -19,9 +19,9 @@ fi
 export XDG_SESSION_TYPE=wayland
 export SDL_VIDEO_DRIVER=wayland
 export SDL_VIDEODRIVER=wayland
-export SDL_VIDEO_WAYLAND_SCALE_TO_DISPLAY=1
-# Non-native fullscreen modes fill the display (SDL 3.2+); test A keeps
-# SCALE_TO_DISPLAY=1, test B flips only this to 0.
+export SDL_VIDEO_WAYLAND_SCALE_TO_DISPLAY=0
+# Non-native fullscreen modes fill the display (SDL 3.2+); test B sets
+# SCALE_TO_DISPLAY=0 to eliminate fractional rounding-error blur.
 export SDL_VIDEO_WAYLAND_MODE_SCALING=stretch
 export __NV_PRIME_RENDER_OFFLOAD=1
 export __GLX_VENDOR_LIBRARY_NAME=nvidia

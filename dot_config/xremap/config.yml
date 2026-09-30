@@ -19,7 +19,6 @@ keymap:
     remap:
       M-c: C-S-c # Win+C -> Ctrl+Shift+C (safe copy without killing running processes)
       M-v: C-S-v # Win+V -> Ctrl+Shift+V (safe paste)
-      M-x: C-S-c # Win+X -> Ctrl+Shift+C (copy selection)
       Alt-c: C-S-c
       CapsLock-DOT: C-S-v
 
