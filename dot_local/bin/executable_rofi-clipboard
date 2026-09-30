@@ -7,8 +7,6 @@
 #   Alt+x       -> Unpin entry (stays open / loops)
 #   Alt+d       -> Delete entry (stays open / loops)
 #   Escape      -> Exit
-# ==============================================================================
-export DISPLAY="${DISPLAY:-:0}"
 export PATH="$HOME/.local/bin:$PATH"
 
 PIN_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/clipboard_pins"
@@ -37,7 +35,7 @@ display_items() {
 # Main interactive loop: pinning, unpinning, or deleting keeps the menu open
 while true; do
     chosen=$(display_items | rofi -dmenu \
-        -p "📋 Clipboard" \
+        -p "Clipboard" \
         -mesg "Enter: Copy & Close  |  Alt+p: Pin  |  Alt+x: Unpin  |  Alt+d: Delete" \
         -kb-delete-entry "" \
         -kb-custom-1 "Alt+d,Shift+Delete" \
@@ -118,8 +116,7 @@ while true; do
                 [ -f "$f" ] || continue
                 line=$(head -n 1 "$f" | tr -d '\r\n')
                 if [ "$line" = "$pin_text" ]; then
-                    xsel -b -i < "$f" 2>/dev/null
-                    xclip -selection clipboard < "$f" 2>/dev/null
+                    wl-copy < "$f"
                     notify "Copied Pin" "$pin_text"
                     break
                 fi
@@ -127,8 +124,7 @@ while true; do
         else
             raw_text=$(cliphist decode <<< "$chosen" 2>/dev/null)
             if [ -n "$raw_text" ]; then
-                printf '%s' "$raw_text" | xsel -b -i 2>/dev/null
-                printf '%s' "$raw_text" | xclip -selection clipboard 2>/dev/null
+                printf '%s' "$raw_text" | wl-copy
                 notify "Copied to Clipboard" "$(head -n 1 <<< "$raw_text")"
             fi
         fi
