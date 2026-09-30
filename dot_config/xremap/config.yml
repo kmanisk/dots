@@ -19,7 +19,6 @@ keymap:
     remap:
       Super-c: C-S-c # Win+C -> Ctrl+Shift+C (safe copy without killing running processes)
       Super-v: C-S-v # Win+V -> Ctrl+Shift+V (safe paste)
-      CapsLock-DOT: C-S-v
 
   # --- General Universal Copy / Paste / Cut (All GUI Applications) ---
   - name: Universal Copy Paste
@@ -55,8 +54,9 @@ keymap:
       CapsLock-u: C-BackSpace
       CapsLock-d: Delete
       CapsLock-f: C-f
-      CapsLock-DOT: C-v
-      CapsLock-COMMA: [C-a, C-c]
+      # Volume: , (<) = VolumeDown, . (>) = VolumeUp
+      CapsLock-COMMA: VolumeDown
+      CapsLock-DOT: VolumeUp
       # F-key row
       CapsLock-1: F1
       CapsLock-2: F2
