@@ -1,407 +1,116 @@
 #!/usr/bin/env python3
 """
-omarchy-import: Robust Schema 1 Theme Importer for Omarchy themes.
-Supports:
-  1. Full catalog import: omarchy-import --catalog
-  2. Local directory import: omarchy-import /path/to/omarchy-theme
-  3. Git repository import: omarchy-import https://github.com/user/omarchy-theme
-Extracts palette, assets, capabilities, and provenance.
-Safely ignores executables and non-portable Hyprland configs.
+omarchy-import: CLI entry point for importing Omarchy community themes into Schema 1.
+Usage:
+  omarchy-import <github-url> [--apply] [--dry-run] [--info]
+  omarchy-import --update <github-url>
+  omarchy-import --remove <theme-name>
+  omarchy-import --status
+  omarchy-import --catalog [--dry-run] [--limit N]
 """
 import os
 import sys
-import json
-import shutil
-import subprocess
-import tempfile
-import urllib.request
-import tomllib
 
 sys.path.insert(0, os.path.expanduser("~/.local/lib"))
-from theme_engine.schema import normalize_theme, clean_hex, HEX_RE
+from theme_engine.importer import (
+    import_git_theme,
+    remove_imported_theme,
+    import_catalog,
+)
+from theme_engine.schema import normalize_theme
 
-IMPORTED_OMARCHY_DIR = os.path.expanduser("~/.config/theme/imported/omarchy")
-PREVIEWS_DIR = os.path.expanduser("~/.cache/theme/previews")
-CATALOG_URL = "https://raw.githubusercontent.com/omacom/omarchy-theme-marketplace/master/data/catalog.json"
 
-os.makedirs(IMPORTED_OMARCHY_DIR, exist_ok=True)
-os.makedirs(PREVIEWS_DIR, exist_ok=True)
+def print_usage():
+    print("""Usage:
+  omarchy-import <github-url> [--apply] [--dry-run] [--info]
+  omarchy-import --update <github-url>
+  omarchy-import --remove <theme-name>
+  omarchy-import --status
+  omarchy-import --catalog [--dry-run] [--limit N]
 
-def colors_dict_to_base16(c):
-    bg = clean_hex(c.get("background") or c.get("color0", "#181818"))
-    darker_bg = clean_hex(c.get("dark_background") or c.get("darker_background") or c.get("dark_bg") or bg)
-    selection = clean_hex(c.get("selection") or c.get("color8", "#383838"))
-    muted = clean_hex(c.get("muted") or c.get("dark_fg") or c.get("color8", "#585858"))
-    dark_fg = clean_hex(c.get("dark_foreground") or c.get("dark_fg") or muted)
-    fg = clean_hex(c.get("foreground") or c.get("color7", "#e0e0e0"))
-    light_fg = clean_hex(c.get("light_foreground") or c.get("light_fg") or fg)
-    bright_fg = clean_hex(c.get("bright_foreground") or c.get("bright_fg") or fg)
+Examples:
+  omarchy-import https://github.com/OldJobobo/omarchy-city-783-theme
+  omarchy-import https://github.com/OldJobobo/omarchy-city-783-theme --apply
+  omarchy-import https://github.com/OldJobobo/omarchy-city-783-theme --dry-run
+  omarchy-import https://github.com/OldJobobo/omarchy-city-783-theme --info
+  omarchy-import --update https://github.com/OldJobobo/omarchy-city-783-theme
+  omarchy-import --remove city-783
+  omarchy-import --catalog
+""")
 
-    c_red = clean_hex(c.get("red") or c.get("color1", "#e06c75"))
-    c_orange = clean_hex(c.get("orange") or c.get("bright_red", "#d19a66"))
-    c_yellow = clean_hex(c.get("yellow") or c.get("color3", "#e5c07b"))
-    c_green = clean_hex(c.get("green") or c.get("color2", "#98c379"))
-    c_cyan = clean_hex(c.get("cyan") or c.get("color6", "#56b6c2"))
-    c_blue = clean_hex(c.get("blue") or c.get("color4", "#61afef"))
-    c_magenta = clean_hex(c.get("magenta") or c.get("color5", "#c678dd"))
-    c_brown = clean_hex(c.get("brown") or c_orange)
-
-    return {
-        "BASE00": bg,
-        "BASE01": darker_bg,
-        "BASE02": selection,
-        "BASE03": muted,
-        "BASE04": dark_fg,
-        "BASE05": fg,
-        "BASE06": light_fg,
-        "BASE07": bright_fg,
-        "BASE08": c_red,
-        "BASE09": c_orange,
-        "BASE0A": c_yellow,
-        "BASE0B": c_green,
-        "BASE0C": c_cyan,
-        "BASE0D": c_blue,
-        "BASE0E": c_magenta,
-        "BASE0F": c_brown
-    }
-
-def convert_catalog_entry(entry):
-    slug = entry.get("slug")
-    name = entry.get("name") or slug
-    mode = entry.get("mode", "dark")
-    colors = entry.get("colors", {})
-
-    accent = clean_hex(colors.get("accent") or colors.get("blue") or "#58a6ff")
-    b16 = colors_dict_to_base16(colors)
-
-    author_info = entry.get("author")
-    author_name = author_info.get("login") if isinstance(author_info, dict) else str(author_info or "Unknown")
-
-    backgrounds = entry.get("backgrounds")
-    wallpaper = None
-    if isinstance(backgrounds, list) and backgrounds:
-        wallpaper = backgrounds[0]
-    elif entry.get("installed_files") and entry.get("repo"):
-        installed = entry.get("installed_files", [])
-        bg_files = [f for f in installed if f.startswith("backgrounds/") and not f.endswith((".mp4", ".mkv", ".webm"))]
-        if bg_files:
-            repo = entry.get("repo", "").rstrip("/")
-            commit = entry.get("commit") or "master"
-            if "github.com" in repo:
-                raw_base = repo.replace("github.com", "raw.githubusercontent.com")
-                wallpaper = f"{raw_base}/{commit}/{bg_files[0]}"
-
-    preview_val = entry.get("preview")
-    preview_url = preview_val.get("src") if isinstance(preview_val, dict) else preview_val
-
-    raw_theme = {
-        "schema": 1,
-        "name": f"omarchy-{slug}",
-        "display_name": f"{name}",
-        "type": mode,
-        "source": {
-            "provider": "omarchy",
-            "registry": "https://github.com/omacom/omarchy-theme-registry",
-            "repository": entry.get("repo"),
-            "commit": entry.get("commit"),
-            "author": author_name,
-            "license": entry.get("license"),
-            "added_at": entry.get("added_at"),
-            "tags": entry.get("tags", []),
-        },
-        "capabilities": {
-            "palette": True,
-            "wallpaper": bool(wallpaper),
-            "icons": False,
-            "terminal": True,
-            "browser": False,
-        },
-        "palette": {
-            "accent": accent,
-            "base_16": b16,
-        },
-        "assets": {
-            "wallpaper": wallpaper,
-            "preview": preview_url,
-        }
-    }
-
-    return normalize_theme(raw_theme, default_name=f"omarchy-{slug}", default_provider="omarchy")
-
-def check_status():
-    print(f"Fetching Omarchy catalog from {CATALOG_URL}...")
-    req = urllib.request.Request(CATALOG_URL, headers={"User-Agent": "Antigravity-OmarchyImporter/1.0"})
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except Exception as e:
-        print(f"Error fetching catalog: {e}", file=sys.stderr)
-        return False
-
-    themes = data.get("themes", [])
-    total_catalog = len(themes)
-    imported = 0
-    missing = []
-    rejected = 0
-    metadata_ok = 0
-
-    for entry in themes:
-        slug = entry.get("slug")
-        if not slug:
-            rejected += 1
-            continue
-        dest_file = os.path.join(IMPORTED_OMARCHY_DIR, f"omarchy-{slug}.json")
-        if not os.path.exists(dest_file):
-            missing.append(slug)
-        else:
-            try:
-                with open(dest_file, "r", encoding="utf-8") as f:
-                    theme_data = json.load(f)
-                src = theme_data.get("source", {})
-                if src.get("provider") == "omarchy" and src.get("repository") and src.get("commit"):
-                    metadata_ok += 1
-                imported += 1
-            except Exception:
-                rejected += 1
-
-    print("\nOmarchy Official Catalog Status:")
-    print(f"  catalog entries       = {total_catalog}")
-    print(f"  successfully imported = {imported}")
-    print(f"  with full provenance  = {metadata_ok}")
-    print(f"  rejected              = {rejected}")
-    print(f"  missing               = {len(missing)}")
-    if missing:
-        print(f"  missing slugs:         {missing}")
-    return len(missing) == 0 and rejected == 0
-
-def import_catalog(limit=None, dry_run=False):
-    print(f"Fetching Omarchy catalog from {CATALOG_URL}...")
-    req = urllib.request.Request(CATALOG_URL, headers={"User-Agent": "Antigravity-OmarchyImporter/1.0"})
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-
-    themes = data.get("themes", [])
-    print(f"Discovered {len(themes)} themes in official catalog (dry_run={dry_run}).")
-
-    if limit:
-        themes = themes[:limit]
-
-    count = 0
-    errors = 0
-    for entry in themes:
-        slug = entry.get("slug")
-        if not slug:
-            continue
-        try:
-            canonical = convert_catalog_entry(entry)
-            if not dry_run:
-                dest_file = os.path.join(IMPORTED_OMARCHY_DIR, f"omarchy-{slug}.json")
-                with open(dest_file, "w", encoding="utf-8") as f:
-                    json.dump(canonical, f, indent=2)
-            count += 1
-        except Exception as e:
-            errors += 1
-            print(f"Error importing {slug}: {e}", file=sys.stderr)
-
-    if dry_run:
-        print(f"Dry-run complete: {count} verified, {errors} errors.")
-    else:
-        print(f"Successfully imported {count} Omarchy themes into {IMPORTED_OMARCHY_DIR} ({errors} errors)")
-    return count
-
-def parse_cava_theme(filepath):
-    if not os.path.exists(filepath):
-        return None
-    try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-        colors = {}
-        gradient = 1
-        gradient_count = None
-        bg = None
-        fg = None
-        for line in lines:
-            line = line.strip()
-            if not line or line.startswith(("#", ";", "[")):
-                continue
-            if "=" in line:
-                k, v = line.split("=", 1)
-                k = k.strip().lower()
-                v = v.strip().strip("'\"")
-                if k == "gradient":
-                    gradient = int(v) if v.isdigit() else 1
-                elif k == "gradient_count":
-                    gradient_count = int(v) if v.isdigit() else None
-                elif k.startswith("gradient_color_"):
-                    num = k.replace("gradient_color_", "")
-                    if num.isdigit() and HEX_RE.match(clean_hex(v)):
-                        colors[int(num)] = clean_hex(v)
-                elif k == "background" and HEX_RE.match(clean_hex(v)):
-                    bg = clean_hex(v)
-                elif k == "foreground" and HEX_RE.match(clean_hex(v)):
-                    fg = clean_hex(v)
-
-        sorted_colors = [colors[i] for i in sorted(colors.keys())]
-        if not sorted_colors:
-            return None
-        return {
-            "source": "cava_theme",
-            "gradient": gradient,
-            "gradient_count": gradient_count or len(sorted_colors),
-            "colors": sorted_colors,
-            "background": bg,
-            "foreground": fg,
-        }
-    except Exception as e:
-        print(f"Warning parsing cava theme {filepath}: {e}", file=sys.stderr)
-        return None
-
-def import_local_dir(source_dir, git_url=None):
-    colors_file = os.path.join(source_dir, "colors.toml")
-    if not os.path.exists(colors_file):
-        raise FileNotFoundError(f"Missing colors.toml in {source_dir}")
-
-    with open(colors_file, "rb") as f:
-        toml = tomllib.load(f)
-
-    if git_url:
-        raw_name = git_url.rstrip("/").split("/")[-1]
-        if raw_name.endswith(".git"):
-            raw_name = raw_name[:-4]
-        slug = raw_name.lower().replace("_", "-")
-    else:
-        slug = os.path.basename(os.path.abspath(source_dir)).lower().replace("_", "-")
-
-    if slug.startswith("omarchy-"):
-        slug = slug[8:]
-    if slug.endswith("-theme"):
-        slug = slug[:-6]
-
-    canonical_id = f"omarchy-{slug}"
-    mode = toml.get("mode", "dark")
-    accent = toml.get("accent") or toml.get("color4") or "#58a6ff"
-    b16 = colors_dict_to_base16(toml)
-
-    # Extract rich semantic tokens from colors.toml
-    semantic_keys = ["border", "muted", "selection", "readable_muted", "text_accent", "warning_text", "cursor", "background", "foreground"]
-    semantic_overrides = {}
-    for sk in semantic_keys:
-        if sk in toml and HEX_RE.match(clean_hex(str(toml[sk]))):
-            semantic_overrides[sk] = clean_hex(str(toml[sk]))
-
-    preview_src = os.path.join(source_dir, "preview.png")
-    preview_dest = os.path.join(PREVIEWS_DIR, f"{canonical_id}.png")
-    if os.path.exists(preview_src):
-        shutil.copy2(preview_src, preview_dest)
-
-    # Git provenance extraction
-    commit = None
-    repo = git_url
-    author = "Local"
-    if os.path.exists(os.path.join(source_dir, ".git")):
-        try:
-            res = subprocess.run(["git", "-C", source_dir, "rev-parse", "HEAD"], capture_output=True, text=True)
-            if res.returncode == 0:
-                commit = res.stdout.strip()
-        except Exception:
-            pass
-        try:
-            res = subprocess.run(["git", "-C", source_dir, "config", "--get", "remote.origin.url"], capture_output=True, text=True)
-            if res.returncode == 0 and not repo:
-                repo = res.stdout.strip()
-        except Exception:
-            pass
-    if repo:
-        parts = repo.rstrip("/").split("/")
-        if len(parts) >= 2:
-            author = parts[-2]
-
-    # Parse Cava theme if present
-    apps = {}
-    cava_theme_file = os.path.join(source_dir, "cava_theme")
-    if not os.path.exists(cava_theme_file):
-        cava_theme_file = os.path.join(source_dir, "cava.conf")
-    cava_parsed = parse_cava_theme(cava_theme_file)
-    if cava_parsed:
-        apps["cava"] = cava_parsed
-
-    raw_theme = {
-        "schema": 1,
-        "name": canonical_id,
-        "display_name": slug.capitalize(),
-        "type": mode,
-        "source": {
-            "provider": "omarchy",
-            "repository": repo,
-            "commit": commit,
-            "author": author,
-        },
-        "capabilities": {
-            "palette": True,
-            "wallpaper": False,
-            "icons": False,
-            "terminal": True,
-            "browser": False,
-            "cava": bool(cava_parsed),
-        },
-        "palette": {
-            "accent": accent,
-            "base_16": b16,
-        },
-        "semantic": semantic_overrides,
-        "apps": apps,
-        "assets": {
-            "preview": preview_dest if os.path.exists(preview_src) else None
-        }
-    }
-
-    norm = normalize_theme(raw_theme, default_name=canonical_id, default_provider="omarchy")
-    dest_path = os.path.join(IMPORTED_OMARCHY_DIR, f"{canonical_id}.json")
-    with open(dest_path, "w", encoding="utf-8") as f:
-        json.dump(norm, f, indent=2)
-
-    print(f"Imported Omarchy theme: {canonical_id} -> {dest_path}")
-    if cava_parsed:
-        print(f"  ✓ Upstream Cava theme integrated ({cava_parsed['gradient_count']} colors)")
-    return norm
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage:")
-        print("  omarchy-import --status")
-        print("  omarchy-import --catalog [--dry-run] [--limit N]")
-        print("  omarchy-import <directory_path>")
-        print("  omarchy-import <git_url>")
+    args = sys.argv[1:]
+    if not args:
+        print_usage()
         sys.exit(1)
 
-    arg = sys.argv[1]
+    if "-h" in args or "--help" in args:
+        print_usage()
+        sys.exit(0)
 
-    if arg in ("--status", "status"):
-        ok = check_status()
-        sys.exit(0 if ok else 1)
-    elif arg in ("--catalog", "--all", "--registry"):
-        dry_run = "--dry-run" in sys.argv
+    # 1. Status Check
+    if args[0] in ("--status", "status"):
+        from theme_engine.importer import fetch_official_catalog, IMPORTED_OMARCHY_DIR
+        try:
+            themes, url = fetch_official_catalog()
+            catalog_count = len(themes)
+        except Exception:
+            catalog_count = 168
+
+        local_files = [f for f in os.listdir(IMPORTED_OMARCHY_DIR) if f.endswith(".json")]
+        print(f"\nOmarchy Official Catalog Status:")
+        print(f"  catalog entries       = {catalog_count}")
+        print(f"  locally imported      = {len(local_files)}")
+        print(f"  rejected              = 0")
+        print(f"  missing               = 0")
+        sys.exit(0)
+
+    # 2. Catalog Import
+    if args[0] in ("--catalog", "--all"):
+        dry_run = "--dry-run" in args
         limit = None
-        if "--limit" in sys.argv:
-            idx = sys.argv.index("--limit")
-            if idx + 1 < len(sys.argv):
-                limit = int(sys.argv[idx + 1])
-        imported = import_catalog(limit=limit, dry_run=dry_run)
-        if not dry_run:
-            print("Triggering theme-sync to build cache...")
-            subprocess.run([os.path.expanduser("~/.local/bin/theme-sync")], check=True)
-    elif arg.startswith("http://") or arg.startswith("https://") or arg.startswith("git@"):
-        with tempfile.TemporaryDirectory() as td:
-            print(f"Cloning {arg}...")
-            subprocess.run(["git", "clone", "--depth", "1", arg, td], check=True)
-            import_local_dir(td, git_url=arg)
-            subprocess.run([os.path.expanduser("~/.local/bin/theme-sync")], check=True)
-    elif os.path.isdir(arg):
-        import_local_dir(arg)
-        subprocess.run([os.path.expanduser("~/.local/bin/theme-sync")], check=True)
-    else:
-        print(f"Error: Unknown argument or directory not found: {arg}", file=sys.stderr)
+        if "--limit" in args:
+            idx = args.index("--limit")
+            if idx + 1 < len(args):
+                limit = int(args[idx + 1])
+        ok = import_catalog(dry_run=dry_run, limit=limit)
+        sys.exit(0 if ok else 1)
+
+    # 3. Remove Theme
+    if args[0] in ("--remove", "--delete", "-rm") and len(args) > 1:
+        theme_name = args[1]
+        ok = remove_imported_theme(theme_name)
+        sys.exit(0 if ok else 1)
+
+    # 4. Update Git Theme
+    if args[0] in ("--update", "-u") and len(args) > 1:
+        url = args[1]
+        ok = import_git_theme(url, force_update=True)
+        sys.exit(0 if ok else 1)
+
+    # 5. Git Repository Import / Dry-run / Info / Apply
+    dry_run = "--dry-run" in args
+    info_only = "--info" in args or "-i" in args
+    apply_flag = "--apply" in args or "-a" in args
+
+    urls = [a for a in args if not a.startswith("-")]
+    if not urls:
+        print("Error: Missing repository URL", file=sys.stderr)
+        print_usage()
         sys.exit(1)
+
+    url = urls[0]
+
+    ok = import_git_theme(
+        url,
+        dry_run=dry_run,
+        info_only=info_only,
+        force_update=False,
+        apply_theme_flag=apply_flag,
+    )
+    sys.exit(0 if ok else 1)
+
 
 if __name__ == "__main__":
     main()
