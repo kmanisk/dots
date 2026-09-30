@@ -1,0 +1,251 @@
+#!/usr/bin/env python3
+"""
+omarchy-import: Robust Schema 1 Theme Importer for Omarchy themes.
+Supports:
+  1. Full catalog import: omarchy-import --catalog
+  2. Local directory import: omarchy-import /path/to/omarchy-theme
+  3. Git repository import: omarchy-import https://github.com/user/omarchy-theme
+Extracts palette, assets, capabilities, and provenance.
+Safely ignores executables and non-portable Hyprland configs.
+"""
+import os
+import sys
+import json
+import shutil
+import subprocess
+import tempfile
+import urllib.request
+import tomllib
+
+sys.path.insert(0, os.path.expanduser("~/.local/lib"))
+from theme_engine.schema import normalize_theme, clean_hex
+
+IMPORTED_OMARCHY_DIR = os.path.expanduser("~/.config/theme/imported/omarchy")
+PREVIEWS_DIR = os.path.expanduser("~/.cache/theme/previews")
+CATALOG_URL = "https://raw.githubusercontent.com/omacom/omarchy-theme-marketplace/master/data/catalog.json"
+
+os.makedirs(IMPORTED_OMARCHY_DIR, exist_ok=True)
+os.makedirs(PREVIEWS_DIR, exist_ok=True)
+
+def colors_dict_to_base16(c):
+    bg = clean_hex(c.get("background") or c.get("color0", "#181818"))
+    darker_bg = clean_hex(c.get("dark_background") or c.get("darker_background") or c.get("dark_bg") or bg)
+    selection = clean_hex(c.get("selection") or c.get("color8", "#383838"))
+    muted = clean_hex(c.get("muted") or c.get("dark_fg") or c.get("color8", "#585858"))
+    dark_fg = clean_hex(c.get("dark_foreground") or c.get("dark_fg") or muted)
+    fg = clean_hex(c.get("foreground") or c.get("color7", "#e0e0e0"))
+    light_fg = clean_hex(c.get("light_foreground") or c.get("light_fg") or fg)
+    bright_fg = clean_hex(c.get("bright_foreground") or c.get("bright_fg") or fg)
+
+    c_red = clean_hex(c.get("red") or c.get("color1", "#e06c75"))
+    c_orange = clean_hex(c.get("orange") or c.get("bright_red", "#d19a66"))
+    c_yellow = clean_hex(c.get("yellow") or c.get("color3", "#e5c07b"))
+    c_green = clean_hex(c.get("green") or c.get("color2", "#98c379"))
+    c_cyan = clean_hex(c.get("cyan") or c.get("color6", "#56b6c2"))
+    c_blue = clean_hex(c.get("blue") or c.get("color4", "#61afef"))
+    c_magenta = clean_hex(c.get("magenta") or c.get("color5", "#c678dd"))
+    c_brown = clean_hex(c.get("brown") or c_orange)
+
+    return {
+        "BASE00": bg,
+        "BASE01": darker_bg,
+        "BASE02": selection,
+        "BASE03": muted,
+        "BASE04": dark_fg,
+        "BASE05": fg,
+        "BASE06": light_fg,
+        "BASE07": bright_fg,
+        "BASE08": c_red,
+        "BASE09": c_orange,
+        "BASE0A": c_yellow,
+        "BASE0B": c_green,
+        "BASE0C": c_cyan,
+        "BASE0D": c_blue,
+        "BASE0E": c_magenta,
+        "BASE0F": c_brown
+    }
+
+def convert_catalog_entry(entry):
+    slug = entry.get("slug")
+    name = entry.get("name") or slug
+    mode = entry.get("mode", "dark")
+    colors = entry.get("colors", {})
+
+    accent = clean_hex(colors.get("accent") or colors.get("blue") or "#58a6ff")
+    b16 = colors_dict_to_base16(colors)
+
+    author_info = entry.get("author")
+    author_name = author_info.get("login") if isinstance(author_info, dict) else str(author_info or "Unknown")
+
+    backgrounds = entry.get("backgrounds")
+    wallpaper = None
+    if isinstance(backgrounds, list) and backgrounds:
+        wallpaper = backgrounds[0]
+    elif entry.get("installed_files") and entry.get("repo"):
+        installed = entry.get("installed_files", [])
+        bg_files = [f for f in installed if f.startswith("backgrounds/") and not f.endswith((".mp4", ".mkv", ".webm"))]
+        if bg_files:
+            repo = entry.get("repo", "").rstrip("/")
+            commit = entry.get("commit") or "master"
+            if "github.com" in repo:
+                raw_base = repo.replace("github.com", "raw.githubusercontent.com")
+                wallpaper = f"{raw_base}/{commit}/{bg_files[0]}"
+
+    preview_val = entry.get("preview")
+    preview_url = preview_val.get("src") if isinstance(preview_val, dict) else preview_val
+
+    raw_theme = {
+        "schema": 1,
+        "name": f"omarchy-{slug}",
+        "display_name": f"{name}",
+        "type": mode,
+        "source": {
+            "provider": "omarchy",
+            "registry": "https://github.com/omacom/omarchy-theme-registry",
+            "repository": entry.get("repo"),
+            "commit": entry.get("commit"),
+            "author": author_name,
+            "license": entry.get("license"),
+            "added_at": entry.get("added_at"),
+            "tags": entry.get("tags", []),
+        },
+        "capabilities": {
+            "palette": True,
+            "wallpaper": bool(wallpaper),
+            "icons": False,
+            "terminal": True,
+            "browser": False,
+        },
+        "palette": {
+            "accent": accent,
+            "base_16": b16,
+        },
+        "assets": {
+            "wallpaper": wallpaper,
+            "preview": preview_url,
+        }
+    }
+
+    return normalize_theme(raw_theme, default_name=f"omarchy-{slug}", default_provider="omarchy")
+
+def import_catalog(limit=None):
+    print(f"Fetching Omarchy catalog from {CATALOG_URL}...")
+    req = urllib.request.Request(CATALOG_URL, headers={"User-Agent": "Antigravity-OmarchyImporter/1.0"})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+
+    themes = data.get("themes", [])
+    print(f"Discovered {len(themes)} themes in official catalog.")
+
+    if limit:
+        themes = themes[:limit]
+
+    count = 0
+    for entry in themes:
+        slug = entry.get("slug")
+        if not slug:
+            continue
+        try:
+            canonical = convert_catalog_entry(entry)
+            dest_file = os.path.join(IMPORTED_OMARCHY_DIR, f"omarchy-{slug}.json")
+            with open(dest_file, "w", encoding="utf-8") as f:
+                json.dump(canonical, f, indent=2)
+            count += 1
+        except Exception as e:
+            print(f"Error importing {slug}: {e}", file=sys.stderr)
+
+    print(f"Successfully imported {count} Omarchy themes into {IMPORTED_OMARCHY_DIR}")
+    return count
+
+def import_local_dir(source_dir):
+    colors_file = os.path.join(source_dir, "colors.toml")
+    if not os.path.exists(colors_file):
+        raise FileNotFoundError(f"Missing colors.toml in {source_dir}")
+
+    with open(colors_file, "rb") as f:
+        toml = tomllib.load(f)
+
+    slug = os.path.basename(os.path.abspath(source_dir)).lower().replace("_", "-")
+    if slug.startswith("omarchy-"):
+        slug = slug[8:]
+    if slug.endswith("-theme"):
+        slug = slug[:-6]
+
+    canonical_id = f"omarchy-{slug}"
+    mode = toml.get("mode", "dark")
+    accent = toml.get("accent") or toml.get("color4") or "#58a6ff"
+    b16 = colors_dict_to_base16(toml)
+
+    preview_src = os.path.join(source_dir, "preview.png")
+    preview_dest = os.path.join(PREVIEWS_DIR, f"{canonical_id}.png")
+    if os.path.exists(preview_src):
+        shutil.copy2(preview_src, preview_dest)
+
+    raw_theme = {
+        "schema": 1,
+        "name": canonical_id,
+        "display_name": slug.capitalize(),
+        "type": mode,
+        "source": {
+            "provider": "omarchy",
+            "repository": None,
+            "author": "Local",
+        },
+        "capabilities": {
+            "palette": True,
+            "wallpaper": False,
+            "icons": False,
+            "terminal": True,
+            "browser": False,
+        },
+        "palette": {
+            "accent": accent,
+            "base_16": b16,
+        },
+        "assets": {
+            "preview": preview_dest if os.path.exists(preview_src) else None
+        }
+    }
+
+    norm = normalize_theme(raw_theme, default_name=canonical_id, default_provider="omarchy")
+    dest_path = os.path.join(IMPORTED_OMARCHY_DIR, f"{canonical_id}.json")
+    with open(dest_path, "w", encoding="utf-8") as f:
+        json.dump(norm, f, indent=2)
+
+    print(f"Imported local Omarchy theme: {canonical_id} -> {dest_path}")
+    return norm
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage:")
+        print("  omarchy-import --catalog [--limit N]")
+        print("  omarchy-import <directory_path>")
+        print("  omarchy-import <git_url>")
+        sys.exit(1)
+
+    arg = sys.argv[1]
+
+    if arg in ("--catalog", "--all", "--registry"):
+        limit = None
+        if "--limit" in sys.argv:
+            idx = sys.argv.index("--limit")
+            if idx + 1 < len(sys.argv):
+                limit = int(sys.argv[idx + 1])
+        imported = import_catalog(limit=limit)
+        print("Triggering theme-sync to build cache...")
+        subprocess.run([os.path.expanduser("~/.local/bin/theme-sync")], check=True)
+    elif arg.startswith("http://") or arg.startswith("https://") or arg.startswith("git@"):
+        with tempfile.TemporaryDirectory() as td:
+            print(f"Cloning {arg}...")
+            subprocess.run(["git", "clone", "--depth", "1", arg, td], check=True)
+            import_local_dir(td)
+            subprocess.run([os.path.expanduser("~/.local/bin/theme-sync")], check=True)
+    elif os.path.isdir(arg):
+        import_local_dir(arg)
+        subprocess.run([os.path.expanduser("~/.local/bin/theme-sync")], check=True)
+    else:
+        print(f"Error: Unknown argument or directory not found: {arg}", file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

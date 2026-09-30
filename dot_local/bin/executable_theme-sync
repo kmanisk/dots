@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 theme-sync: Parses NvChad base46 lua themes and custom json themes into ~/.cache/theme/themes/<name>.json.
-No daemons. Fast, precomputed JSON cache.
+Also pre-generates mock whole-desktop preview PNGs into ~/.cache/theme/previews/<name>.png.
+Stdlib only, fast, idempotent.
 """
 import os
 import sys
@@ -10,14 +11,25 @@ import json
 import re
 import subprocess
 import tempfile
+import zlib
+import struct
+import time
+
+sys.path.insert(0, os.path.expanduser("~/.local/lib"))
+from theme_engine import normalize_theme, is_cache_stale, update_manifest_for_files
 
 CACHE_DIR = os.path.expanduser("~/.cache/theme/themes")
+PREVIEWS_DIR = os.path.expanduser("~/.cache/theme/previews")
 BASE46_DIR = os.path.expanduser("~/.config/theme/base46/lua/base46/themes")
 CUSTOM_DIR = os.path.expanduser("~/.config/theme/custom")
+IMPORTED_DIR = os.path.expanduser("~/.config/theme/imported")
+MANIFEST_PATH = os.path.expanduser("~/.cache/theme/manifest.json")
 
 os.makedirs(CACHE_DIR, exist_ok=True)
+os.makedirs(PREVIEWS_DIR, exist_ok=True)
+os.makedirs(CUSTOM_DIR, exist_ok=True)
+os.makedirs(IMPORTED_DIR, exist_ok=True)
 
-B16_KEYS = [f"base0{i:X}" for i in range(16)]
 HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 def parse_with_regex(filepath):
@@ -27,20 +39,17 @@ def parse_with_regex(filepath):
     except Exception:
         return None
 
-    # Find M.type
     theme_type = "dark"
     m_type = re.search(r'M\.type\s*=\s*["\'](dark|light)["\']', content)
     if m_type:
         theme_type = m_type.group(1)
 
-    # Find base_16
     base_16 = {}
     m16 = re.search(r'M\.base_16\s*=\s*\{([^}]+)\}', content, re.DOTALL)
     if m16:
         for k, v in re.findall(r'(base0[0-9A-Fa-f])\s*=\s*["\'](#[0-9a-fA-F]{6})["\']', m16.group(1)):
             base_16[k.upper()] = v.lower()
 
-    # Find base_30
     base_30 = {}
     m30 = re.search(r'M\.base_30\s*=\s*\{([^}]+)\}', content, re.DOTALL)
     if m30:
@@ -90,7 +99,6 @@ io.stdout:write(vim.fn.json_encode(res))
         )
         if proc.returncode == 0 and proc.stdout.strip():
             data = json.loads(proc.stdout)
-            # normalize keys
             b16 = {k.upper(): v.lower() for k, v in data.get("base_16", {}).items() if HEX_RE.match(str(v))}
             b30 = {k: v.lower() for k, v in data.get("base_30", {}).items() if HEX_RE.match(str(v))}
             return {
@@ -106,7 +114,6 @@ def ensure_fallbacks(data):
     b16 = data.get("base_16", {})
     b30 = data.get("base_30", {})
 
-    # Derive missing base_30 from base_16 if needed
     derivation = {
         "black": b16.get("BASE00", "#1e2122"),
         "darker_black": b16.get("BASE00", "#1e2122"),
@@ -138,53 +145,369 @@ def ensure_fallbacks(data):
     data["base_30"] = b30
     return data
 
-def write_atomic(filepath, content):
+def write_atomic(filepath, content, binary=False):
     dirname = os.path.dirname(filepath)
-    with tempfile.NamedTemporaryFile("w", dir=dirname, delete=False) as tf:
+    mode = "wb" if binary else "w"
+    encoding = None if binary else "utf-8"
+    with tempfile.NamedTemporaryFile(mode, dir=dirname, delete=False, encoding=encoding) as tf:
         tf.write(content)
+        tf.flush()
+        os.fsync(tf.fileno())
         temp_name = tf.name
     os.replace(temp_name, filepath)
 
+# ------------------------------------------------------------------------------
+# PNG Mock Desktop Preview Generator (Pure Python Stdlib)
+# ------------------------------------------------------------------------------
+def hex_to_rgb(h):
+    if not h or not isinstance(h, str):
+        return (30, 33, 34)
+    h = h.lstrip("#")
+    if len(h) >= 6:
+        try:
+            return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        except ValueError:
+            pass
+    return (30, 33, 34)
+
+def render_preview_png(data, width=960, height=540):
+    b16 = data.get("base_16", {})
+    b30 = data.get("base_30", {})
+    accent_hex = data.get("accent", b30.get("yellow", b16.get("BASE0A", "#d6b676")))
+
+    # Palette roles matching theme-set
+    bg_wallpaper = hex_to_rgb(b16.get("BASE00", "#1e2122"))
+    win_bg       = hex_to_rgb(b30.get("black", b16.get("BASE00", "#1e2122")))
+    win_bg_dim   = hex_to_rgb(b30.get("darker_black", b16.get("BASE00", "#1a1d1e")))
+    bar_bg       = hex_to_rgb(b30.get("darker_black", b16.get("BASE00", "#1a1d1e")))
+    one_bg       = hex_to_rgb(b30.get("one_bg", b16.get("BASE01", "#282b2c")))
+    one_bg2      = hex_to_rgb(b30.get("one_bg2", b16.get("BASE02", "#393c3d")))
+    one_bg3      = hex_to_rgb(b30.get("one_bg3", b16.get("BASE03", "#404344")))
+    fg_text      = hex_to_rgb(b30.get("white", b16.get("BASE05", "#c7b89d")))
+    fg_muted     = hex_to_rgb(b30.get("grey_fg", b16.get("BASE04", "#575a5b")))
+    border_focus = hex_to_rgb(accent_hex)
+    border_unfoc = hex_to_rgb(b30.get("grey", b16.get("BASE02", "#36393a")))
+    c_red        = hex_to_rgb(b30.get("red", b16.get("BASE08", "#ec6b64")))
+    c_orange     = hex_to_rgb(b30.get("orange", b16.get("BASE09", "#e78a4e")))
+    c_yellow     = hex_to_rgb(b30.get("yellow", b16.get("BASE0A", "#d6b676")))
+    c_green      = hex_to_rgb(b30.get("green", b16.get("BASE0B", "#89b482")))
+    c_cyan       = hex_to_rgb(b30.get("cyan", b16.get("BASE0C", "#82b3a8")))
+    c_blue       = hex_to_rgb(b30.get("blue", b16.get("BASE0D", "#6d8dad")))
+    c_purple     = hex_to_rgb(b30.get("purple", b16.get("BASE0E", "#9385b4")))
+    c_accent     = hex_to_rgb(accent_hex)
+
+    buf = bytearray(width * height * 3)
+
+    # 1. Fill wallpaper background
+    r0, g0, b0 = bg_wallpaper
+    for i in range(0, len(buf), 3):
+        buf[i] = r0
+        buf[i+1] = g0
+        buf[i+2] = b0
+
+    def draw_rect(x0, y0, rw, rh, rgb):
+        r, g, b = rgb
+        x1 = min(x0 + rw, width)
+        y1 = min(y0 + rh, height)
+        if x0 >= x1 or y0 >= y1:
+            return
+        row_slice = bytes([r, g, b]) * (x1 - x0)
+        for y in range(y0, y1):
+            idx = (y * width + x0) * 3
+            buf[idx : idx + len(row_slice)] = row_slice
+
+    def draw_bordered_rect(x, y, w, h, bg_col, border_col, bw=2):
+        draw_rect(x, y, w, h, border_col)
+        draw_rect(x + bw, y + bw, w - (bw * 2), h - (bw * 2), bg_col)
+
+    # 2. Swaybar top (height: 24px)
+    draw_rect(0, 0, width, 24, bar_bg)
+    # Workspace tags (left)
+    draw_rect(8, 4, 28, 16, c_accent)       # Focused workspace (accent)
+    draw_rect(40, 4, 28, 16, one_bg2)      # Workspace 2
+    draw_rect(72, 4, 28, 16, one_bg2)      # Workspace 3
+    # Window title block in bar (center-left)
+    draw_rect(120, 7, 180, 10, fg_muted)
+    # Status blocks (right)
+    draw_rect(width - 240, 5, 45, 14, one_bg)
+    draw_rect(width - 190, 5, 55, 14, one_bg)
+    draw_rect(width - 130, 5, 45, 14, one_bg)
+    draw_rect(width - 80, 5, 70, 14, c_accent)
+
+    # 3. Two tiled windows (left terminal: focused, right editor: unfocused)
+    win_top = 34
+    win_h = 470
+    win_w = 460
+    left_x = 14
+    right_x = 486
+
+    # Left Window: Terminal (FOCUSED)
+    draw_bordered_rect(left_x, win_top, win_w, win_h, win_bg, border_focus, bw=3)
+    # Terminal header / tab
+    draw_rect(left_x + 3, win_top + 3, win_w - 6, 22, one_bg)
+    draw_rect(left_x + 12, win_top + 8, 80, 10, fg_text)
+    # Terminal prompt & lines
+    ty = win_top + 40
+    # Prompt 1
+    draw_rect(left_x + 18, ty, 35, 9, c_green)
+    draw_rect(left_x + 58, ty, 50, 9, c_blue)
+    draw_rect(left_x + 114, ty, 90, 9, fg_text)
+    ty += 24
+    # ANSI color blocks demo
+    ansi_cols = [win_bg_dim, c_red, c_green, c_yellow, c_blue, c_purple, c_cyan, fg_text]
+    for i, ac in enumerate(ansi_cols):
+        draw_rect(left_x + 18 + (i * 38), ty, 32, 14, ac)
+    ty += 20
+    for i, ac in enumerate(ansi_cols):
+        draw_rect(left_x + 18 + (i * 38), ty, 32, 14, ac)
+    ty += 34
+    # Prompt 2 with cursor
+    draw_rect(left_x + 18, ty, 35, 9, c_green)
+    draw_rect(left_x + 58, ty, 70, 9, c_cyan)
+    draw_rect(left_x + 134, ty, 110, 9, fg_text)
+    draw_rect(left_x + 248, ty - 2, 7, 13, c_accent)  # Cursor
+
+    # Right Window: Editor (UNFOCUSED)
+    draw_bordered_rect(right_x, win_top, win_w, win_h, win_bg, border_unfoc, bw=2)
+    # Editor tabline
+    draw_rect(right_x + 2, win_top + 2, win_w - 4, 24, win_bg_dim)
+    draw_rect(right_x + 6, win_top + 4, 100, 20, win_bg)
+    draw_rect(right_x + 16, win_top + 9, 65, 9, fg_text)
+    draw_rect(right_x + 110, win_top + 4, 90, 20, win_bg_dim)
+    draw_rect(right_x + 120, win_top + 9, 55, 9, fg_muted)
+    # Gutter
+    draw_rect(right_x + 2, win_top + 26, 32, win_h - 28, win_bg_dim)
+    for row in range(16):
+        gy = win_top + 36 + (row * 24)
+        draw_rect(right_x + 8, gy, 14, 8, fg_muted)
+
+    # Visual selection band on line 6 & 7
+    sel_y = win_top + 36 + (5 * 24) - 4
+    draw_rect(right_x + 36, sel_y, win_w - 42, 46, one_bg2)
+
+    # Active line highlight on line 3
+    act_y = win_top + 36 + (2 * 24) - 4
+    draw_rect(right_x + 36, act_y, win_w - 42, 22, one_bg)
+
+    # Code lines tokens
+    tokens_pattern = [
+        [(c_purple, 45), (c_blue, 70), (fg_text, 15), (c_yellow, 60)],
+        [(fg_muted, 120)],  # comment
+        [(c_purple, 35), (c_blue, 80), (c_cyan, 25), (c_green, 95)],
+        [(c_orange, 40), (c_accent, 50), (fg_text, 80)],
+        [(c_purple, 50), (c_yellow, 65), (c_green, 70)],
+        [(fg_text, 60), (c_cyan, 30), (c_orange, 45)],
+        [(c_blue, 55), (fg_text, 90), (c_red, 40)],
+        [(c_purple, 35), (fg_text, 40), (c_green, 110)],
+        [(c_accent, 75), (c_blue, 50), (fg_text, 35)],
+        [(fg_muted, 160)], # comment
+        [(c_purple, 45), (c_yellow, 55), (c_cyan, 45)],
+        [(c_green, 85), (fg_text, 45), (c_orange, 35)],
+        [(c_blue, 60), (fg_text, 70)],
+        [(c_purple, 40), (c_accent, 60), (c_green, 50)],
+        [(fg_text, 95)],
+    ]
+    for row_idx, tokens in enumerate(tokens_pattern):
+        lx = right_x + 44
+        ly = win_top + 36 + (row_idx * 24)
+        for col, t_width in tokens:
+            draw_rect(lx, ly, t_width, 8, col)
+            lx += t_width + 8
+
+    # 4. Mock Dunst Notification (Top Right overlay)
+    notif_x = width - 260
+    notif_y = 38
+    draw_bordered_rect(notif_x, notif_y, 240, 62, win_bg_dim, border_focus, bw=2)
+    draw_rect(notif_x + 12, notif_y + 12, 110, 10, c_accent)
+    draw_rect(notif_x + 12, notif_y + 30, 180, 8, fg_text)
+    draw_rect(notif_x + 12, notif_y + 44, 130, 8, fg_muted)
+
+    # 5. Mock Rofi floating launcher (Center-Bottom overlay)
+    rofi_w = 340
+    rofi_h = 170
+    rofi_x = (width - rofi_w) // 2
+    rofi_y = height - rofi_h - 22
+    draw_bordered_rect(rofi_x, rofi_y, rofi_w, rofi_h, win_bg_dim, border_focus, bw=2)
+    # Search input row
+    draw_rect(rofi_x + 10, rofi_y + 10, rofi_w - 20, 26, one_bg)
+    draw_rect(rofi_x + 20, rofi_y + 18, 50, 10, c_accent)
+    draw_rect(rofi_x + 76, rofi_y + 18, 80, 10, fg_text)
+    # List items
+    for r_i in range(4):
+        item_y = rofi_y + 44 + (r_i * 26)
+        if r_i == 1:
+            # Selected item
+            draw_rect(rofi_x + 10, item_y, rofi_w - 20, 22, c_accent)
+            draw_rect(rofi_x + 22, item_y + 6, 120, 10, win_bg_dim)
+        else:
+            draw_rect(rofi_x + 10, item_y, rofi_w - 20, 22, win_bg_dim)
+            draw_rect(rofi_x + 22, item_y + 6, 100, 10, fg_text)
+
+    # 6. Bottom Palette Strip (base00..base0F)
+    strip_h = 10
+    strip_y = height - strip_h
+    strip_w = width // 16
+    for i in range(16):
+        k = f"BASE0{i:X}"
+        col_hex = b16.get(k, "#1e2122")
+        draw_rect(i * strip_w, strip_y, strip_w + 1, strip_h, hex_to_rgb(col_hex))
+
+    # Fast PNG packaging
+    raw_scanlines = bytearray()
+    row_bytes = width * 3
+    for y in range(height):
+        raw_scanlines.append(0) # filter 0 (None)
+        raw_scanlines.extend(buf[y * row_bytes : (y + 1) * row_bytes])
+
+    compressed = zlib.compress(bytes(raw_scanlines), 1)
+
+    def png_chunk(tag, data_bytes):
+        c = tag + data_bytes
+        crc = zlib.crc32(c)
+        return struct.pack(">I", len(data_bytes)) + c + struct.pack(">I", crc)
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    png_data = b"\x89PNG\r\n\x1a\n" + png_chunk(b"IHDR", ihdr) + png_chunk(b"IDAT", compressed) + png_chunk(b"IEND", b"")
+    return png_data
+
+def sync_previews():
+    t0 = time.perf_counter()
+    json_files = glob.glob(os.path.join(CACHE_DIR, "*.json"))
+    generated = 0
+    skipped = 0
+
+    for jf in json_files:
+        name = os.path.splitext(os.path.basename(jf))[0]
+        png_path = os.path.join(PREVIEWS_DIR, f"{name}.png")
+
+        # Regenerate only if JSON is newer than PNG
+        if os.path.exists(png_path):
+            if name.startswith("omarchy-"):
+                skipped += 1
+                continue
+            if os.path.getmtime(png_path) >= os.path.getmtime(jf):
+                skipped += 1
+                continue
+
+        try:
+            with open(jf, "r", encoding="utf-8") as f:
+                theme_data = json.load(f)
+            png_bytes = render_preview_png(theme_data, 960, 540)
+            write_atomic(png_path, png_bytes, binary=True)
+            generated += 1
+        except Exception as e:
+            print(f"Error generating preview for {name}: {e}", file=sys.stderr)
+
+    t1 = time.perf_counter()
+    return generated, skipped, len(json_files), (t1 - t0)
+
 def main():
+    force = "--force" in sys.argv or "-f" in sys.argv
+    source_dirs = [BASE46_DIR, IMPORTED_DIR, CUSTOM_DIR]
+
+    stale, changed = is_cache_stale(source_dirs, MANIFEST_PATH)
+    if not stale and not force and os.path.exists(CACHE_DIR) and len(os.listdir(CACHE_DIR)) > 0:
+        print("Theme cache is up to date (0 changes detected via manifest).")
+        return 0
+
+    if stale and not force:
+        print(f"Manifest detected {len(changed)} changed/new files. Compiling themes...")
+
     cached_count = 0
     skipped = []
+    nvim_themes_dir = os.path.expanduser("~/.config/nvim/lua/themes")
+    os.makedirs(nvim_themes_dir, exist_ok=True)
 
-    # 1. Process base46 themes
+    def process_and_save(raw_data, fallback_name, provider):
+        nonlocal cached_count
+        norm = normalize_theme(raw_data, default_name=fallback_name, default_provider=provider)
+        cname = norm["name"]
+
+        # Check contrast and warn if low (Non-destructive)
+        cr_info = norm.get("derived", {}).get("contrast", {})
+        if cr_info.get("warning"):
+            print(f"[WARN] {cname}: {cr_info['warning']}", file=sys.stderr)
+
+        cache_path = os.path.join(CACHE_DIR, f"{cname}.json")
+        write_atomic(cache_path, json.dumps(norm, indent=2))
+        cached_count += 1
+
+        # Generate NvChad Lua theme for Neovim parity
+        b16 = norm["base_16"]
+        b30 = norm["base_30"]
+        ttype = norm["type"]
+        lua_lines = [
+            f"-- Auto-generated by theme-sync for {cname} (Schema 1)",
+            "local M = {}",
+            f'M.type = "{ttype}"',
+            "M.base_30 = {"
+        ]
+        for k, v in sorted(b30.items()):
+            lua_lines.append(f'  {k} = "{v}",')
+        lua_lines.append("}")
+        lua_lines.append("M.base_16 = {")
+        for k, v in sorted(b16.items()):
+            k_lower = k.lower()
+            lua_lines.append(f'  {k_lower} = "{v}",')
+            if len(k_lower) == 6 and k_lower.startswith("base0") and k_lower[5] in "abcdef":
+                k_upper = "base0" + k_lower[5].upper()
+                lua_lines.append(f'  {k_upper} = "{v}",')
+        lua_lines.append("}")
+        lua_lines.append(f'M = require("base46").override_theme(M, "{cname}")')
+        lua_lines.append("return M\n")
+        nvim_lua_dest = os.path.join(nvim_themes_dir, f"{cname}.lua")
+        write_atomic(nvim_lua_dest, "\n".join(lua_lines))
+
+    # 1. Process base46 themes (upstream)
     lua_files = sorted(glob.glob(os.path.join(BASE46_DIR, "*.lua")))
     for lf in lua_files:
         theme_name = os.path.splitext(os.path.basename(lf))[0]
         data = parse_with_regex(lf)
         if not data:
             data = parse_with_nvim(lf)
-        
+
         if not data or len(data.get("base_16", {})) != 16:
             skipped.append(theme_name)
             continue
 
-        data = ensure_fallbacks(data)
-        data["name"] = theme_name
-        cache_path = os.path.join(CACHE_DIR, f"{theme_name}.json")
-        write_atomic(cache_path, json.dumps(data, indent=2))
-        cached_count += 1
+        process_and_save(data, fallback_name=theme_name, provider="base46")
 
-    # 2. Process custom themes (overrides base46)
+    # 2. Process imported themes (e.g. Omarchy)
+    imported_files = []
+    for root, _, files in os.walk(IMPORTED_DIR):
+        for f in files:
+            if f.endswith(".json"):
+                imported_files.append(os.path.join(root, f))
+    for imp in sorted(imported_files):
+        try:
+            with open(imp, "r", encoding="utf-8") as f:
+                cdata = json.load(f)
+            cname = cdata.get("name") or os.path.splitext(os.path.basename(imp))[0]
+            process_and_save(cdata, fallback_name=cname, provider="omarchy")
+        except Exception as e:
+            print(f"Error loading imported theme {imp}: {e}", file=sys.stderr)
+
+    # 3. Process custom themes (user-created, top priority)
     custom_files = sorted(glob.glob(os.path.join(CUSTOM_DIR, "*.json")))
     for cf in custom_files:
         try:
             with open(cf, "r", encoding="utf-8") as f:
                 cdata = json.load(f)
             cname = cdata.get("name") or os.path.splitext(os.path.basename(cf))[0]
-            cdata["name"] = cname
-            cdata = ensure_fallbacks(cdata)
-            cache_path = os.path.join(CACHE_DIR, f"{cname}.json")
-            write_atomic(cache_path, json.dumps(cdata, indent=2))
-            cached_count += 1
+            process_and_save(cdata, fallback_name=cname, provider="custom")
         except Exception as e:
             print(f"Error loading custom theme {cf}: {e}", file=sys.stderr)
 
-    print(f"Successfully cached {cached_count} themes.")
+    print(f"Successfully compiled {cached_count} canonical themes into Schema 1.")
     if skipped:
-        print(f"Skipped {len(skipped)} themes: {', '.join(skipped)}")
+        print(f"Skipped {len(skipped)} invalid themes: {', '.join(skipped)}")
+
+    # 4. Update manifest
+    update_manifest_for_files(source_dirs, MANIFEST_PATH)
+
+    # 5. Pre-generate mock desktop previews
+    gen, skp, total, dt = sync_previews()
+    print(f"Preview PNGs: {gen} generated, {skp} up-to-date (total {total}) in {dt:.2f}s")
     return 0
 
 if __name__ == "__main__":

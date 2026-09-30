@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-theme-set: Applies a system-wide theme instantly.
-Minimal, fast, atomic file writes. Zero daemons.
+theme-set: Minimal, robust Base46 system theme compiler.
+Staged atomic file replacement, live IPC/RPC/signals where supported,
+zero resident processes / daemons / watchers.
+Optimized for <150ms execution.
 """
 import os
 import sys
@@ -10,7 +12,7 @@ import json
 import re
 import subprocess
 import tempfile
-import time
+import signal
 
 STATE_DIR = os.path.expanduser("~/.local/state/theme")
 CACHE_DIR = os.path.expanduser("~/.cache/theme/themes")
@@ -18,11 +20,11 @@ TEMPLATES_DIR = os.path.expanduser("~/.config/theme/templates")
 HOOKS_DIR = os.path.expanduser("~/.config/theme/hooks.d")
 QT5_COLOR_FILE = os.path.expanduser("~/.config/qt5ct/colors/nvchad.conf")
 QT6_COLOR_FILE = os.path.expanduser("~/.config/qt6ct/colors/nvchad.conf")
-CHADRC_FILE = os.path.expanduser("~/.config/nvim/lua/chadrc.lua")
 
 os.makedirs(STATE_DIR, exist_ok=True)
 
 def write_atomic(filepath, content):
+    """Safely write content to filepath atomically via os.replace."""
     dirname = os.path.dirname(filepath)
     os.makedirs(dirname, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", dir=dirname, delete=False) as tf:
@@ -35,12 +37,22 @@ def get_available_themes():
     names = [os.path.splitext(os.path.basename(f))[0] for f in files]
     return sorted(names)
 
-def is_running(proc_name):
+def scan_running_processes(names):
+    """Perform a single fast /proc scan for all target process names."""
+    found = {name: [] for name in names}
     try:
-        res = subprocess.run(["pgrep", "-x", proc_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return res.returncode == 0
+        for pid_dir in os.listdir("/proc"):
+            if pid_dir.isdigit():
+                try:
+                    with open(f"/proc/{pid_dir}/comm", "r") as f:
+                        comm = f.read().strip()
+                        if comm in found:
+                            found[comm].append(int(pid_dir))
+                except Exception:
+                    pass
     except Exception:
-        return False
+        pass
+    return found
 
 def get_current_theme():
     name_file = os.path.join(STATE_DIR, "name")
@@ -51,6 +63,16 @@ def get_current_theme():
         except Exception:
             pass
     return "gruvchad"
+
+def get_current_theme_type():
+    type_file = os.path.join(STATE_DIR, "type")
+    if os.path.exists(type_file):
+        try:
+            with open(type_file, "r") as f:
+                return f.read().strip()
+        except Exception:
+            pass
+    return "dark"
 
 def generate_qt_palette(r):
     QT = [
@@ -70,23 +92,14 @@ def generate_qt_palette(r):
 
     active = qt_colors(False)
     disabled = qt_colors(True)
-    content = f"[ColorScheme]\nactive_colors={active}\ndisabled_colors={disabled}\ninactive_colors={active}\n"
-    return content
+    return f"[ColorScheme]\nactive_colors={active}\ndisabled_colors={disabled}\ninactive_colors={active}\n"
 
-def apply_theme(name):
-    theme_json_path = os.path.join(CACHE_DIR, f"{name}.json")
-    if not os.path.exists(theme_json_path):
-        print(f"Error: Theme '{name}' not found in cache. Run 'theme-sync' first.", file=sys.stderr)
-        sys.exit(1)
-
-    with open(theme_json_path, "r", encoding="utf-8") as f:
-        theme_data = json.load(f)
-
+def normalize_palette(theme_data, name):
     b16 = theme_data.get("base_16", {})
     b30 = theme_data.get("base_30", {})
     theme_type = theme_data.get("type", "dark")
 
-    # Build role dict r
+    # Semantic roles
     base00 = b16.get("BASE00", "#1e2122")
     base01 = b16.get("BASE01", "#282b2c")
     base02 = b16.get("BASE02", "#393c3d")
@@ -103,10 +116,19 @@ def apply_theme(name):
     base0D = b16.get("BASE0D", "#6d8dad")
     base0E = b16.get("BASE0E", "#9385b4")
     base0F = b16.get("BASE0F", "#d65d0e")
-
-    accent = theme_data.get("accent", b30.get("yellow", base0A))
+    # Signature accent selection: explicit accent -> folder_bg (brand UI color) -> BASE0D -> blue
+    accent = (
+        theme_data.get("accent")
+        or b30.get("folder_bg")
+        or b16.get("BASE0D")
+        or b30.get("nord_blue")
+        or b30.get("blue")
+        or base0A
+    )
 
     r = {
+        "name": name,
+        "type": theme_type,
         "bg": base00,
         "bg2": base01,
         "sel": base02,
@@ -120,7 +142,6 @@ def apply_theme(name):
         "blue": base0D,
         "purple": base0E,
         "accent": accent,
-        "type": theme_type,
     }
 
     # Add base_16 keys in lower and upper
@@ -132,6 +153,11 @@ def apply_theme(name):
     for k, v in b30.items():
         r[k] = v
 
+    # Add semantic tokens (e.g. semantic_background, semantic_border)
+    semantic = theme_data.get("derived", {}).get("semantic", {}) or theme_data.get("semantic", {})
+    for k, v in semantic.items():
+        r[f"semantic_{k}"] = v
+
     # Add _x no-hash variants
     keys_snapshot = list(r.keys())
     for k in keys_snapshot:
@@ -139,116 +165,306 @@ def apply_theme(name):
         if v.startswith("#") and len(v) == 7:
             r[f"{k}_x"] = v[1:]
 
-    # 1. Render templates in ~/.config/theme/templates/
+    return r, theme_type
+
+def apply_theme(name, no_nvim=False):
+    theme_json_path = os.path.join(CACHE_DIR, f"{name}.json")
+    if not os.path.exists(theme_json_path):
+        print(f"Error: Theme '{name}' not found in cache. Run 'theme-sync' first.", file=sys.stderr)
+        return 1
+
+    try:
+        with open(theme_json_path, "r", encoding="utf-8") as f:
+            theme_data = json.load(f)
+    except Exception as e:
+        print(f"Error reading theme JSON: {e}", file=sys.stderr)
+        return 1
+
+    r, theme_type = normalize_palette(theme_data, name)
+    current_type = get_current_theme_type()
+
+    # -------------------------------------------------------------
+    # PHASE 2: STAGED COMPILATION IN .next/
+    # -------------------------------------------------------------
+    next_dir = os.path.join(STATE_DIR, ".next")
+    os.makedirs(next_dir, exist_ok=True)
+
+    staged_files = {}
+
+    # 1. Render all templates
     tmpl_files = glob.glob(os.path.join(TEMPLATES_DIR, "*"))
     pattern = re.compile(r"\{\{([a-zA-Z0-9_]+)\}\}")
     for tf in tmpl_files:
         if os.path.isdir(tf):
             continue
         fname = os.path.basename(tf)
-        with open(tf, "r", encoding="utf-8") as f:
-            template_text = f.read()
-
-        rendered = pattern.sub(lambda m: r.get(m.group(1), m.group(0)), template_text)
-        dest_path = os.path.join(STATE_DIR, fname)
-        write_atomic(dest_path, rendered)
-
-    # 2. Write state files
-    write_atomic(os.path.join(STATE_DIR, "name"), name + "\n")
-    write_atomic(os.path.join(STATE_DIR, "type"), theme_type + "\n")
-
-    # 3. Generate Qt palettes
-    qt_content = generate_qt_palette(r)
-    write_atomic(QT5_COLOR_FILE, qt_content)
-    write_atomic(QT6_COLOR_FILE, qt_content)
-
-    # 4. Neovim RPC sync (system -> running Neovim instances)
-    runtime_dir = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
-    nvim_sockets = glob.glob(os.path.join(runtime_dir, "nvim.*"))
-    lua_code = (
-        f"luaeval(\"(_G.theme_sync or function() "
-        f"vim.g.system_theme_sync = true; "
-        f"pcall(function() require('nvconfig').base46.theme = '{name}' end); "
-        f"pcall(function() require('base46').load_all_highlights() end); "
-        f"vim.g.system_theme_sync = false; "
-        f"return 1 end)()\")"
-    )
-    for sock in nvim_sockets:
         try:
-            subprocess.run(
-                ["nvim", "--server", sock, "--remote-expr", lua_code],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=0.5
-            )
-        except Exception:
-            pass
+            with open(tf, "r", encoding="utf-8") as f:
+                template_text = f.read()
+            rendered = pattern.sub(lambda m: str(r.get(m.group(1), m.group(0))), template_text)
+            staged_path = os.path.join(next_dir, fname)
+            write_atomic(staged_path, rendered)
+            staged_files[staged_path] = os.path.join(STATE_DIR, fname)
 
-    # 5. Live reload running components
-    # Sway: live client and bar colors (safest, no exec_always re-trigger)
-    if is_running("sway"):
+            if fname == "zed-theme.json":
+                zed_dest = os.path.expanduser("~/.config/zed/themes/nvchad-system.json")
+                os.makedirs(os.path.dirname(zed_dest), exist_ok=True)
+                staged_zed = os.path.join(next_dir, "nvchad-system.json")
+                write_atomic(staged_zed, rendered)
+                staged_files[staged_zed] = zed_dest
+        except Exception as e:
+            print(f"Error compiling template {fname}: {e}", file=sys.stderr)
+            return 1
+
+    # 2. Stage Qt palettes
+    qt_content = generate_qt_palette(r)
+    staged_qt5 = os.path.join(next_dir, "qt5ct.conf")
+    staged_qt6 = os.path.join(next_dir, "qt6ct.conf")
+    write_atomic(staged_qt5, qt_content)
+    write_atomic(staged_qt6, qt_content)
+    staged_files[staged_qt5] = QT5_COLOR_FILE
+    staged_files[staged_qt6] = QT6_COLOR_FILE
+
+    # 3. Stage state markers
+    staged_name = os.path.join(next_dir, "name")
+    staged_type = os.path.join(next_dir, "type")
+    write_atomic(staged_name, name + "\n")
+    write_atomic(staged_type, theme_type + "\n")
+
+    # -------------------------------------------------------------
+    # VALIDATION
+    # -------------------------------------------------------------
+    for staged_p in staged_files.keys():
+        if not os.path.exists(staged_p) or os.path.getsize(staged_p) == 0:
+            print(f"Validation failed: generated output {staged_p} is empty or missing", file=sys.stderr)
+            return 1
+
+    # -------------------------------------------------------------
+    # ATOMIC PROMOTION (file-by-file into destination paths)
+    # -------------------------------------------------------------
+    for staged_p, target_p in staged_files.items():
+        try:
+            os.replace(staged_p, target_p)
+        except Exception as e:
+            print(f"Error promoting {staged_p} -> {target_p}: {e}", file=sys.stderr)
+            return 1
+
+    # Promote state markers last
+    os.replace(staged_name, os.path.join(STATE_DIR, "name"))
+    os.replace(staged_type, os.path.join(STATE_DIR, "type"))
+
+    # Clean up .next directory safely
+    try:
+        for f in os.listdir(next_dir):
+            os.remove(os.path.join(next_dir, f))
+    except Exception:
+        pass
+
+    # -------------------------------------------------------------
+    # RUNTIME IPC / SIGNALS (Best-Effort, isolated)
+    # -------------------------------------------------------------
+
+    # Single-pass /proc scan to discover all relevant processes at once
+    procs = scan_running_processes({"sway", "btop", "dunst", "mako", "waybar", "yazi"})
+
+    # Neovim RPC (system -> all live NvChad instances via their sockets)
+    # NvChad spawns an --embed child that owns the socket; that child responds to RPC.
+    # We must NOT filter out --embed sockets — they are the correct targets.
+    # Only skip sockets whose PID is gone from /proc (stale/dead socket files).
+    if not no_nvim:
+        import threading
+        runtime_dir = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+        nvim_sockets = glob.glob(os.path.join(runtime_dir, "nvim.*"))
+        lua_code = (
+            f"luaeval(\"(_G.theme_sync or function() "
+            f"vim.g.system_theme_sync = true; "
+            f"pcall(function() require('nvconfig').base46.theme = '{name}' end); "
+            f"pcall(function() require('base46').load_all_highlights() end); "
+            f"vim.g.system_theme_sync = false; "
+            f"return 1 end)()\")"
+        )
+
+        def _rpc_one(sock):
+            try:
+                subprocess.run(
+                    ["nvim", "--server", sock, "--remote-expr", lua_code],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=2.0
+                )
+            except Exception:
+                pass
+
+        for sock in nvim_sockets:
+            # Skip sockets whose PID no longer exists (stale socket file)
+            base = os.path.basename(sock)
+            parts = base.split(".")
+            if len(parts) >= 2 and parts[1].isdigit():
+                pid = parts[1]
+                if not os.path.exists(f"/proc/{pid}"):
+                    continue  # dead socket, skip
+            # Fire RPC in background thread — don't block theme-set execution
+            t = threading.Thread(target=_rpc_one, args=(sock,), daemon=True)
+            t.start()
+
+    # Sway IPC: live client borders and swaybar colors (single batched command)
+    if procs["sway"]:
         sway_cmd = (
             f"client.focused {r['accent']} {r['bg2']} {r['fg']} {r['accent']} {r['accent']}; "
-            f"client.focused_inactive {r['sel']} {r['bg']} {r['muted']} {r['sel']} {r['sel']}; "
-            f"client.unfocused {r['sel']} {r['bg']} {r['muted']} {r['sel']} {r['sel']}; "
-            f"client.urgent {r['red']} {r['red']} {r['bg']} {r['red']} {r['red']}; "
+            f"client.focused_inactive {r['bg2']} {r['bg']} {r['muted']} {r['bg2']} {r['bg2']}; "
+            f"client.unfocused {r['bg']} {r['bg']} {r['muted']} {r['bg']} {r['bg']}; "
+            f"client.urgent {r['red']} {r['bg']} {r['red']} {r['red']} {r['red']}; "
             f"bar bar-0 colors background {r['bg']}; "
             f"bar bar-0 colors statusline {r['fg']}; "
             f"bar bar-0 colors separator {r['muted']}; "
             f"bar bar-0 colors focused_workspace {r['accent']} {r['bg2']} {r['accent']}; "
             f"bar bar-0 colors active_workspace {r['blue']} {r['bg2']} {r['fg']}; "
             f"bar bar-0 colors inactive_workspace {r['bg2']} {r['bg']} {r['muted']}; "
-            f"bar bar-0 colors urgent_workspace {r['red']} {r['red']} {r['bg']}"
+            f"bar bar-0 colors urgent_workspace {r['red']} {r['bg']} {r['red']}"
         )
         try:
-            subprocess.run(["swaymsg", sway_cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(["swaymsg", sway_cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
             pass
 
-    # Dunst
-    if is_running("dunst"):
+    # Zed editor: touch settings.json to trigger instant inotify reload of active theme
+    zed_settings = os.path.expanduser("~/.config/zed/settings.json")
+    if os.path.exists(zed_settings):
         try:
-            subprocess.run(["dunstctl", "reload"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            os.utime(zed_settings, None)
         except Exception:
             pass
 
-    # GTK dark preference
-    pref = "prefer-dark" if theme_type == "dark" else "prefer-light"
-    try:
-        subprocess.run(
-            ["gsettings", "set", "org.gnome.desktop.interface", "color-scheme", pref],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
-    except Exception:
-        pass
+    # btop: direct os.kill SIGUSR2 signal without spawning pgrep/pkill
+    for pid in procs["btop"]:
+        try:
+            os.kill(pid, signal.SIGUSR2)
+        except Exception:
+            pass
+
+    # Dunst: reload only if running
+    if procs["dunst"]:
+        try:
+            subprocess.Popen(["dunstctl", "reload"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+    # Mako: reload live notifications & OSD colors if running
+    if procs["mako"]:
+        try:
+            subprocess.Popen(["makoctl", "reload"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+    # Yazi file manager: hot reload active instances via DDS
+    if procs["yazi"]:
+        try:
+            subprocess.Popen(["ya", "emit-to", "0", "app:theme"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+
+    # GTK dark preference & theme sync for GTK3 (Thunar) and GTK4
+    if theme_type != current_type:
+        pref = "prefer-dark" if theme_type == "dark" else "prefer-light"
+        gtk_theme = "adw-gtk3-dark" if theme_type == "dark" else "adw-gtk3"
+        try:
+            subprocess.Popen(
+                ["gsettings", "set", "org.gnome.desktop.interface", "color-scheme", pref],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            subprocess.Popen(
+                ["gsettings", "set", "org.gnome.desktop.interface", "gtk-theme", gtk_theme],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+        except Exception:
+            pass
 
     # Waybar (if running)
-    if is_running("waybar"):
+    for pid in procs["waybar"]:
         try:
-            subprocess.run(["pkill", "-SIGUSR2", "waybar"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            os.kill(pid, signal.SIGUSR2)
         except Exception:
             pass
 
-    # 6. Execute hooks in ~/.config/theme/hooks.d/
+    # 8. Asynchronous non-critical wallpaper application
+    wallpaper = theme_data.get("assets", {}).get("wallpaper") or theme_data.get("wallpaper")
+    if wallpaper:
+        wp_path = os.path.expanduser(wallpaper)
+        if os.path.isfile(wp_path):
+            try:
+                subprocess.Popen(
+                    ["swaymsg", f"output * bg '{wp_path}' fill"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True
+                )
+            except Exception as e:
+                print(f"[WARN] Non-critical wallpaper error: {e}", file=sys.stderr)
+
+    # 9. Execute custom hooks in ~/.config/theme/hooks.d/ (Failure-Isolated)
     if os.path.exists(HOOKS_DIR):
         for h in sorted(os.listdir(HOOKS_DIR)):
             hp = os.path.join(HOOKS_DIR, h)
             if os.path.isfile(hp) and os.access(hp, os.X_OK):
                 try:
-                    subprocess.run([hp, name, theme_type], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                except Exception:
-                    pass
+                    p = subprocess.run([hp, name, theme_type], capture_output=True, text=True, timeout=3.0)
+                    if p.returncode != 0:
+                        err = p.stderr.strip() or f"exit code {p.returncode}"
+                        print(f"[WARN] Hook '{h}' warning: {err}", file=sys.stderr)
+                except subprocess.TimeoutExpired:
+                    print(f"[WARN] Hook '{h}' timed out after 3.0s (skipped)", file=sys.stderr)
+                except Exception as e:
+                    print(f"[WARN] Hook '{h}' execution error: {e}", file=sys.stderr)
 
     return 0
 
 def main():
     args = sys.argv[1:]
     if not args:
-        print("Usage: theme-set <name> | --list | --current | --next | --prev")
+        print("Usage: theme-set <name> [--no-nvim] | --list | --current | --info <name> | --next | --prev")
         return 1
 
-    cmd = args[0]
+    no_nvim = "--no-nvim" in args
+    filtered_args = [a for a in args if a != "--no-nvim"]
+
+    if not filtered_args:
+        print("Usage: theme-set <name> [--no-nvim] | --list | --current | --info <name> | --next | --prev")
+        return 1
+
+    cmd = filtered_args[0]
     all_themes = get_available_themes()
+
+    if cmd in ("--info", "-i") and len(filtered_args) > 1:
+        target_name = filtered_args[1]
+        tf = os.path.join(CACHE_DIR, f"{target_name}.json")
+        if not os.path.isfile(tf):
+            print(f"Error: Theme '{target_name}' not found in cache", file=sys.stderr)
+            return 1
+        with open(tf, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        src = data.get("source", {})
+        caps = data.get("capabilities", {})
+        cr = data.get("derived", {}).get("contrast", {})
+        print(f"Name:         {data.get('display_name', target_name)} ({target_name})")
+        print(f"Type:         {data.get('type', 'dark')}")
+        print(f"Accent:       {data.get('accent', 'N/A')}")
+        print(f"Provider:     {src.get('provider', 'N/A')}")
+        if src.get('repository'):
+            print(f"Repository:   {src.get('repository')}")
+        if src.get('author'):
+            print(f"Author:       {src.get('author')}")
+        if src.get('license'):
+            print(f"License:      {src.get('license')}")
+        if src.get('commit'):
+            print(f"Commit:       {src.get('commit')}")
+        cap_list = [k for k, v in caps.items() if v]
+        print(f"Capabilities: {', '.join(cap_list) if cap_list else 'palette'}")
+        if cr:
+            ratio = cr.get('ratio', 'N/A')
+            aa = "Pass" if cr.get('wcag_aa') else "Fail"
+            print(f"Contrast:     {ratio}:1 (WCAG AA: {aa})")
+        return 0
 
     if cmd == "--list":
         for t in all_themes:
@@ -266,13 +482,15 @@ def main():
         idx = all_themes.index(curr) if curr in all_themes else 0
         new_idx = (idx + 1) % len(all_themes) if cmd == "--next" else (idx - 1) % len(all_themes)
         target = all_themes[new_idx]
-        apply_theme(target)
-        print(f"Switched theme to {target}")
-        return 0
+        ret = apply_theme(target, no_nvim=no_nvim)
+        if ret == 0:
+            print(f"Switched theme to {target}")
+        return ret
 
-    apply_theme(cmd)
-    print(f"Applied theme: {cmd}")
-    return 0
+    ret = apply_theme(cmd, no_nvim=no_nvim)
+    if ret == 0:
+        print(f"Applied theme: {cmd}")
+    return ret
 
 if __name__ == "__main__":
     sys.exit(main())

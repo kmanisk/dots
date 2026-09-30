@@ -1,0 +1,128 @@
+#!/usr/bin/env python3
+"""
+theme-check: Validate theme definitions against Schema 1 and check WCAG contrast.
+Usage:
+    theme-check <file.json> [--strict]
+    theme-check --all [--strict]
+"""
+import os
+import sys
+import json
+import glob
+
+sys.path.insert(0, os.path.expanduser("~/.local/lib"))
+from theme_engine.schema import contrast_ratio, BASE16_KEYS, HEX_RE, clean_hex
+
+def check_theme_file(filepath, strict=False):
+    errors = []
+    warnings = []
+
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        return [f"Failed to parse JSON: {e}"], []
+
+    name = data.get("name") or os.path.splitext(os.path.basename(filepath))[0]
+
+    # Check schema
+    schema = data.get("schema")
+    if schema != 1:
+        warnings.append(f"Unversioned or legacy schema (got {schema}, expected 1)")
+
+    # Check palette
+    b16_raw = data.get("base_16") or data.get("palette", {}).get("base_16", {})
+    if not b16_raw:
+        errors.append("Missing 'base_16' palette dictionary")
+    else:
+        b16 = {k.upper(): v for k, v in b16_raw.items()}
+        for k in BASE16_KEYS:
+            if k not in b16:
+                errors.append(f"Missing Base16 key: {k}")
+            else:
+                val = b16.get(k)
+                if not HEX_RE.match(str(val)):
+                    errors.append(f"Invalid hex color for {k}: {val}")
+
+    # Contrast check
+    bg = b16.get("BASE00") or b16.get("base00")
+    fg = b16.get("BASE05") or b16.get("base05")
+    if bg and fg and HEX_RE.match(str(bg)) and HEX_RE.match(str(fg)):
+        cr = contrast_ratio(clean_hex(bg), clean_hex(fg))
+        if cr < 4.5:
+            warnings.append(f"Low contrast between BASE00 ({bg}) and BASE05 ({fg}): {cr:.2f}:1 (WCAG AA requires >= 4.5:1)")
+        elif cr < 7.0:
+            # WCAG AA Pass, but AAA warning
+            pass
+
+    # Accent check
+    accent = data.get("accent") or data.get("palette", {}).get("accent")
+    if accent and not HEX_RE.match(str(accent)):
+        errors.append(f"Invalid hex accent color: {accent}")
+
+    return errors, warnings
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        print("Usage: theme-check <file.json> | --all [--strict]")
+        sys.exit(1)
+
+    strict = "--strict" in args
+    files_to_check = []
+
+    if "--all" in args:
+        for d in ("~/.config/theme/custom", "~/.config/theme/imported"):
+            files_to_check.extend(glob.glob(os.path.expanduser(f"{d}/**/*.json"), recursive=True))
+    else:
+        target = [a for a in args if a != "--strict"][0]
+        expanded = os.path.expanduser(target)
+        if os.path.exists(expanded):
+            files_to_check.append(expanded)
+        else:
+            # Check by theme name in config dirs or cache
+            candidates = [
+                os.path.expanduser(f"~/.config/theme/custom/{target}.json"),
+                os.path.expanduser(f"~/.config/theme/imported/omarchy/{target}.json"),
+                os.path.expanduser(f"~/.cache/theme/themes/{target}.json"),
+            ]
+            found = False
+            for cand in candidates:
+                if os.path.exists(cand):
+                    files_to_check.append(cand)
+                    found = True
+                    break
+            if not found:
+                files_to_check.append(expanded)
+
+    total = len(files_to_check)
+    passed = 0
+    warned = 0
+    failed = 0
+
+    print(f"Validating {total} theme(s) (strict={strict})...\n")
+
+    for f in sorted(files_to_check):
+        rel = os.path.relpath(f, os.path.expanduser("~/.config/theme"))
+        errors, warnings = check_theme_file(f, strict=strict)
+
+        if errors or (strict and warnings):
+            failed += 1
+            print(f"FAIL: {rel}")
+            for e in errors:
+                print(f"  [ERROR] {e}")
+            for w in warnings:
+                print(f"  [WARN]  {w}")
+        elif warnings:
+            warned += 1
+            print(f"WARN: {rel}")
+            for w in warnings:
+                print(f"  [WARN]  {w}")
+        else:
+            passed += 1
+
+    print(f"\nResults: {passed} passed, {warned} warnings, {failed} failed (total {total})")
+    sys.exit(1 if failed > 0 else 0)
+
+if __name__ == "__main__":
+    main()
