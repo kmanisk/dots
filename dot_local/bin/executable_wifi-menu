@@ -1,0 +1,263 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# wifi-menu: High-performance Wi-Fi picker & manager for Rofi (Sway / Wayland)
+# Win+Alt+1. Inspired by Dusky & unified system floating theme.
+# Features:
+#   - Full Wi-Fi entries: SSID, Signal bars + %, Band (2.4/5/6GHz), Channel, Security, BSSID
+#   - Prominent bold emerald badge for currently connected AP at top of list
+#   - Instant cached paint (<0.02s) via --rescan no; on-demand background sweep
+#   - Native Rofi masked password prompt for secured unsaved networks
+#   - Actions: Connect, Disconnect, Rescan, Toggle Wi-Fi, Detailed IP info
+# ==============================================================================
+export PATH="$HOME/.local/bin:/usr/bin:/bin:$PATH"
+THEME="$HOME/.config/rofi/system-floating.rasi"
+
+notify() {
+    command -v notify-send >/dev/null 2>&1 && notify-send -a "Wi-Fi" -u low -i network-wireless "$1" "$2"
+}
+
+IFACE="$(nmcli -t -f DEVICE,TYPE device status 2>/dev/null | awk -F: '$2=="wifi" {print $1; exit}')"
+if [ -z "$IFACE" ]; then
+    notify "No Wi-Fi Adapter" "No wireless device detected"
+    exit 1
+fi
+
+if ! nmcli -t -f STATE general status 2>/dev/null | grep -q .; then
+    notify "NetworkManager Inactive" "NetworkManager service is not running"
+    exit 1
+fi
+
+band_of() { # $1 = freq MHz -> 2.4/5/6 GHz
+    local f="${1% *}"
+    if [ "$f" -ge 5925 ] 2>/dev/null; then printf '6 GHz';
+    elif [ "$f" -ge 4900 ] 2>/dev/null; then printf '5 GHz';
+    elif [ "$f" -ge 2400 ] 2>/dev/null; then printf '2.4 GHz';
+    else printf -- '—'; fi
+}
+
+signal_icon() { # $1 = sig %
+    local s="${1:-0}"
+    if [ "$s" -ge 75 ] 2>/dev/null; then printf '󰤨';
+    elif [ "$s" -ge 50 ] 2>/dev/null; then printf '󰤥';
+    elif [ "$s" -ge 25 ] 2>/dev/null; then printf '󰤢';
+    else printf '󰤟'; fi
+}
+
+show_info() {
+    local ip gw dns bitrate
+    ip=$(nmcli -t -f IP4.ADDRESS device show "$IFACE" 2>/dev/null | head -n1 | cut -d: -f2-)
+    [ -z "$ip" ] && ip="Not assigned"
+    gw=$(nmcli -t -f IP4.GATEWAY device show "$IFACE" 2>/dev/null | head -n1 | cut -d: -f2-)
+    [ -z "$gw" ] && gw="None"
+    dns=$(nmcli -t -f IP4.DNS device show "$IFACE" 2>/dev/null | tr '\n' ' ' | sed 's/IP4.DNS\[[0-9]*\]://g' | xargs)
+    [ -z "$dns" ] && dns="None"
+    bitrate=$(nmcli -t -f WIFI-PROPERTIES.BITRATE device show "$IFACE" 2>/dev/null | cut -d: -f2- | xargs)
+    [ -z "$bitrate" ] && bitrate="Unknown"
+
+    local active_ssid
+    active_ssid=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | awk -F: '$1=="yes" {print $2; exit}')
+    [ -z "$active_ssid" ] && active_ssid="Disconnected"
+
+    local details="SSID: ${active_ssid}\nInterface: ${IFACE}\nIP Address: ${ip}\nGateway: ${gw}\nDNS: ${dns}\nBitrate: ${bitrate}"
+    echo -e "$details" | rofi -dmenu -p "Network Status" -theme "$THEME"
+}
+
+connect_network() { # $1 = ssid, $2 = bssid, $3 = sec
+    local ssid="$1" bssid="$2" sec="$3"
+    
+    # Check if a connection profile already exists
+    if nmcli -t -f NAME,TYPE connection show 2>/dev/null | grep -qxF "${ssid}:802-11-wireless"; then
+        notify "Connecting…" "$ssid"
+        if nmcli connection up id "$ssid" >/dev/null 2>&1; then
+            notify "Connected" "$ssid"
+            return 0
+        fi
+    fi
+
+    # Handle hidden networks
+    local target="$ssid"
+    if [[ "$ssid" == "<hidden"* ]]; then
+        target="$bssid"
+    fi
+
+    # Open network (no security)
+    if [ -z "$sec" ] || [ "$sec" = "--" ] || [ "$sec" = "OPEN" ]; then
+        notify "Connecting…" "$ssid"
+        if nmcli device wifi connect "$target" >/dev/null 2>&1; then
+            notify "Connected" "$ssid"
+        else
+            notify "Connection Failed" "$ssid"
+        fi
+        return 0
+    fi
+
+    # Secured network requiring password
+    local psk
+    psk=$(rofi -dmenu -password -p "Password for $ssid" -theme "$THEME")
+    [ -z "$psk" ] && return 0
+
+    notify "Authenticating…" "$ssid"
+    if nmcli device wifi connect "$target" password "$psk" >/dev/null 2>&1; then
+        notify "Connected" "$ssid"
+    else
+        notify "Authentication Failed" "Incorrect password or timeout for $ssid"
+    fi
+}
+
+main() {
+    # Check Wi-Fi radio power state
+    local wifi_powered
+    wifi_powered=$(nmcli radio wifi 2>/dev/null)
+
+    if [ "$wifi_powered" != "enabled" ]; then
+        local p_choice
+        p_choice=$(printf "⏻  Turn Wi-Fi on\n" | rofi -dmenu -p "Wi-Fi is Off" -theme "$THEME")
+        if [[ "$p_choice" == *"Turn Wi-Fi on"* ]]; then
+            nmcli radio wifi on >/dev/null 2>&1
+            notify "Wi-Fi" "Radio enabled"
+            sleep 1
+            exec "$0"
+        fi
+        exit 0
+    fi
+
+    local PH=$'\x01'
+    declare -A seen_idx=()
+    local -a R_SSID=() R_BSSID=() R_CHAN=() R_FREQ=() R_SIG=() R_BARS=() R_SEC=() R_INUSE=()
+
+    # Cached instant paint (rescan no)
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        line="${line//\\:/$PH}"
+        IFS=: read -r inuse bssid ssid chan freq sig bars sec <<< "$line"
+        bssid="${bssid//$PH/:}"; ssid="${ssid//$PH/:}"; sec="${sec//$PH/:}"
+        [ -z "$ssid" ] && ssid="<hidden ${bssid: -5}>"
+        [ -z "$sec" ] && sec="OPEN"
+        local active=0
+        [ "$inuse" = "*" ] && active=1
+
+        # Key deduplication by SSID + Frequency Band
+        local band
+        band=$(band_of "$freq")
+        local key="${ssid}_${band}"
+
+        if [ -n "${seen_idx[$key]+x}" ]; then
+            local idx="${seen_idx[$key]}"
+            if [ "${sig:-0}" -gt "${R_SIG[$idx]:-0}" ] 2>/dev/null; then
+                R_BSSID[$idx]="$bssid"
+                R_CHAN[$idx]="$chan"
+                R_FREQ[$idx]="$freq"
+                R_SIG[$idx]="$sig"
+                R_BARS[$idx]="$bars"
+                R_SEC[$idx]="$sec"
+            fi
+            [ "$active" -eq 1 ] && R_INUSE[$idx]=1
+        else
+            local idx="${#R_SSID[@]}"
+            seen_idx[$key]="$idx"
+            R_SSID[$idx]="$ssid"
+            R_BSSID[$idx]="$bssid"
+            R_CHAN[$idx]="$chan"
+            R_FREQ[$idx]="$freq"
+            R_SIG[$idx]="${sig:-0}"
+            R_BARS[$idx]="$bars"
+            R_SEC[$idx]="$sec"
+            R_INUSE[$idx]="$active"
+        fi
+    done < <(nmcli -t -f IN-USE,BSSID,SSID,CHAN,FREQ,SIGNAL,BARS,SECURITY device wifi list --rescan no 2>/dev/null)
+
+    # Build formatted entries with connected at the top
+    local conn_rows="" avail_rows=""
+
+    # Sort indices by active status, then signal strength
+    mapfile -t sorted_indices < <(for i in "${!R_SSID[@]}"; do
+        printf '%s\t%s\t%s\n' "${R_INUSE[$i]}" "${R_SIG[$i]:-0}" "$i"
+    done | sort -t$'\t' -k1,1nr -k2,2nr | cut -f3)
+
+    for i in "${sorted_indices[@]}"; do
+        local ssid="${R_SSID[$i]}"
+        local bssid="${R_BSSID[$i]}"
+        local chan="${R_CHAN[$i]}"
+        local freq="${R_FREQ[$i]}"
+        local sig="${R_SIG[$i]}"
+        local bars="${R_BARS[$i]:-____}"
+        local sec="${R_SEC[$i]}"
+        local band
+        band=$(band_of "$freq")
+        local icon
+        icon=$(signal_icon "$sig")
+
+        if [ "${R_INUSE[$i]}" -eq 1 ]; then
+            conn_rows+="<b><span foreground=\"#a6e3a1\">${icon} </span> <span foreground=\"#a6e3a1\" weight=\"bold\">${ssid}</span></b>   <span background=\"#a6e3a1\" foreground=\"#11111b\" weight=\"heavy\"> CONNECTED </span>   <span foreground=\"#89b4fa\">${bars} ${sig}%</span>   <span foreground=\"#fab387\">${band} (ch ${chan})</span>   <span foreground=\"#f9e2af\">[${sec}]</span>   <span foreground=\"#6c7086\">(${bssid})</span>"$'\n'
+        else
+            avail_rows+="<span foreground=\"#cdd6f4\">${icon}  <b>${ssid}</b></span>   <span foreground=\"#89b4fa\">${bars} ${sig}%</span>   <span foreground=\"#fab387\">${band} (ch ${chan})</span>   <span foreground=\"#a6adc8\">[${sec}]</span>   <span foreground=\"#585b70\">(${bssid})</span>"$'\n'
+        fi
+    done
+
+    local menu="${conn_rows}${avail_rows}"
+    menu+="⟳   Rescan Wi-Fi networks"$'\n'
+    menu+="󰖪   Disconnect current network"$'\n'
+    menu+="ℹ   Network details & IP status"$'\n'
+    menu+="⏻   Turn Wi-Fi off"
+
+    local chosen
+    chosen=$(printf "%s" "$menu" | rofi -dmenu -i -markup-rows -p "Wi-Fi" -theme "$THEME")
+    [ -z "$chosen" ] && exit 0
+
+    case "$chosen" in
+        *"Rescan Wi-Fi networks"*)
+            notify "Scanning…" "Sweeping wireless channels (3–5s)"
+            nmcli device wifi list --rescan yes >/dev/null 2>&1
+            notify "Scan Complete" "Networks refreshed"
+            exec "$0" ;;
+        *"Disconnect current network"*)
+            local active_con
+            active_con=$(nmcli -t -f NAME,TYPE connection show --active 2>/dev/null | grep ':802-11-wireless$' | cut -d: -f1 | head -n1)
+            if [ -n "$active_con" ]; then
+                nmcli connection down id "$active_con" >/dev/null 2>&1 && notify "Disconnected" "$active_con"
+            else
+                notify "Not Connected" "No active wireless connection"
+            fi
+            exec "$0" ;;
+        *"Network details & IP status"*)
+            show_info ;;
+        *"Turn Wi-Fi off"*)
+            nmcli radio wifi off >/dev/null 2>&1 && notify "Wi-Fi" "Radio turned off" ;;
+        *)
+            # Extract BSSID from selected line
+            local selected_bssid
+            selected_bssid=$(echo "$chosen" | grep -oE '([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}' | head -n1)
+            [ -z "$selected_bssid" ] && exit 0
+
+            # Match extracted BSSID back to parsed entry
+            local matched_idx=-1
+            for i in "${!R_BSSID[@]}"; do
+                if [ "${R_BSSID[$i]}" = "$selected_bssid" ]; then
+                    matched_idx="$i"
+                    break
+                fi
+            done
+
+            [ "$matched_idx" -ge 0 ] || exit 0
+
+            local sel_ssid="${R_SSID[$matched_idx]}"
+            local sel_sec="${R_SEC[$matched_idx]}"
+            local sel_inuse="${R_INUSE[$matched_idx]}"
+
+            if [ "$sel_inuse" -eq 1 ]; then
+                # Action modal for already connected network
+                local act
+                act=$(printf "󰖪  Disconnect\nℹ  Connection Details\n" | rofi -dmenu -i -p "$sel_ssid" -theme "$THEME")
+                case "$act" in
+                    *"Disconnect"*)
+                        nmcli connection down id "$sel_ssid" >/dev/null 2>&1 && notify "Disconnected" "$sel_ssid" ;;
+                    *"Details"*)
+                        show_info ;;
+                esac
+            else
+                connect_network "$sel_ssid" "$selected_bssid" "$sel_sec"
+            fi ;;
+    esac
+}
+
+main

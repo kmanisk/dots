@@ -17,9 +17,8 @@ keymap:
       only: ["Alacritty"]
     exact_match: true
     remap:
-      M-c: C-S-c # Win+C -> Ctrl+Shift+C (safe copy without killing running processes)
-      M-v: C-S-v # Win+V -> Ctrl+Shift+V (safe paste)
-      Alt-c: C-S-c
+      Super-c: C-S-c # Win+C -> Ctrl+Shift+C (safe copy without killing running processes)
+      Super-v: C-S-v # Win+V -> Ctrl+Shift+V (safe paste)
       CapsLock-DOT: C-S-v
 
   # --- General Universal Copy / Paste / Cut (All GUI Applications) ---
@@ -28,9 +27,9 @@ keymap:
       not: ["Alacritty"]
     exact_match: true
     remap:
-      M-c: C-c # Win+C -> Ctrl+C (Universal Copy)
-      M-v: C-v # Win+V -> Ctrl+V (Universal Paste)
-      M-x: C-x # Win+X -> Ctrl+X (Universal Cut)
+      Super-c: C-c # Win+C -> Ctrl+C (Universal Copy)
+      Super-v: C-v # Win+V -> Ctrl+V (Universal Paste)
+      Super-x: C-x # Win+X -> Ctrl+X (Universal Cut)
 
   # --- CapsLock layer ---
   - name: CapsLock layer

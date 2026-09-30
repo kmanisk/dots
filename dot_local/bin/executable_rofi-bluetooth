@@ -1,58 +1,98 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# rofi-bluetooth: Bluetooth device menu in the system rofi theme.
-# Win+Alt+2. Replaces blueman-manager (its window never maps under Sway/XWayland).
-#   Main menu -> pick device -> action menu (Connect/Disconnect/Pair/Remove)
-#   + Scan for new devices, + Toggle power. All control via bluetoothctl.
+# rofi-bluetooth: Bluetooth device menu in the unified system rofi theme.
+# Win+Alt+2.
+#   - Pango markup: prominent bold/emerald badge for connected devices & battery %
+#   - Restart Bluetooth service button (sudo systemctl restart bluetooth)
+#   - Scan for new devices, Toggle power, Connect/Disconnect/Pair/Remove
 # ==============================================================================
 export PATH="$HOME/.local/bin:$PATH"
 THEME="$HOME/.config/rofi/system-floating.rasi"
 
 notify() {
-    command -v notify-send >/dev/null 2>&1 && notify-send -a "Bluetooth" -u low "$1" "$2"
+    command -v notify-send >/dev/null 2>&1 && notify-send -a "Bluetooth" -u low -i bluetooth "$1" "$2"
 }
 
-bt() { timeout 20 bluetoothctl "$@" 2>/dev/null; }
+bt() { timeout 15 bluetoothctl "$@" 2>/dev/null; }
 
 is_connected() { bt info "$1" | grep -q "Connected: yes"; }
 is_paired()    { bt info "$1" | grep -q "Paired: yes"; }
 
 device_menu() {
-    bt power on >/dev/null
-    local rows="" mac name marker
+    bt power on >/dev/null 2>&1
+
+    # Fast fetch of all currently connected device MACs
+    mapfile -t conn_macs < <(bt devices Connected 2>/dev/null | awk '{print $2}')
+
+    local conn_rows="" disc_rows=""
+
     while read -r _ mac name_rest; do
         [ -z "$mac" ] && continue
-        name="$name_rest"
-        if is_connected "$mac"; then marker="●"; else marker="○"; fi
-        rows+="${marker} ${name}  [${mac}]"$'\n'
-    done < <(bt devices)
+        local name="$name_rest"
+        [ -z "$name" ] && name="Unknown Device"
+
+        local is_conn=0
+        for c in "${conn_macs[@]}"; do
+            if [ "$c" = "$mac" ]; then
+                is_conn=1
+                break
+            fi
+        done
+
+        if [ "$is_conn" -eq 1 ]; then
+            # Query battery if available
+            local bat
+            bat=$(bt info "$mac" | awk -F'[()]' '/Battery Percentage:/ {print $2}')
+            local bat_str=""
+            if [ -n "$bat" ]; then
+                bat_str="  <span foreground=\"#f9e2af\">󰁹 ${bat}%</span>"
+            fi
+            conn_rows+="<b><span foreground=\"#a6e3a1\">󰂱 </span> <span foreground=\"#a6e3a1\" weight=\"bold\">${name}</span></b>   <span background=\"#a6e3a1\" foreground=\"#11111b\" weight=\"heavy\"> CONNECTED </span>${bat_str}   <span foreground=\"#6c7086\">(${mac})</span>"$'\n'
+        else
+            disc_rows+="<span foreground=\"#6c7086\">󰂲  ${name}</span>   <span foreground=\"#585b70\">(${mac})</span>"$'\n'
+        fi
+    done < <(bt devices 2>/dev/null)
+
+    local rows="${conn_rows}${disc_rows}"
+    rows+="🔄  Restart Bluetooth service"$'\n'
     rows+="⟳  Scan for new devices"$'\n'
-    if bt show | grep -q "Powered: yes"; then
+    if bt show 2>/dev/null | grep -q "Powered: yes"; then
         rows+="⏻  Turn Bluetooth off"
     else
         rows+="⏻  Turn Bluetooth on"
     fi
-    printf "%s" "$rows" | rofi -dmenu -i -p "Bluetooth" -theme "$THEME"
+
+    printf "%s" "$rows" | rofi -dmenu -i -markup-rows -p "Bluetooth" -theme "$THEME"
 }
 
-action_menu() { # $1 = mac, $2 = name
-    local mac="$1" opts=""
-    if is_connected "$mac"; then
-        opts="Disconnect"
+action_menu() { # $1 = mac, $2 = name, $3 = is_connected
+    local mac="$1" name="$2" is_conn="$3" opts=""
+    if [ "$is_conn" -eq 1 ]; then
+        opts="󰂲  Disconnect"$'\n'"🔄  Reconnect"$'\n'"🗑  Remove device"
     else
-        opts="Connect"
+        opts="󰂱  Connect"$'\n'
+        is_paired "$mac" || opts+="🔗  Pair + Trust"$'\n'
+        opts+="🗑  Remove device"
     fi
-    is_paired "$mac" || opts+=$'\n'"Pair + Trust"
-    opts+=$'\n'"Remove device"
-    printf "%s" "$opts" | rofi -dmenu -i -p "$2" -theme "$THEME"
+    printf "%s" "$opts" | rofi -dmenu -i -markup-rows -p "$name" -theme "$THEME"
 }
 
 main() {
-    local chosen mac name action
+    local chosen mac name action is_conn
     chosen=$(device_menu)
     [ -z "$chosen" ] && exit 0
 
     case "$chosen" in
+        *"Restart Bluetooth service"*)
+            notify "Bluetooth" "Restarting Bluetooth service..."
+            sudo -n systemctl reset-failed bluetooth 2>/dev/null
+            if sudo -n systemctl restart bluetooth 2>/dev/null; then
+                sleep 1.2
+                notify "Bluetooth" "Bluetooth daemon restarted successfully"
+            else
+                notify "Bluetooth Error" "Failed to restart service via sudo"
+            fi
+            exec "$0" ;;
         *"Scan for new devices"*)
             notify "Scanning…" "Looking for nearby devices (12s)"
             timeout 12 bt scan on >/dev/null
@@ -63,16 +103,41 @@ main() {
         *"Turn Bluetooth on"*)
             bt power on >/dev/null && notify "Bluetooth" "Powered on" ;;
         *)
-            mac=$(echo "$chosen" | grep -oE '([0-9A-F]{2}:){5}[0-9A-F]{2}')
+            mac=$(echo "$chosen" | grep -oE '([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}' | head -n1)
             [ -z "$mac" ] && exit 0
-            name=$(echo "$chosen" | sed -E 's/^[●○] //; s/  \[.*//')
-            action=$(action_menu "$mac" "$name")
+
+            # Derive clean device name
+            name=$(bt info "$mac" 2>/dev/null | awk -F': ' '/Name:/ {print $2}')
+            [ -z "$name" ] && name=$(bt devices 2>/dev/null | grep "$mac" | cut -d' ' -f3-)
+            [ -z "$name" ] && name="$mac"
+
+            if is_connected "$mac"; then
+                is_conn=1
+            else
+                is_conn=0
+            fi
+
+            action=$(action_menu "$mac" "$name" "$is_conn")
             case "$action" in
-                Connect*)    bt connect "$mac" >/dev/null && notify "Connected" "$name" ;;
-                Disconnect*) bt disconnect "$mac" >/dev/null && notify "Disconnected" "$name" ;;
-                Pair*)       bt pair "$mac" >/dev/null && bt trust "$mac" >/dev/null \
-                             && notify "Paired" "$name" ;;
-                Remove*)     bt remove "$mac" >/dev/null && notify "Removed" "$name" ;;
+                *"Connect"*)
+                    notify "Connecting…" "$name"
+                    if bt connect "$mac" >/dev/null; then
+                        notify "Connected" "$name"
+                    else
+                        notify "Connection Failed" "$name"
+                    fi ;;
+                *"Disconnect"*)
+                    bt disconnect "$mac" >/dev/null && notify "Disconnected" "$name" ;;
+                *"Reconnect"*)
+                    notify "Reconnecting…" "$name"
+                    bt disconnect "$mac" >/dev/null
+                    sleep 0.5
+                    bt connect "$mac" >/dev/null && notify "Connected" "$name" ;;
+                *"Pair"*)
+                    notify "Pairing…" "$name"
+                    bt pair "$mac" >/dev/null && bt trust "$mac" >/dev/null && notify "Paired & Trusted" "$name" ;;
+                *"Remove"*)
+                    bt remove "$mac" >/dev/null && notify "Removed" "$name" ;;
             esac ;;
     esac
 }

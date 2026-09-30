@@ -43,7 +43,7 @@ while true; do
         -kb-delete-entry "" \
         -kb-custom-1 "Alt+d,Shift+Delete" \
         -kb-custom-2 "Alt+p" \
-        -kb-custom-3 "Alt+x" \
+        -kb-custom-3 "Alt+x,Alt+X,Alt+u,Alt+U,Control+x" \
         -theme "$THEME" \
         "$@")
     exit_code=$?
@@ -64,7 +64,8 @@ while true; do
             for f in "$PIN_DIR"/*; do
                 [ -f "$f" ] || continue
                 line=$(head -n 1 "$f" | tr -d '\r\n')
-                if [ "$line" = "$pin_text" ]; then
+                full=$(tr -d '\r\n' < "$f")
+                if [ "$line" = "$pin_text" ] || [ "$full" = "$pin_text" ] || [[ "$line" == "$pin_text"* ]] || [[ "$pin_text" == "$line"* ]]; then
                     rm -f "$f"
                     notify "Deleted Pin" "$pin_text"
                     break
@@ -96,17 +97,47 @@ while true; do
     if [ "$exit_code" -eq 12 ]; then
         if [ "$is_pinned" -eq 1 ]; then
             pin_text="${chosen#"${PIN_PREFIX}"}"
+            unpinned=0
             for f in "$PIN_DIR"/*; do
                 [ -f "$f" ] || continue
                 line=$(head -n 1 "$f" | tr -d '\r\n')
-                if [ "$line" = "$pin_text" ]; then
+                full=$(tr -d '\r\n' < "$f")
+                if [ "$line" = "$pin_text" ] || [ "$full" = "$pin_text" ] || [[ "$line" == "$pin_text"* ]] || [[ "$pin_text" == "$line"* ]]; then
                     rm -f "$f"
                     notify "Unpinned" "$pin_text"
+                    unpinned=1
                     break
                 fi
             done
+            if [ "$unpinned" -eq 0 ]; then
+                notify "Unpin Failed" "Could not find pin record"
+            fi
         else
-            notify "Not Pinned" "Item is in standard history, not pinned"
+            raw_text=$(cliphist decode <<< "$chosen" 2>/dev/null)
+            unpinned=0
+            if [ -n "$raw_text" ]; then
+                hash_id=$(printf '%s' "$raw_text" | md5sum | cut -d' ' -f1)
+                if [ -f "$PIN_DIR/$hash_id" ]; then
+                    rm -f "$PIN_DIR/$hash_id"
+                    notify "Unpinned" "$(head -n 1 <<< "$raw_text")"
+                    unpinned=1
+                else
+                    first=$(head -n 1 <<< "$raw_text" | tr -d '\r\n')
+                    for f in "$PIN_DIR"/*; do
+                        [ -f "$f" ] || continue
+                        line=$(head -n 1 "$f" | tr -d '\r\n')
+                        if [ "$line" = "$first" ]; then
+                            rm -f "$f"
+                            notify "Unpinned" "$first"
+                            unpinned=1
+                            break
+                        fi
+                    done
+                fi
+            fi
+            if [ "$unpinned" -eq 0 ]; then
+                notify "Not Pinned" "Item is in standard history, not pinned"
+            fi
         fi
         continue
     fi
@@ -115,15 +146,22 @@ while true; do
     if [ "$exit_code" -eq 0 ]; then
         if [ "$is_pinned" -eq 1 ]; then
             pin_text="${chosen#"${PIN_PREFIX}"}"
+            copied=0
             for f in "$PIN_DIR"/*; do
                 [ -f "$f" ] || continue
                 line=$(head -n 1 "$f" | tr -d '\r\n')
-                if [ "$line" = "$pin_text" ]; then
+                full=$(tr -d '\r\n' < "$f")
+                if [ "$line" = "$pin_text" ] || [ "$full" = "$pin_text" ] || [[ "$line" == "$pin_text"* ]] || [[ "$pin_text" == "$line"* ]]; then
                     wl-copy < "$f"
                     notify "Copied Pin" "$pin_text"
+                    copied=1
                     break
                 fi
             done
+            if [ "$copied" -eq 0 ]; then
+                printf '%s' "$pin_text" | wl-copy
+                notify "Copied Pin" "$pin_text"
+            fi
         else
             raw_text=$(cliphist decode <<< "$chosen" 2>/dev/null)
             if [ -n "$raw_text" ]; then
