@@ -19,6 +19,8 @@ import urllib.request
 from datetime import datetime
 
 import tomllib
+import yaml
+
 
 from theme_engine.schema import (
     normalize_theme,
@@ -111,24 +113,35 @@ def clone_repo_safely(repo_url, target_dir, commit=None):
 
 
 def colors_dict_to_base16(c):
-    """Converts Omarchy toml colors dict into a complete Base16 dictionary."""
+    """Converts colors dict into a complete Base16 dictionary."""
+    # Check if direct BASE00..BASE0F are already present
+    b16_direct = {}
+    for k in BASE16_KEYS:
+        if k in c and HEX_RE.match(clean_hex(str(c[k]))):
+            b16_direct[k] = clean_hex(str(c[k]))
+        elif k.lower() in c and HEX_RE.match(clean_hex(str(c[k.lower()]))):
+            b16_direct[k] = clean_hex(str(c[k.lower()]))
+
+    if len(b16_direct) == 16:
+        return b16_direct
+
     bg = clean_hex(c.get("background") or c.get("bg") or c.get("color0", "#181818"))
-    darker_bg = clean_hex(c.get("dark_background") or c.get("darker_background") or c.get("dark_bg") or bg)
-    selection = clean_hex(c.get("selection") or c.get("selection_background") or c.get("color8", "#383838"))
+    darker_bg = clean_hex(c.get("dark_background") or c.get("darker_background") or c.get("dark_bg") or c.get("color0") or bg)
+    selection = clean_hex(c.get("selection") or c.get("selection_background") or c.get("selected_bg") or c.get("color8", "#383838"))
     muted = clean_hex(c.get("muted") or c.get("readable_muted") or c.get("color8", "#585858"))
-    dark_fg = clean_hex(c.get("dark_foreground") or c.get("dark_fg") or muted)
+    dark_fg = clean_hex(c.get("dark_foreground") or c.get("dark_fg") or c.get("color7") or muted)
     fg = clean_hex(c.get("foreground") or c.get("fg") or c.get("color7", "#e0e0e0"))
-    light_fg = clean_hex(c.get("light_foreground") or c.get("light_fg") or fg)
-    bright_fg = clean_hex(c.get("bright_foreground") or c.get("bright_fg") or fg)
+    light_fg = clean_hex(c.get("light_foreground") or c.get("light_fg") or c.get("color7") or fg)
+    bright_fg = clean_hex(c.get("bright_foreground") or c.get("bright_fg") or c.get("color15") or fg)
 
     c_red = clean_hex(c.get("red") or c.get("color1", "#e06c75"))
-    c_orange = clean_hex(c.get("orange") or c.get("bright_red", "#d19a66"))
+    c_orange = clean_hex(c.get("orange") or c.get("bright_red") or c.get("color9", "#d19a66"))
     c_yellow = clean_hex(c.get("yellow") or c.get("color3", "#e5c07b"))
     c_green = clean_hex(c.get("green") or c.get("color2", "#98c379"))
     c_cyan = clean_hex(c.get("cyan") or c.get("color6", "#56b6c2"))
     c_blue = clean_hex(c.get("blue") or c.get("color4", "#61afef"))
     c_magenta = clean_hex(c.get("magenta") or c.get("color5", "#c678dd"))
-    c_brown = clean_hex(c.get("brown") or c_orange)
+    c_brown = clean_hex(c.get("brown") or c.get("bright_magenta") or c.get("color13") or c_orange)
 
     return {
         "BASE00": bg,
@@ -155,7 +168,7 @@ def parse_cava_theme(filepath):
     if not os.path.exists(filepath):
         return None
     try:
-        with open(filepath, "r", encoding="utf-8") as f:
+        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
         colors = {}
         gradient = 1
@@ -199,22 +212,442 @@ def parse_cava_theme(filepath):
         return None
 
 
+def find_candidate_files(repo_dir, max_depth=3):
+    """
+    Recursively scans repo_dir up to max_depth (skipping hidden and build dirs).
+    Returns a dict of discovered candidate files grouped by format/app.
+    """
+    candidates = {
+        "colors_toml": [],
+        "palette_toml": [],
+        "yaml_palette": [],
+        "alacritty": [],
+        "kitty": [],
+        "ghostty": [],
+        "btop": [],
+        "foot": [],
+        "cava": [],
+        "gtk": [],
+        "waybar": [],
+        "mako": [],
+        "dunst": [],
+        "swayosd": [],
+        "walker": [],
+        "rofi": [],
+        "neovim": [],
+        "steam": [],
+        "vencord": [],
+        "browser": [],
+        "zed": [],
+        "wallpapers": [],
+        "previews": [],
+        "ignored": [],
+    }
+
+    skip_dirs = {".git", ".github", ".cache", "node_modules", "target", "build", "dist", ".svn", ".hg"}
+    ignored_exact = {
+        "hyprland.conf", "hyprland.lua", "hyprlock.conf", "hypridle.conf",
+        "hyprpaper.conf", "hyprland-preview-share-picker.css", "keyboard.rgb",
+        "install.sh", "setup.sh", "Makefile", "package.json", "Cargo.toml",
+    }
+
+    repo_dir_abs = os.path.abspath(repo_dir)
+
+    for root, dirs, files in os.walk(repo_dir_abs):
+        rel_root = os.path.relpath(root, repo_dir_abs)
+        parts = rel_root.split(os.sep) if rel_root != "." else []
+
+        if len(parts) >= max_depth:
+            dirs[:] = []
+            continue
+        dirs[:] = [d for d in dirs if d not in skip_dirs and not d.startswith(".")]
+
+        for f in files:
+            f_lower = f.lower()
+            rel_file = os.path.relpath(os.path.join(root, f), repo_dir_abs)
+
+            # Check ignored scripts and window manager configs
+            if f_lower in ignored_exact or f_lower.endswith((".sh", ".bash", ".zsh", ".fish", ".service")):
+                candidates["ignored"].append(rel_file)
+                continue
+
+            # Preview discovery
+            if f_lower in ("preview.png", "preview.jpg", "preview.jpeg", "preview.webp") or (
+                "preview" in f_lower and f_lower.endswith((".png", ".jpg", ".jpeg", ".webp"))
+            ):
+                candidates["previews"].append(rel_file)
+                continue
+
+            # Wallpaper discovery
+            if (
+                any(w in rel_file.lower() for w in ("background", "wallpaper", "bg/"))
+                and f_lower.endswith((".png", ".jpg", ".jpeg", ".webp"))
+            ):
+                candidates["wallpapers"].append(rel_file)
+                continue
+
+            # Palette files
+            if f_lower == "colors.toml":
+                candidates["colors_toml"].append(rel_file)
+            elif f_lower in ("palette.toml", "theme.toml", "colorscheme.toml"):
+                candidates["palette_toml"].append(rel_file)
+            elif f_lower in ("base16.yaml", "base16.yml", "base24.yaml", "base24.yml", "colors.yaml", "colors.yml", "palette.yaml", "palette.yml"):
+                candidates["yaml_palette"].append(rel_file)
+            elif f_lower.startswith("alacritty") and f_lower.endswith((".toml", ".yml", ".yaml")):
+                candidates["alacritty"].append(rel_file)
+            elif f_lower == "kitty.conf":
+                candidates["kitty"].append(rel_file)
+            elif f_lower in ("ghostty.conf", "ghostty-theme"):
+                candidates["ghostty"].append(rel_file)
+            elif f_lower in ("btop.theme", "btop.conf") or "btop" in rel_file:
+                candidates["btop"].append(rel_file)
+            elif f_lower == "foot.ini":
+                candidates["foot"].append(rel_file)
+            elif f_lower in ("cava_theme", "cava.conf") or "cava" in rel_file:
+                candidates["cava"].append(rel_file)
+            elif f_lower.endswith(".css") and "gtk" in rel_file.lower():
+                candidates["gtk"].append(rel_file)
+            elif "waybar" in rel_file.lower() and f_lower.endswith((".css", ".json")):
+                candidates["waybar"].append(rel_file)
+            elif f_lower in ("mako.ini", "mako.conf"):
+                candidates["mako"].append(rel_file)
+            elif f_lower == "dunst.conf":
+                candidates["dunst"].append(rel_file)
+            elif f_lower == "swayosd.css":
+                candidates["swayosd"].append(rel_file)
+            elif f_lower == "walker.css":
+                candidates["walker"].append(rel_file)
+            elif f_lower.endswith(".rasi"):
+                candidates["rofi"].append(rel_file)
+            elif f_lower == "neovim.lua" or "nvim" in rel_file:
+                candidates["neovim"].append(rel_file)
+            elif f_lower == "steam.css":
+                candidates["steam"].append(rel_file)
+            elif f_lower == "vencord.theme.css":
+                candidates["vencord"].append(rel_file)
+            elif f_lower == "chromium.theme":
+                candidates["browser"].append(rel_file)
+            elif f_lower.endswith(".zed.json"):
+                candidates["zed"].append(rel_file)
+
+    # Sort root files first
+    for k in candidates:
+        candidates[k].sort(key=lambda p: (p.count(os.sep), len(p)))
+
+    return candidates
+
+
+def parse_alacritty_dict(data):
+    """Extracts flat colors dictionary from Alacritty dictionary structure."""
+    c = {}
+    colors = data.get("colors", {}) if isinstance(data, dict) else {}
+    primary = colors.get("primary", {})
+    cursor = colors.get("cursor", {})
+    normal = colors.get("normal", {})
+    bright = colors.get("bright", {})
+    selection = colors.get("selection", {})
+
+    if "background" in primary:
+        c["background"] = clean_hex(primary["background"])
+    if "foreground" in primary:
+        c["foreground"] = clean_hex(primary["foreground"])
+    if "cursor" in cursor:
+        c["cursor"] = clean_hex(cursor["cursor"])
+        c["accent"] = c["cursor"]
+    if isinstance(selection, dict) and "background" in selection:
+        c["selection"] = clean_hex(selection["background"])
+    if isinstance(selection, dict) and "text" in selection:
+        c["selection_foreground"] = clean_hex(selection["text"])
+
+    normal_map = {
+        "black": "color0",
+        "red": "color1",
+        "green": "color2",
+        "yellow": "color3",
+        "blue": "color4",
+        "magenta": "color5",
+        "cyan": "color6",
+        "white": "color7",
+    }
+    for name, code in normal_map.items():
+        if name in normal:
+            val = clean_hex(normal[name])
+            c[code] = val
+            c[name] = val
+
+    bright_map = {
+        "black": ("color8", "muted"),
+        "red": ("color9", "bright_red", "orange"),
+        "green": ("color10", "bright_green"),
+        "yellow": ("color11", "bright_yellow"),
+        "blue": ("color12", "bright_blue"),
+        "magenta": ("color13", "bright_magenta", "brown"),
+        "cyan": ("color14", "bright_cyan"),
+        "white": ("color15", "bright_white", "bright_fg"),
+    }
+    for name, codes in bright_map.items():
+        if name in bright:
+            val = clean_hex(bright[name])
+            if isinstance(codes, tuple):
+                for cd in codes:
+                    c[cd] = val
+            else:
+                c[codes] = val
+
+    return c
+
+
+def parse_toml_colors_file(filepath):
+    """Parses a TOML file that contains color definitions."""
+    try:
+        with open(filepath, "rb") as f:
+            data = tomllib.load(f)
+        if "colors" in data and isinstance(data["colors"], dict):
+            if "primary" in data["colors"] or "normal" in data["colors"]:
+                return parse_alacritty_dict(data)
+            merged = dict(data)
+            merged.update(data["colors"])
+            return merged
+        return data
+    except Exception as e:
+        print(f"Warning parsing TOML {filepath}: {e}", file=sys.stderr)
+        return None
+
+
+def parse_yaml_palette_file(filepath):
+    """Parses Base16/Base24 or colors YAML file."""
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+        if not isinstance(data, dict):
+            return None
+        res = {}
+        b16_found = False
+        for k, v in data.items():
+            k_lower = str(k).lower()
+            if k_lower.startswith("base0") or k_lower.startswith("base1"):
+                res[k.upper()] = clean_hex(str(v))
+                b16_found = True
+            elif k_lower in ("scheme", "name"):
+                res["name"] = str(v)
+            elif k_lower == "author":
+                res["author"] = str(v)
+        if b16_found:
+            return res
+
+        if "palette" in data and isinstance(data["palette"], dict):
+            return data["palette"]
+        if "colors" in data and isinstance(data["colors"], dict):
+            return data["colors"]
+        return data
+    except Exception as e:
+        print(f"Warning parsing YAML {filepath}: {e}", file=sys.stderr)
+        return None
+
+
+def parse_alacritty_file(filepath):
+    try:
+        if filepath.endswith((".yml", ".yaml")):
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+        else:
+            with open(filepath, "rb") as f:
+                data = tomllib.load(f)
+        return parse_alacritty_dict(data)
+    except Exception as e:
+        print(f"Warning parsing Alacritty {filepath}: {e}", file=sys.stderr)
+        return None
+
+
+def parse_kitty_file(filepath):
+    try:
+        c = {}
+        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split()
+                if len(parts) >= 2:
+                    k, v = parts[0].lower(), parts[1]
+                    if HEX_RE.match(clean_hex(v)):
+                        val = clean_hex(v)
+                        if k in ("background", "bg"):
+                            c["background"] = val
+                        elif k in ("foreground", "fg"):
+                            c["foreground"] = val
+                        elif k in ("cursor", "cursor_color"):
+                            c["cursor"] = val
+                            c["accent"] = val
+                        elif k in ("selection_background", "selection_bg"):
+                            c["selection"] = val
+                            c["selection_background"] = val
+                        elif k in ("selection_foreground", "selection_fg"):
+                            c["selection_foreground"] = val
+                        elif k.startswith("color") and k[5:].isdigit():
+                            c[k] = val
+        return c if len(c) >= 4 else None
+    except Exception as e:
+        print(f"Warning parsing Kitty {filepath}: {e}", file=sys.stderr)
+        return None
+
+
+def parse_ghostty_file(filepath):
+    try:
+        c = {}
+        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" in line:
+                    k, v = line.split("=", 1)
+                    k, v = k.strip().lower(), v.strip().strip("'\"")
+                    if k == "palette" and "=" in v:
+                        idx, color = v.split("=", 1)
+                        idx, color = idx.strip(), color.strip()
+                        if idx.isdigit() and HEX_RE.match(clean_hex(color)):
+                            c[f"color{idx}"] = clean_hex(color)
+                    elif HEX_RE.match(clean_hex(v)):
+                        val = clean_hex(v)
+                        if k in ("background", "bg"):
+                            c["background"] = val
+                        elif k in ("foreground", "fg"):
+                            c["foreground"] = val
+                        elif k in ("cursor-color", "cursor"):
+                            c["cursor"] = val
+                            c["accent"] = val
+                        elif k in ("selection-background", "selection_bg"):
+                            c["selection"] = val
+                            c["selection_background"] = val
+                        elif k in ("selection-foreground", "selection_fg"):
+                            c["selection_foreground"] = val
+        return c if len(c) >= 4 else None
+    except Exception as e:
+        print(f"Warning parsing Ghostty {filepath}: {e}", file=sys.stderr)
+        return None
+
+
+def parse_btop_file(filepath):
+    try:
+        c = {}
+        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                m = re.match(r'theme\[(\w+)\]\s*=\s*[\'"]?([#0-9a-fA-F]{6,7})[\'"]?', line)
+                if m:
+                    k, v = m.group(1).lower(), clean_hex(m.group(2))
+                    if k == "main_bg":
+                        c["background"] = v
+                    elif k == "main_fg":
+                        c["foreground"] = v
+                    elif k == "title":
+                        c["accent"] = v
+                    elif k == "selected_bg":
+                        c["selection"] = v
+                        c["selection_background"] = v
+                    elif k == "selected_fg":
+                        c["selection_foreground"] = v
+                    elif k == "div_line":
+                        c["border"] = v
+        return c if c else None
+    except Exception as e:
+        print(f"Warning parsing Btop {filepath}: {e}", file=sys.stderr)
+        return None
+
+
+def resolve_theme_palette(repo_dir, candidates):
+    """
+    Dynamically identifies the best palette source and enriches semantic tokens.
+    Returns (primary_data, format_desc, mode, display_name)
+    """
+    primary_data = None
+    format_desc = "Unknown"
+    primary_path = None
+
+    if candidates["colors_toml"]:
+        primary_path = candidates["colors_toml"][0]
+        primary_data = parse_toml_colors_file(os.path.join(repo_dir, primary_path))
+        format_desc = f"Native Omarchy ({primary_path})"
+    elif candidates["palette_toml"]:
+        primary_path = candidates["palette_toml"][0]
+        primary_data = parse_toml_colors_file(os.path.join(repo_dir, primary_path))
+        format_desc = f"TOML Palette ({primary_path})"
+    elif candidates["yaml_palette"]:
+        primary_path = candidates["yaml_palette"][0]
+        primary_data = parse_yaml_palette_file(os.path.join(repo_dir, primary_path))
+        format_desc = f"YAML Palette ({primary_path})"
+    elif candidates["alacritty"]:
+        primary_path = candidates["alacritty"][0]
+        primary_data = parse_alacritty_file(os.path.join(repo_dir, primary_path))
+        format_desc = f"Alacritty Config ({primary_path})"
+    elif candidates["kitty"]:
+        primary_path = candidates["kitty"][0]
+        primary_data = parse_kitty_file(os.path.join(repo_dir, primary_path))
+        format_desc = f"Kitty Config ({primary_path})"
+    elif candidates["ghostty"]:
+        primary_path = candidates["ghostty"][0]
+        primary_data = parse_ghostty_file(os.path.join(repo_dir, primary_path))
+        format_desc = f"Ghostty Config ({primary_path})"
+    elif candidates["btop"]:
+        primary_path = candidates["btop"][0]
+        primary_data = parse_btop_file(os.path.join(repo_dir, primary_path))
+        format_desc = f"Btop Theme ({primary_path})"
+
+    if not primary_data:
+        raise ValueError(
+            "Repository does not appear to contain a recognized theme palette. "
+            "Supported formats: colors.toml, palette.toml, base16.yaml, alacritty.toml, kitty.conf, ghostty.conf, btop.theme"
+        )
+
+    # Cross-source semantic enrichment
+    secondary_files = []
+    if candidates["kitty"] and primary_path not in candidates["kitty"]:
+        kd = parse_kitty_file(os.path.join(repo_dir, candidates["kitty"][0]))
+        if kd:
+            for k in ("selection", "selection_background", "selection_foreground", "cursor", "accent"):
+                if k not in primary_data and k in kd:
+                    primary_data[k] = kd[k]
+            secondary_files.append("Kitty")
+
+    if candidates["ghostty"] and primary_path not in candidates["ghostty"]:
+        gd = parse_ghostty_file(os.path.join(repo_dir, candidates["ghostty"][0]))
+        if gd:
+            for k in ("selection", "selection_background", "selection_foreground", "cursor", "accent"):
+                if k not in primary_data and k in gd:
+                    primary_data[k] = gd[k]
+            secondary_files.append("Ghostty")
+
+    if candidates["btop"] and primary_path not in candidates["btop"]:
+        bd = parse_btop_file(os.path.join(repo_dir, candidates["btop"][0]))
+        if bd:
+            for k in ("selection", "selection_background", "selection_foreground", "accent", "border"):
+                if k not in primary_data and k in bd:
+                    primary_data[k] = bd[k]
+            secondary_files.append("Btop")
+
+    if secondary_files:
+        format_desc += f" (enriched with {', '.join(secondary_files)})"
+
+    mode = primary_data.get("mode", "dark")
+    display_name = primary_data.get("name") or primary_data.get("display_name")
+
+    return primary_data, format_desc, mode, display_name
+
+
 def analyze_repository(repo_dir, git_url=None, owner="Unknown", repo_name=""):
     """
     Analyzes the cloned repository:
-      - Validates Omarchy theme signature (colors.toml)
+      - Dynamically discovers palette across Omarchy root, subdirs, and terminal formats
       - Classifies every file (SOURCE-DATA, SUPPORTED, IGNORED)
       - Extracts palette, rich semantic tokens, Cava visualizer, and capabilities
     Returns (raw_theme, analysis_summary)
     """
-    colors_file = os.path.join(repo_dir, "colors.toml")
-    if not os.path.exists(colors_file):
-        raise ValueError("Repository does not appear to contain a supported Omarchy theme (missing colors.toml).")
+    candidates = find_candidate_files(repo_dir)
 
-    with open(colors_file, "rb") as f:
-        toml_data = tomllib.load(f)
-
-    # Derive slug and names
+    # Derive slug
     if git_url:
         _, owner, repo_name, slug = normalize_git_url(git_url)
     else:
@@ -224,12 +657,33 @@ def analyze_repository(repo_dir, git_url=None, owner="Unknown", repo_name=""):
         if slug.endswith("-theme"):
             slug = slug[:-6]
 
-    display_name = toml_data.get("name") or slug.replace("-", " ").title()
-    mode = toml_data.get("mode", "dark")
-    accent = toml_data.get("accent") or toml_data.get("color4") or "#58a6ff"
-    b16 = colors_dict_to_base16(toml_data)
+    primary_data, format_desc, mode, detected_name = resolve_theme_palette(repo_dir, candidates)
 
-    # Rich semantic extraction from colors.toml
+    display_name = detected_name
+    if not display_name:
+        # Check README.md for title
+        readme_path = os.path.join(repo_dir, "README.md")
+        if os.path.exists(readme_path):
+            try:
+                with open(readme_path, "r", encoding="utf-8", errors="replace") as rf:
+                    for line in rf:
+                        line = line.strip()
+                        if line.startswith("#"):
+                            clean_t = re.sub(r'^[#\s\U00010000-\U0010ffff\u2600-\u27bf\u2300-\u23ff\ud800-\udbff\udc00-\udfff]+', '', line).strip()
+                            clean_t = re.sub(r'^(omarchy|theme|the)\s+', '', clean_t, flags=re.I)
+                            clean_t = re.sub(r'\s+(theme|omarchy)$', '', clean_t, flags=re.I).strip()
+                            if clean_t:
+                                display_name = clean_t
+                            break
+            except Exception:
+                pass
+    if not display_name:
+        display_name = slug.replace("-", " ").title()
+
+    accent = primary_data.get("accent") or primary_data.get("cursor") or primary_data.get("color4") or "#58a6ff"
+    accent = clean_hex(str(accent))
+    b16 = colors_dict_to_base16(primary_data)
+
     semantic_keys = [
         "background", "foreground", "accent", "cursor", "selection",
         "selection_foreground", "selection_background", "readable_muted",
@@ -238,96 +692,52 @@ def analyze_repository(repo_dir, git_url=None, owner="Unknown", repo_name=""):
     ]
     semantic_overrides = {}
     for sk in semantic_keys:
-        if sk in toml_data and HEX_RE.match(clean_hex(str(toml_data[sk]))):
-            semantic_overrides[sk] = clean_hex(str(toml_data[sk]))
+        if sk in primary_data and HEX_RE.match(clean_hex(str(primary_data[sk]))):
+            semantic_overrides[sk] = clean_hex(str(primary_data[sk]))
 
-    # Scan and classify all repository entries
-    repo_files = os.listdir(repo_dir)
     capabilities = {
         "palette": True,
-        "wallpaper": False,
-        "cava": False,
-        "gtk": False,
-        "waybar": False,
-        "alacritty": False,
-        "btop": False,
-        "neovim": False,
-        "mako": False,
-        "kitty": False,
-        "steam": False,
-        "vencord": False,
-        "browser": False,
+        "wallpaper": len(candidates["wallpapers"]) > 0,
+        "cava": True,
+        "gtk": len(candidates["gtk"]) > 0,
+        "waybar": len(candidates["waybar"]) > 0,
+        "alacritty": len(candidates["alacritty"]) > 0,
+        "btop": len(candidates["btop"]) > 0,
+        "neovim": len(candidates["neovim"]) > 0,
+        "mako": len(candidates["mako"]) > 0,
+        "kitty": len(candidates["kitty"]) > 0,
+        "ghostty": len(candidates["ghostty"]) > 0,
+        "foot": len(candidates["foot"]) > 0,
+        "swayosd": len(candidates["swayosd"]) > 0,
+        "walker": len(candidates["walker"]) > 0,
+        "steam": len(candidates["steam"]) > 0,
+        "vencord": len(candidates["vencord"]) > 0,
+        "browser": len(candidates["browser"]) > 0,
+        "zed": len(candidates["zed"]) > 0,
         "terminal": True,
     }
 
-    ignored_files = []
     apps = {}
+    # Cava
+    if candidates["cava"]:
+        cava_file = os.path.join(repo_dir, candidates["cava"][0])
+        cava_parsed = parse_cava_theme(cava_file)
+        if cava_parsed:
+            apps["cava"] = cava_parsed
 
-    # 1. Cava
-    cava_file = os.path.join(repo_dir, "cava_theme")
-    if not os.path.exists(cava_file):
-        cava_file = os.path.join(repo_dir, "cava.conf")
-    cava_parsed = parse_cava_theme(cava_file)
-    if cava_parsed:
-        apps["cava"] = cava_parsed
-        capabilities["cava"] = True
-
-    # 2. Terminals
-    if "alacritty.toml" in repo_files:
-        capabilities["alacritty"] = True
-    if "kitty.conf" in repo_files:
-        capabilities["kitty"] = True
-    if "ghostty.conf" in repo_files:
-        capabilities["ghostty"] = True
-    if "foot.ini" in repo_files:
-        capabilities["foot"] = True
-
-    # 3. System Apps & Bar
-    if "gtk.css" in repo_files:
-        capabilities["gtk"] = True
-    if "btop.theme" in repo_files:
-        capabilities["btop"] = True
-    if "mako.ini" in repo_files or "dunst.conf" in repo_files:
-        capabilities["mako"] = True
-    if "waybar.css" in repo_files or os.path.isdir(os.path.join(repo_dir, "waybar-theme")):
-        capabilities["waybar"] = True
-    if "neovim.lua" in repo_files:
-        capabilities["neovim"] = True
-
-    # 4. Miscellaneous Apps
-    if "steam.css" in repo_files:
-        capabilities["steam"] = True
-    if "vencord.theme.css" in repo_files:
-        capabilities["vencord"] = True
-    if "chromium.theme" in repo_files:
-        capabilities["browser"] = True
-    if any(f.endswith(".zed.json") for f in repo_files):
-        capabilities["zed"] = True
-
-    # 5. Wallpapers (Assets recorded in cache, never auto-activated)
-    wallpapers = []
-    bg_dir = os.path.join(repo_dir, "backgrounds")
-    if os.path.isdir(bg_dir):
-        for bg in os.listdir(bg_dir):
-            if bg.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
-                wallpapers.append(os.path.join("backgrounds", bg))
-        if wallpapers:
-            capabilities["wallpaper"] = True
-
-    # 6. Explicitly ignored files (Hyprland, Hyprlock, shell executables, rgb)
-    ignored_patterns = [
-        "hyprland.conf", "hyprland.lua", "hyprlock.conf", "hyprland-preview-share-picker.css",
-        "keyboard.rgb", "install.sh", "setup.sh", "Makefile", "package.json", "Cargo.toml"
-    ]
-    for rf in repo_files:
-        if rf in ignored_patterns or rf.endswith((".sh", ".fish", ".zsh", ".bash", ".service")):
-            ignored_files.append(rf)
-
-    # Preview image
-    preview_src = os.path.join(repo_dir, "preview.png")
-    preview_dest = os.path.join(PREVIEWS_DIR, f"{slug}.png")
-    if os.path.exists(preview_src):
-        shutil.copy2(preview_src, preview_dest)
+    # Previews
+    preview_dest = None
+    if candidates["previews"]:
+        # Sort so preview.png / theme-preview come first
+        candidates["previews"].sort(key=lambda p: (
+            0 if "preview.png" in p.lower() else (1 if "theme-preview" in p.lower() else 2)
+        ))
+        preview_src = os.path.join(repo_dir, candidates["previews"][0])
+        preview_dest = os.path.join(PREVIEWS_DIR, f"{slug}.png")
+        try:
+            shutil.copy2(preview_src, preview_dest)
+        except Exception:
+            preview_dest = None
 
     raw_theme = {
         "schema": 1,
@@ -349,8 +759,8 @@ def analyze_repository(repo_dir, git_url=None, owner="Unknown", repo_name=""):
         "semantic": semantic_overrides,
         "apps": apps,
         "assets": {
-            "wallpapers": wallpapers,
-            "preview": preview_dest if os.path.exists(preview_src) else None,
+            "wallpapers": candidates["wallpapers"],
+            "preview": preview_dest,
         }
     }
 
@@ -358,10 +768,11 @@ def analyze_repository(repo_dir, git_url=None, owner="Unknown", repo_name=""):
         "name": display_name,
         "slug": slug,
         "author": owner,
+        "format": format_desc,
         "capabilities": capabilities,
-        "ignored_files": sorted(ignored_files),
-        "cava_gradient_count": apps.get("cava", {}).get("gradient_count") if "cava" in apps else 0,
-        "wallpapers_count": len(wallpapers),
+        "ignored_files": sorted(set(candidates["ignored"])),
+        "cava_gradient_count": apps.get("cava", {}).get("gradient_count", 8) if "cava" in apps else 8,
+        "wallpapers_count": len(candidates["wallpapers"]),
     }
 
     return raw_theme, summary
@@ -406,16 +817,25 @@ def print_theme_analysis(summary, branch="master", commit=""):
     """Renders the user experience report."""
     print(f"\nDetected Omarchy theme")
     print(f"Name:   {summary['name']}")
+    print(f"Format: {summary.get('format', 'Native Omarchy')}")
     print(f"Author: {summary['author']}")
     print(f"Branch: {branch}")
     print(f"Commit: {commit[:7] if commit else 'unknown'}")
 
     print("\nAnalyzing theme...")
     caps = summary["capabilities"]
-    for cap_name in ["palette", "wallpaper", "cava", "gtk", "waybar", "alacritty", "btop", "neovim", "mako", "kitty", "steam", "vencord", "zed"]:
-        has_cap = caps.get(cap_name, False)
-        status = "yes" if has_cap else "no"
-        print(f"  {cap_name.capitalize():<12} {status}")
+    for cap_name in ["palette", "wallpaper", "cava", "gtk", "waybar", "alacritty", "btop", "neovim", "mako", "kitty", "ghostty", "foot", "swayosd", "walker", "steam", "vencord", "zed"]:
+        if cap_name in caps:
+            has_cap = caps.get(cap_name, False)
+            if cap_name == "cava":
+                c_status = f"yes ({summary.get('cava_gradient_count', 8)} colors)" if has_cap else "no"
+                print(f"  {cap_name.capitalize():<12} {c_status}")
+            elif cap_name == "wallpaper":
+                w_status = f"yes ({summary.get('wallpapers_count', 0)} found)" if has_cap else "no"
+                print(f"  {cap_name.capitalize():<12} {w_status}")
+            else:
+                status = "yes" if has_cap else "no"
+                print(f"  {cap_name.capitalize():<12} {status}")
 
     print("\nEnvironment Adaptation:")
     print("  Sway:        generated from palette")
@@ -428,6 +848,7 @@ def print_theme_analysis(summary, branch="master", commit=""):
             print(f"  - {ig}")
         if len(summary["ignored_files"]) > 6:
             print(f"  ... and {len(summary['ignored_files']) - 6} more")
+
 
 
 def import_git_theme(git_url, dry_run=False, info_only=False, force_update=False, apply_theme_flag=False):
