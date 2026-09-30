@@ -75,25 +75,21 @@ keymap:
       # Volume (] for up, \ for down)
       CapsLock-RIGHTBRACE: VolumeUp
       CapsLock-BACKSLASH: VolumeDown
-      # Screenshots:
-      # - CapsLock + Space: Region selection -> clipboard only (zero file storage)
-      # - CapsLock + s: Fullscreen -> saved to ~/Pictures/Screenshots + clipboard
-      CapsLock-Space: Print
-      CapsLock-s: Shift-Print
-
       # Window Close & Kill (Sway native integration):
-      # - CapsLock + BackSpace (Two-Handed) or CapsLock + q: Graceful close
-      # - CapsLock + Shift + BackSpace or CapsLock + Shift + q: Force kill
-      CapsLock-BackSpace: M-BackSpace
+      # - CapsLock + q: Graceful close (without reaching down to physical Super)
+      # - CapsLock + BackSpace: Graceful close (two-handed)
+      # - CapsLock + Shift + q / CapsLock + Shift + BackSpace: Force kill
       CapsLock-q: M-q
-      CapsLock-Shift-BackSpace: M-S-BackSpace
+      CapsLock-BackSpace: M-BackSpace
       CapsLock-Shift-q: M-S-q
+      CapsLock-Shift-BackSpace: M-S-BackSpace
 
       # Passthrough
       CapsLock-a: a
       CapsLock-b: b
       CapsLock-c: c
       CapsLock-e: e
+      CapsLock-s: s
       CapsLock-t: t
       CapsLock-v: v
       CapsLock-w: w
