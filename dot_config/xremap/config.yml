@@ -76,10 +76,10 @@ keymap:
       CapsLock-RIGHTBRACE: VolumeUp
       CapsLock-BACKSLASH: VolumeDown
       # Screenshots:
-      # - CapsLock + Space: Region selection -> clipboard only (zero file storage)
-      # - CapsLock + s: Fullscreen -> saved to ~/Pictures/Screenshots + clipboard
-      CapsLock-Space: SysRq
-      CapsLock-s: Shift-SysRq
+      # - CapsLock + s: Region selection -> clipboard only (zero file storage)
+      # - CapsLock + Space: Fullscreen -> saved to ~/Pictures/Screenshots + clipboard
+      CapsLock-s: SysRq
+      CapsLock-Space: Shift-SysRq
 
       # Window Close & Kill (Sway native integration):
       # - CapsLock + q: Graceful close (without reaching down to physical Super)
