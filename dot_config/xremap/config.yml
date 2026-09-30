@@ -40,8 +40,7 @@ keymap:
       CapsLock-l: Right
       CapsLock-o: C-Left
       CapsLock-p: C-Right
-      # Brightness (CapsLock + [ and CapsLock + ')
-      CapsLock-LEFTBRACE: BrightnessUp
+      # Brightness (CapsLock + ')
       CapsLock-APOSTROPHE: BrightnessDown
       # Actions
       CapsLock-n: Enter
@@ -70,8 +69,7 @@ keymap:
       CapsLock-0: F10
       CapsLock-MINUS: F11
       CapsLock-EQUAL: F12
-      # Volume (] for up, \ for down)
-      CapsLock-RIGHTBRACE: VolumeUp
+      # Volume (\ for down)
       CapsLock-BACKSLASH: VolumeDown
       # Screenshots:
       # - CapsLock + s: Region selection -> clipboard only (zero file storage)
