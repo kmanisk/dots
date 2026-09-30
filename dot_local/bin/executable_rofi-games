@@ -2,7 +2,7 @@
 # rofi-games — game launcher menu (Alt+g). All entries use Proton, never vanilla Wine.
 export PATH="$HOME/.local/bin:$PATH"
 
-options="✨ ELDEN RING + FG (2x)\n🗡️ ELDEN RING\n🧪 ELDEN RING (Gamescope test)\n🎮 Steam library\n⚙️ Configure LSFG (GUI)\n🛑 Kill game"
+options="🗡️ ELDEN RING\n✨ ELDEN RING + FG (2x) [Disabled]\n🧪 ELDEN RING (Gamescope test)\n🎮 Steam library\n⚙️ Configure LSFG (GUI)\n🛑 Kill game"
 chosen=$(echo -e "$options" | rofi -dmenu -i \
     -sort \
     -sorting-method "fzf" \
@@ -12,9 +12,9 @@ chosen=$(echo -e "$options" | rofi -dmenu -i \
 
 case "$chosen" in
     *"Steam"*)          env STEAM_DGPU=1 steam-workspace ;;
-    *"+ FG"*)           env ENABLE_LSFG=1 LSFGVK_PROFILE='Elden Ring' mangohud eldenring-run ;;
-    *"Gamescope test"*) env ENABLE_LSFG=0 DISABLE_LSFGVK=1 mangohud eldenring-run ;;
-    *"ELDEN RING"*)     env ENABLE_LSFG=0 DISABLE_LSFGVK=1 mangohud eldenring-run ;;
+    *"+ FG"*)           notify-send -t 3000 -i dialog-warning "Elden Ring" "LSFG frame gen is disabled for now due to Gamescope crash. Launching vanilla." ; env DISABLE_LSFGVK=1 mangohud eldenring-run ;;
+    *"Gamescope test"*) env DISABLE_LSFGVK=1 mangohud eldenring-run ;;
+    *"ELDEN RING"*)     env DISABLE_LSFGVK=1 mangohud eldenring-run ;;
     *"Configure LSFG"*) ( ~/.local/bin/lsfg-vk-ui >/dev/null 2>&1 & ) ;;
     *"Kill"*)           killgame ;;
 esac
