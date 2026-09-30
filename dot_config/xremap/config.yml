@@ -75,13 +75,18 @@ keymap:
       # Volume (] for up, \ for down)
       CapsLock-RIGHTBRACE: VolumeUp
       CapsLock-BACKSLASH: VolumeDown
+      # Screenshots:
+      # - CapsLock + s or CapsLock + Space: Region selection -> clipboard only
+      # - CapsLock + Shift + s: Fullscreen -> file storage + clipboard
+      CapsLock-s: Print
+      CapsLock-Space: Print
+      CapsLock-Shift-s: Shift-Print
       # Passthrough
       CapsLock-a: a
       CapsLock-b: b
       CapsLock-c: c
       CapsLock-e: e
       CapsLock-q: q
-      CapsLock-s: s
       CapsLock-t: t
       CapsLock-v: v
       CapsLock-w: w

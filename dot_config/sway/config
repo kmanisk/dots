@@ -40,7 +40,6 @@ bindsym $mod+d exec "pkill fuzzel || fuzzel"
 # Web Search with bangs (Google, YouTube, ArchWiki, GitHub, Amazon)
 bindsym Mod1+s exec --no-startup-id ~/.local/bin/rofi-websearch
 bindsym $mod+slash exec --no-startup-id ~/.local/bin/rofi-websearch
-bindsym Mod1+Shift+space exec --no-startup-id ~/.local/bin/rofi-websearch --floating
 
 # Clipboard History (Fuzzel + Cliphist)
 bindsym $mod+Shift+v exec --no-startup-id ~/.local/bin/fuzzel-clipboard
@@ -208,11 +207,12 @@ bindsym XF86AudioMute exec --no-startup-id ~/.local/bin/volume-notify mute
 bindsym XF86AudioMicMute exec --no-startup-id pactl set-source-mute @DEFAULT_SOURCE@ toggle
 
 # Screenshots:
-# - Win+s: Interactive region selection -> clipboard
-# - Win+Shift+s / Print / Win+Print: Fullscreen direct to clipboard (no select)
+# - Win+s / Print: Interactive region selection -> clipboard only (zero file storage)
+# - Win+Shift+s / Shift+Print / Win+Print: Fullscreen direct to file storage (~/Pictures/Screenshots) + clipboard
 bindsym $mod+s exec --no-startup-id ~/.local/bin/screenshot-region
+bindsym Print exec --no-startup-id ~/.local/bin/screenshot-region
+bindsym Shift+Print exec --no-startup-id ~/.local/bin/screenshot-fullscreen
 bindsym $mod+Shift+s exec --no-startup-id ~/.local/bin/screenshot-fullscreen
-bindsym Print exec --no-startup-id ~/.local/bin/screenshot-fullscreen
 bindsym $mod+Print exec --no-startup-id ~/.local/bin/screenshot-fullscreen
 
 # Screen Lock
@@ -221,10 +221,15 @@ bindsym $mod+Control+l exec swaylock -f -c 000000
 # ==============================================================================
 # WINDOW MANAGEMENT
 # ==============================================================================
+# Close & Force Kill:
+# - Win+q / Win+BackSpace: Graceful close (Win+BackSpace eliminates pinky claw)
+# - Win+Shift+q / Win+Shift+BackSpace: Force kill
 bindsym $mod+q kill
+bindsym $mod+BackSpace kill
 bindsym $mod+Shift+q exec --no-startup-id ~/.local/bin/force-kill-window
+bindsym $mod+Shift+BackSpace exec --no-startup-id ~/.local/bin/force-kill-window
 bindsym $mod+f fullscreen toggle
-# bindsym $mod+Shift+space floating toggle
+bindsym Mod1+Shift+space floating toggle
 bindsym Shift+space focus mode_toggle
 # bindsym $mod+space focus mode_toggle (disabled: collided with xremap RightCtrl/Space input in scratchpad)
 bindsym $mod+Shift+a focus parent
