@@ -84,10 +84,14 @@ def main():
         "-markup-rows",
         "-p", " ",
         "-no-custom",
-        "-format", "i",
-        "-selected-row", str(selected_row),
+        "-sort",
+        "-sorting-method", "fzf",
+        "-matching", "fuzzy",
+        "-format", "s",
         "-theme", THEME_RASI,
     ]
+    if current:
+        rofi_cmd.extend(["-select", current])
 
     try:
         proc = subprocess.run(
@@ -99,13 +103,14 @@ def main():
         if proc.returncode != 0 or not proc.stdout.strip():
             return 0
 
-        chosen_idx = int(proc.stdout.strip())
-        if 0 <= chosen_idx < len(names):
-            chosen_theme = names[chosen_idx]
+        selected_line = proc.stdout.strip()
+        chosen_theme = selected_line.split()[0]
+        if chosen_theme in names:
             subprocess.run([THEME_SET, chosen_theme])
     except Exception as e:
         print(f"Error launching theme picker: {e}", file=sys.stderr)
         return 1
+
 
     return 0
 
