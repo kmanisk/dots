@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 Hook: 20-thunar-folder-color.py
-Dynamically recolors Gruvbox-Plus-Dark folder icons to match the active system theme accent.
-Execution time: ~30-50ms. Zero resident processes / daemons.
+Dynamically recolors Gruvbox-Plus-Dark folder icons to match the active system theme accent,
+and enforces sharp, straight geometric edges (zero rounded corners).
+Execution time: ~30-50ms on change, <1ms when cached. Zero resident processes / daemons.
 """
 import os
 import sys
@@ -13,8 +14,55 @@ COLORS_SH = os.path.join(THEME_STATE_DIR, "colors.sh")
 STATE_ACCENT_FILE = os.path.join(THEME_STATE_DIR, "folder_accent")
 ICON_THEME_DIR = os.path.expanduser("~/.local/share/icons/Gruvbox-Plus-Dark")
 
+STRAIGHT_FOLDER_BODY = """  <!-- Back flap -->
+  <path class="ColorScheme-Highlight" d="M14 22H96L112 38H242V234H14Z" fill="currentColor"/>
+  <!-- Back flap shadow -->
+  <path d="M14 22H96L112 38H242V234H14Z" fill="#000000" opacity=".28"/>
+  <!-- Top tab highlight -->
+  <path d="M14 22H96L112 38H242V40H111L95 24H14Z" fill="#ffffff" opacity=".2"/>
+  <!-- Front flap -->
+  <path class="ColorScheme-Highlight" d="M14 72H104L120 56H242V234H14Z" fill="currentColor"/>
+  <!-- Front flap top edge highlight -->
+  <path d="M14 72H104L120 56H242V59H119L103 75H14Z" fill="#ffffff" opacity=".25"/>
+  <!-- Bottom shadow -->
+  <path d="M14 231H242V235H14Z" fill="#000000" opacity=".3"/>"""
+
+STRAIGHT_OPEN_FOLDER_BODY = """  <!-- Back flap -->
+  <path class="ColorScheme-Highlight" d="M14 22H96L112 38H242V234H14Z" fill="currentColor"/>
+  <!-- Back flap shadow -->
+  <path d="M14 22H96L112 38H242V234H14Z" fill="#000000" opacity=".28"/>
+  <!-- Top tab highlight -->
+  <path d="M14 22H96L112 38H242V40H111L95 24H14Z" fill="#ffffff" opacity=".2"/>
+  <!-- Interior paper sheet (sharp edges) -->
+  <path d="M30 46H226V180H30Z" fill="#ebdbb2"/>
+  <path d="M30 46H226V50H30Z" fill="#ffffff" opacity=".4"/>
+  <!-- Front open flap -->
+  <path class="ColorScheme-Highlight" d="M14 99H104L120 83H242V234H14Z" fill="currentColor"/>
+  <!-- Front flap top edge highlight -->
+  <path d="M14 99H104L120 83H242V86H119L103 102H14Z" fill="#ffffff" opacity=".25"/>
+  <!-- Bottom shadow -->
+  <path d="M14 231H242V235H14Z" fill="#000000" opacity=".3"/>"""
+
+STRAIGHT_DESKTOP_BODY = """  <!-- Window frame (sharp straight edges) -->
+  <path class="ColorScheme-Highlight" d="M14 38H242V218H14Z" fill="currentColor"/>
+  <!-- Titlebar -->
+  <path d="M14 38H242V60H14Z" fill="#000000" opacity=".28"/>
+  <!-- Titlebar top highlight -->
+  <path d="M14 38H242V40H14Z" fill="#ffffff" opacity=".2"/>
+  <!-- Bottom shadow -->
+  <path d="M14 215H242V218H14Z" fill="#000000" opacity=".3"/>
+  <!-- Sharp titlebar dots -->
+  <rect x="24" y="44" width="8" height="8" fill="#ffffff" opacity=".3"/>
+  <rect x="38" y="44" width="8" height="8" fill="#ffffff" opacity=".3"/>
+  <rect x="52" y="44" width="8" height="8" fill="#ffffff" opacity=".3"/>
+  <!-- Bottom dock blocks (sharp straight edges) -->
+  <rect x="58" y="194" width="16" height="12" fill="#000000" opacity=".25"/>
+  <rect x="88" y="194" width="16" height="12" fill="#000000" opacity=".25"/>
+  <rect x="118" y="194" width="16" height="12" fill="#000000" opacity=".25"/>
+  <rect x="148" y="194" width="16" height="12" fill="#000000" opacity=".25"/>
+  <rect x="178" y="194" width="16" height="12" fill="#000000" opacity=".25"/>"""
+
 def get_target_accent():
-    # If passed as command line argument or found in colors.sh
     if os.path.exists(COLORS_SH):
         try:
             with open(COLORS_SH, "r", encoding="utf-8") as f:
@@ -44,17 +92,59 @@ def main():
     pattern = re.compile(r'(\.ColorScheme-Highlight\s*\{\s*color:\s*)[^;]+(;)')
     updated = False
 
-    target_dirs = [
-        os.path.join(ICON_THEME_DIR, "places/scalable"),
-        os.path.join(ICON_THEME_DIR, "places/16")
-    ]
+    scalable_dir = os.path.join(ICON_THEME_DIR, "places/scalable")
+    if os.path.isdir(scalable_dir):
+        for fname in os.listdir(scalable_dir):
+            if not fname.endswith(".svg"):
+                continue
+            fpath = os.path.join(scalable_dir, fname)
+            if os.path.islink(fpath):
+                continue
 
-    for d in target_dirs:
-        if not os.path.isdir(d):
-            continue
-        for fname in os.listdir(d):
+            try:
+                with open(fpath, "r", encoding="utf-8", errors="ignore") as fp:
+                    content = fp.read()
+
+                # Enforce straight geometric edges if file still has rounded curves
+                if "m53 71c-36.338" in content:
+                    defs_m = re.search(r'(<defs>.*?</defs>)', content, re.DOTALL)
+                    defs = defs_m.group(1) if defs_m else f'<defs><style id="current-color-scheme" type="text/css">.ColorScheme-Text {{ color:#282828; }} .ColorScheme-Highlight {{ color:{target_accent}; }}</style></defs>'
+                    is_open = fname.endswith("-open.svg") or "-drag-accept" in fname or "-visiting" in fname
+                    body = STRAIGHT_OPEN_FOLDER_BODY if is_open else STRAIGHT_FOLDER_BODY
+                    parts = content.split('<path ')
+                    emblem_start = 7 if is_open else 6
+                    emblem_paths = ['<path ' + part for part in parts[emblem_start:]]
+                    emblem_content = ''.join(emblem_paths).replace('</svg>', '').strip()
+                    if emblem_content:
+                        content = f'<svg width="256" height="256" version="1.1" xmlns="http://www.w3.org/2000/svg">\n  {defs}\n{body}\n  {emblem_content}\n</svg>\n'
+                    else:
+                        content = f'<svg width="256" height="256" version="1.1" xmlns="http://www.w3.org/2000/svg">\n  {defs}\n{body}\n</svg>\n'
+                    updated = True
+
+                elif fname == "user-desktop.svg" and "m16.833 39.881" in content:
+                    defs_m = re.search(r'(<defs>.*?</defs>)', content, re.DOTALL)
+                    defs = defs_m.group(1) if defs_m else f'<defs><style id="current-color-scheme" type="text/css">.ColorScheme-Text {{ color:#282828; }} .ColorScheme-Highlight {{ color:{target_accent}; }}</style></defs>'
+                    content = f'<svg width="256" height="256" version="1.1" xmlns="http://www.w3.org/2000/svg">\n  {defs}\n{STRAIGHT_DESKTOP_BODY}\n</svg>\n'
+                    updated = True
+
+                # Update accent color
+                if ".ColorScheme-Highlight" in content:
+                    new_content = pattern.sub(r'\g<1>' + target_accent + r'\2', content)
+                    if new_content != content:
+                        content = new_content
+                        updated = True
+
+                with open(fpath, "w", encoding="utf-8") as fp:
+                    fp.write(content)
+            except Exception:
+                pass
+
+    # 16px places
+    places16_dir = os.path.join(ICON_THEME_DIR, "places/16")
+    if os.path.isdir(places16_dir):
+        for fname in os.listdir(places16_dir):
             if fname.endswith(".svg"):
-                fpath = os.path.join(d, fname)
+                fpath = os.path.join(places16_dir, fname)
                 if os.path.islink(fpath):
                     continue
                 try:
