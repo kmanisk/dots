@@ -5,11 +5,16 @@ Safely removes themes from Imported Omarchy, Custom, or Base46 sources.
 Enforces active-theme immunity, cleans compiled caches, and synchronizes the manifest.
 
 Usage:
-  theme-rm <theme-name>... [--force | -f] [--dry-run | -n]
+  theme-rm                          Interactive FZF search & multi-selection
+  theme-rm <theme-name>...          Delete specific themes
+  theme-ls | fzf | theme-rm         Pipe selected themes directly
+  theme-rm --preview <theme-name>   Render formatted ANSI truecolor preview
 """
 import argparse
 import glob
+import json
 import os
+import shutil
 import subprocess
 import sys
 
@@ -19,6 +24,7 @@ IMPORTED_DIR = os.path.expanduser("~/.config/theme/imported")
 CACHE_DIR = os.path.expanduser("~/.cache/theme/themes")
 PREVIEWS_DIR = os.path.expanduser("~/.cache/theme/previews")
 THEME_SYNC = os.path.expanduser("~/.local/bin/theme-sync")
+COLORS_SH = os.path.expanduser("~/.local/state/theme/colors.sh")
 
 
 def get_current_theme():
@@ -30,6 +36,149 @@ def get_current_theme():
         except Exception:
             pass
     return "gruvchad"
+
+
+def hex_to_ansi(hex_col, block=True):
+    try:
+        h = hex_col.lstrip("#")
+        if len(h) != 6:
+            return hex_col
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        glyph = "██" if block else "●"
+        return f"\033[38;2;{r};{g};{b}m{glyph}\033[0m #{h.upper()}"
+    except Exception:
+        return hex_col
+
+
+def print_theme_preview(theme_name):
+    clean = theme_name[8:] if theme_name.startswith("omarchy-") else theme_name
+    candidates = [
+        os.path.join(CACHE_DIR, f"{theme_name}.json"),
+        os.path.join(CACHE_DIR, f"{clean}.json"),
+        os.path.join(CACHE_DIR, f"omarchy-{clean}.json"),
+    ]
+    target = None
+    for cand in candidates:
+        if os.path.exists(cand):
+            target = cand
+            break
+
+    if not target:
+        print(f"\033[31mNo compiled metadata found for theme '{theme_name}'.\033[0m")
+        return
+
+    try:
+        with open(target, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f"Error loading theme JSON: {e}")
+        return
+
+    current = get_current_theme()
+    is_active = (theme_name == current or clean == current)
+    status_tag = " \033[1;32m[CURRENTLY ACTIVE]\033[0m" if is_active else ""
+
+    print(f"\033[1;37mTHEME DETAILS\033[0m{status_tag}")
+    print(f"  Name:         \033[1m{data.get('name', theme_name)}\033[0m")
+    print(f"  Display:      {data.get('display_name', '')}")
+    print(f"  Type:         {data.get('type', 'dark')}")
+    prov = data.get("source", {}).get("provider", "unknown")
+    print(f"  Provider:     \033[36m{prov}\033[0m")
+    accent = data.get("accent", "#ffffff")
+    print(f"  Accent:       {hex_to_ansi(accent)}")
+
+    b16 = data.get("palette", {}).get("base_16", {})
+    if b16:
+        print("\n\033[1;37mPALETTE (Base 16)\033[0m")
+        order = ["BASE00", "BASE01", "BASE02", "BASE03", "BASE04", "BASE05", "BASE06", "BASE07",
+                 "BASE08", "BASE09", "BASE0A", "BASE0B", "BASE0C", "BASE0D", "BASE0E", "BASE0F"]
+        for k in order:
+            val = b16.get(k)
+            if val:
+                print(f"  {k:<8} {hex_to_ansi(val)}")
+
+
+def get_fzf_color_spec():
+    if os.path.isfile(COLORS_SH):
+        vars_map = {}
+        try:
+            with open(COLORS_SH, "r") as f:
+                for line in f:
+                    if line.startswith("export THEME_"):
+                        k, v = line.strip().split("=", 1)
+                        vars_map[k.replace("export ", "")] = v.strip('"')
+            return (
+                f"bg+:{vars_map.get('THEME_SEL', '#3b4252')},"
+                f"bg:{vars_map.get('THEME_BG', '#2e3440')},"
+                f"spinner:{vars_map.get('THEME_ACCENT', '#81a1c1')},"
+                f"hl:{vars_map.get('THEME_ACCENT', '#88c0d0')},"
+                f"fg:{vars_map.get('THEME_FG', '#d8dee9')},"
+                f"header:{vars_map.get('THEME_ACCENT', '#81a1c1')},"
+                f"info:{vars_map.get('THEME_YELLOW', '#ebcb8b')},"
+                f"pointer:{vars_map.get('THEME_RED', '#bf616a')},"
+                f"marker:{vars_map.get('THEME_RED', '#bf616a')},"
+                f"fg+:{vars_map.get('THEME_FG', '#eceff4')},"
+                f"prompt:{vars_map.get('THEME_RED', '#bf616a')},"
+                f"hl+:{vars_map.get('THEME_CYAN', '#8fbcbb')},"
+                f"border:{vars_map.get('THEME_MUTED', '#4c566a')}"
+            )
+        except Exception:
+            pass
+    return "pointer:#bf616a,marker:#bf616a,prompt:#bf616a"
+
+
+def run_interactive_fzf():
+    """Launches FZF to select theme(s) to delete."""
+    if not shutil.which("fzf"):
+        print("Error: fzf is not installed for interactive mode.", file=sys.stderr)
+        return []
+
+    theme_files = sorted(glob.glob(os.path.join(CACHE_DIR, "*.json")))
+    current = get_current_theme()
+
+    lines = []
+    for tf in theme_files:
+        t_name = os.path.splitext(os.path.basename(tf))[0]
+        prov = "unknown"
+        try:
+            with open(tf, "r", encoding="utf-8") as jf:
+                d = json.load(jf)
+            prov = d.get("source", {}).get("provider", "unknown")
+        except Exception:
+            pass
+
+        active_badge = "\033[1;32m[ACTIVE]\033[0m" if t_name == current else ""
+        lines.append(f"{t_name:<28} {prov:<14} {active_badge}")
+
+    input_text = "\n".join(lines) + "\n"
+
+    fzf_cmd = [
+        "fzf",
+        "--ansi",
+        "--multi",
+        "--layout=reverse",
+        "--height=100%",
+        "--border=rounded",
+        "--prompt=🗑️  Delete Theme> ",
+        "--header=[Tab] Multi-select | [Enter] Confirm Deletion | [Esc] Cancel",
+        f"--preview={os.path.abspath(__file__)} --preview {{1}}",
+        "--preview-window=right,55%,wrap",
+        f"--color={get_fzf_color_spec()}",
+    ]
+
+    try:
+        proc = subprocess.run(fzf_cmd, input=input_text, text=True, capture_output=True)
+        if proc.returncode != 0 or not proc.stdout.strip():
+            return []
+        selected = []
+        for line in proc.stdout.strip().splitlines():
+            parts = line.split()
+            if parts:
+                selected.append(parts[0])
+        return selected
+    except Exception as e:
+        print(f"Error launching fzf: {e}", file=sys.stderr)
+        return []
 
 
 def find_theme_source(theme_name):
@@ -83,21 +232,47 @@ def purge_cache(theme_name):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Safely delete themes from the Theme Engine via command line."
+        description="Safely delete themes from the Theme Engine via command line or fzf."
     )
-    parser.add_argument("themes", nargs="+", help="Name(s) of the theme to delete")
+    parser.add_argument("themes", nargs="*", help="Name(s) of the theme to delete")
     parser.add_argument(
         "-f", "--force", action="store_true", help="Skip confirmation prompt"
     )
     parser.add_argument(
         "-n", "--dry-run", action="store_true", help="Simulate deletion without making changes"
     )
+    parser.add_argument(
+        "--preview", type=str, help="Render formatted ANSI preview of a theme and exit"
+    )
     args = parser.parse_args()
 
+    if args.preview:
+        print_theme_preview(args.preview)
+        return 0
+
     current_theme = get_current_theme()
+    targets_to_delete = []
+
+    # 1. Positional arguments
+    if args.themes:
+        targets_to_delete = args.themes
+    # 2. Piped stdin (e.g. theme-ls | fzf | theme-rm)
+    elif not sys.stdin.isatty():
+        piped_input = sys.stdin.read().strip()
+        if piped_input:
+            for line in piped_input.splitlines():
+                t = line.split()[0] if line.split() else ""
+                if t:
+                    targets_to_delete.append(t)
+    # 3. Interactive FZF picker
+    else:
+        targets_to_delete = run_interactive_fzf()
+        if not targets_to_delete:
+            return 0
+
     any_deleted = False
 
-    for t_name in args.themes:
+    for t_name in targets_to_delete:
         clean_name = t_name.strip()
         if not clean_name:
             continue
@@ -105,7 +280,7 @@ def main():
         # Active theme safety rule
         if clean_name == current_theme or (clean_name.startswith("omarchy-") and clean_name[8:] == current_theme):
             print(
-                f"Error: Cannot delete '{clean_name}' — it is the currently ACTIVE theme!",
+                f"\033[1;31mError:\033[0m Cannot delete '{clean_name}' — it is the currently \033[1;32mACTIVE\033[0m theme!",
                 file=sys.stderr,
             )
             print("Please switch to another theme first using 'theme-set'.", file=sys.stderr)
@@ -113,7 +288,7 @@ def main():
 
         source_path, source_type = find_theme_source(clean_name)
         if not source_path:
-            print(f"Error: Theme '{clean_name}' not found in any source directory.", file=sys.stderr)
+            print(f"\033[1;31mError:\033[0m Theme '{clean_name}' not found in any source directory.", file=sys.stderr)
             continue
 
         if args.dry_run:
@@ -122,7 +297,7 @@ def main():
 
         if not args.force and sys.stdin.isatty():
             try:
-                confirm = input(f"Permanently delete '{clean_name}' ({source_type})? [y/N]: ").strip().lower()
+                confirm = input(f"Permanently delete '{clean_name}' (\033[36m{source_type}\033[0m)? [y/N]: ").strip().lower()
                 if confirm not in ("y", "yes"):
                     print(f"Skipped '{clean_name}'.")
                     continue
@@ -133,18 +308,18 @@ def main():
         try:
             os.remove(source_path)
             purge_cache(clean_name)
-            print(f"✓ Removed: {clean_name} ({source_path})")
+            print(f"\033[32m✓ Removed:\033[0m {clean_name} ({source_path})")
             any_deleted = True
         except Exception as e:
             print(f"Error removing {source_path}: {e}", file=sys.stderr)
 
     if any_deleted:
-        print("Recompiling theme cache via theme-sync...")
+        print("\nRecompiling theme cache via theme-sync...")
         subprocess.run([THEME_SYNC], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run([
             "notify-send",
             "Theme Engine",
-            f"Themes removed and cache synchronized.",
+            "Themes removed and cache synchronized.",
             "-i", "dialog-information",
         ])
         print("Done.")
