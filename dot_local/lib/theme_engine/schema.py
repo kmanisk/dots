@@ -144,52 +144,22 @@ def synthesize_derived(palette, theme_type="dark"):
 def synthesize_cava(palette, semantic, raw_cava=None):
     """
     Builds canonical Cava visualizer theme settings.
-    If raw_cava is provided (from an upstream cava_theme), validates and preserves:
-      - gradient (0 or 1)
-      - gradient_count (N)
-      - colors (list of hex colors in gradient order)
-      - background / foreground
-    Otherwise, derives an 8-color gradient from semantic & Base16 tokens.
+    Uses the most prominent theme accent color across the whole visualizer (gradient = 0)
+    for a clean, unified aesthetic matching Omarchy theme standards.
     """
     b16 = palette.get("base_16", {})
-    accent = palette.get("accent", "#58a6ff")
-    bg = semantic.get("background", b16.get("BASE00", "#181818"))
-    fg = semantic.get("foreground", b16.get("BASE05", "#d8d8d8"))
-
-    if raw_cava and isinstance(raw_cava, dict) and raw_cava.get("colors"):
-        colors = [clean_hex(c) for c in raw_cava["colors"] if HEX_RE.match(clean_hex(c))]
-        if colors:
-            g_count = raw_cava.get("gradient_count") or len(colors)
-            return {
-                "source": raw_cava.get("source", "cava_theme"),
-                "gradient": int(raw_cava.get("gradient", 1)),
-                "gradient_count": int(g_count),
-                "colors": colors,
-                "background": clean_hex(raw_cava.get("background") or bg),
-                "foreground": clean_hex(raw_cava.get("foreground") or fg),
-            }
-
-    # Derived 8-stage gradient rising from bottom to top:
-    # accent -> blue -> cyan -> green -> yellow -> orange -> red -> bright_fg
-    colors = [
-        accent,                                             # stage 1 (bottom baseline)
-        clean_hex(b16.get("BASE0D", accent)),               # stage 2 (blue)
-        clean_hex(b16.get("BASE0C", "#56b6c2")),           # stage 3 (cyan)
-        clean_hex(b16.get("BASE0B", "#98c379")),           # stage 4 (green)
-        clean_hex(b16.get("BASE0A", "#e5c07b")),           # stage 5 (yellow)
-        clean_hex(b16.get("BASE09", "#d19a66")),           # stage 6 (orange)
-        clean_hex(b16.get("BASE08", "#e06c75")),           # stage 7 (red)
-        clean_hex(b16.get("BASE07", fg)),                  # stage 8 (peak bright fg)
-    ]
+    accent = palette.get("accent") or b16.get("BASE0D") or b16.get("BASE0A") or "#58a6ff"
+    accent = clean_hex(accent)
 
     return {
-        "source": "derived",
-        "gradient": 1,
-        "gradient_count": len(colors),
-        "colors": colors,
-        "background": bg,
-        "foreground": fg,
+        "source": "accent",
+        "gradient": 0,
+        "gradient_count": 0,
+        "colors": [accent],
+        "background": "default",
+        "foreground": accent,
     }
+
 
 def normalize_theme(raw, default_name=None, default_provider="custom"):
     """

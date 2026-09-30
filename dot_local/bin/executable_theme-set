@@ -159,24 +159,18 @@ def normalize_palette(theme_data, name):
     for k, v in semantic.items():
         r[f"semantic_{k}"] = v
 
-    # Add Cava visualizer tokens
+    # Add Cava visualizer tokens (solid prominent accent, gradient = 0)
+    accent = r.get("accent", "#58a6ff")
     cava = theme_data.get("apps", {}).get("cava") or theme_data.get("cava", {})
-    cava_colors = cava.get("colors", [])
-    cava_bg = cava.get("background") or r.get("base00", "#181818")
-    cava_fg = cava.get("foreground") or r.get("base05", "#d8d8d8")
-    cava_grad = cava.get("gradient", 1)
-    cava_count = cava.get("gradient_count", len(cava_colors) if cava_colors else 8)
+    cava_bg = cava.get("background") or "default"
+    cava_fg = accent
 
     r["cava_bg"] = cava_bg
     r["cava_fg"] = cava_fg
-    r["cava_gradient"] = str(cava_grad)
-    r["cava_gradient_count"] = str(cava_count)
+    r["cava_gradient"] = "0"
+    r["cava_gradient_count"] = "0"
+    r["cava_gradient_lines"] = ""
 
-    grad_lines = []
-    for idx, c in enumerate(cava_colors, 1):
-        r[f"cava_color_{idx}"] = c
-        grad_lines.append(f"gradient_color_{idx} = '{c}'")
-    r["cava_gradient_lines"] = "\n".join(grad_lines)
 
     # Add _x no-hash variants
     keys_snapshot = list(r.keys())
@@ -535,11 +529,9 @@ def main():
             print(f"Commit:       {src.get('commit')}")
         cap_list = [k for k, v in caps.items() if v]
         print(f"Capabilities: {', '.join(cap_list) if cap_list else 'palette'}")
-        cava_info = data.get("apps", {}).get("cava") or data.get("cava", {})
-        cava_source = cava_info.get("source", "derived")
-        cava_count = cava_info.get("gradient_count") or len(cava_info.get("colors", []))
-        cava_label = f"yes ({cava_source}, {cava_count} colors)" if caps.get("cava") else "no"
+        cava_label = f"yes (accent {accent})" if caps.get("cava") else "no"
         print(f"Cava:         {cava_label}")
+
         if cr:
             ratio = cr.get('ratio', 'N/A')
             aa = "Pass" if cr.get('wcag_aa') else "Fail"
