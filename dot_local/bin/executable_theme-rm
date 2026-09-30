@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+"""
+theme-rm: Command-line theme deletion wrapper for the unified Theme Engine.
+Safely removes themes from Imported Omarchy, Custom, or Base46 sources.
+Enforces active-theme immunity, cleans compiled caches, and synchronizes the manifest.
+
+Usage:
+  theme-rm <theme-name>... [--force | -f] [--dry-run | -n]
+"""
+import argparse
+import glob
+import os
+import subprocess
+import sys
+
+BASE46_DIR = os.path.expanduser("~/.config/theme/base46/lua/base46/themes")
+CUSTOM_DIR = os.path.expanduser("~/.config/theme/custom")
+IMPORTED_DIR = os.path.expanduser("~/.config/theme/imported")
+CACHE_DIR = os.path.expanduser("~/.cache/theme/themes")
+PREVIEWS_DIR = os.path.expanduser("~/.cache/theme/previews")
+THEME_SYNC = os.path.expanduser("~/.local/bin/theme-sync")
+
+
+def get_current_theme():
+    name_file = os.path.expanduser("~/.local/state/theme/name")
+    if os.path.exists(name_file):
+        try:
+            with open(name_file, "r") as f:
+                return f.read().strip()
+        except Exception:
+            pass
+    return "gruvchad"
+
+
+def find_theme_source(theme_name):
+    clean = theme_name[8:] if theme_name.startswith("omarchy-") else theme_name
+
+    # 1. Check imported
+    if os.path.isdir(IMPORTED_DIR):
+        for root, _, files in os.walk(IMPORTED_DIR):
+            for f in files:
+                stem, ext = os.path.splitext(f)
+                if ext == ".json" and stem in (theme_name, clean, f"omarchy-{clean}"):
+                    return os.path.join(root, f), "Imported Omarchy"
+
+    # 2. Check custom
+    if os.path.isdir(CUSTOM_DIR):
+        for root, _, files in os.walk(CUSTOM_DIR):
+            for f in files:
+                stem, ext = os.path.splitext(f)
+                if ext in (".json", ".yaml", ".toml") and stem in (theme_name, clean):
+                    return os.path.join(root, f), "Custom"
+
+    # 3. Check base46
+    base46_candidates = [
+        os.path.join(BASE46_DIR, f"{theme_name}.lua"),
+        os.path.join(BASE46_DIR, f"{clean}.lua"),
+    ]
+    for b in base46_candidates:
+        if os.path.exists(b):
+            return b, "Base46"
+
+    return None, None
+
+
+def purge_cache(theme_name):
+    clean = theme_name[8:] if theme_name.startswith("omarchy-") else theme_name
+    targets = [
+        os.path.join(CACHE_DIR, f"{theme_name}.json"),
+        os.path.join(CACHE_DIR, f"{clean}.json"),
+        os.path.join(CACHE_DIR, f"omarchy-{clean}.json"),
+        os.path.join(PREVIEWS_DIR, f"{theme_name}.png"),
+        os.path.join(PREVIEWS_DIR, f"{clean}.png"),
+        os.path.join(PREVIEWS_DIR, f"omarchy-{clean}.png"),
+    ]
+    for t in targets:
+        if os.path.exists(t):
+            try:
+                os.remove(t)
+            except Exception:
+                pass
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Safely delete themes from the Theme Engine via command line."
+    )
+    parser.add_argument("themes", nargs="+", help="Name(s) of the theme to delete")
+    parser.add_argument(
+        "-f", "--force", action="store_true", help="Skip confirmation prompt"
+    )
+    parser.add_argument(
+        "-n", "--dry-run", action="store_true", help="Simulate deletion without making changes"
+    )
+    args = parser.parse_args()
+
+    current_theme = get_current_theme()
+    any_deleted = False
+
+    for t_name in args.themes:
+        clean_name = t_name.strip()
+        if not clean_name:
+            continue
+
+        # Active theme safety rule
+        if clean_name == current_theme or (clean_name.startswith("omarchy-") and clean_name[8:] == current_theme):
+            print(
+                f"Error: Cannot delete '{clean_name}' — it is the currently ACTIVE theme!",
+                file=sys.stderr,
+            )
+            print("Please switch to another theme first using 'theme-set'.", file=sys.stderr)
+            continue
+
+        source_path, source_type = find_theme_source(clean_name)
+        if not source_path:
+            print(f"Error: Theme '{clean_name}' not found in any source directory.", file=sys.stderr)
+            continue
+
+        if args.dry_run:
+            print(f"[dry-run] Would delete: {source_path} ({source_type})")
+            continue
+
+        if not args.force and sys.stdin.isatty():
+            try:
+                confirm = input(f"Permanently delete '{clean_name}' ({source_type})? [y/N]: ").strip().lower()
+                if confirm not in ("y", "yes"):
+                    print(f"Skipped '{clean_name}'.")
+                    continue
+            except (KeyboardInterrupt, EOFError):
+                print("\nAborted.")
+                sys.exit(130)
+
+        try:
+            os.remove(source_path)
+            purge_cache(clean_name)
+            print(f"✓ Removed: {clean_name} ({source_path})")
+            any_deleted = True
+        except Exception as e:
+            print(f"Error removing {source_path}: {e}", file=sys.stderr)
+
+    if any_deleted:
+        print("Recompiling theme cache via theme-sync...")
+        subprocess.run([THEME_SYNC], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run([
+            "notify-send",
+            "Theme Engine",
+            f"Themes removed and cache synchronized.",
+            "-i", "dialog-information",
+        ])
+        print("Done.")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,27 +1,21 @@
 #!/usr/bin/env python3
 """
-rofi-theme: Pure NvChad Base46 Theme Selector with Inline Deletion.
+rofi-theme: Pure NvChad Base46 Theme Selector for the whole system.
 Displays exact NvChad bordered theme list with colored palette chips (󱓻).
 Fast (<10ms generation), 0 resident daemons, atomic switching.
-
-Keyboard Shortcuts:
-- Enter: Apply highlighted theme
-- Ctrl+Shift+D: Delete highlighted theme (source-aware, safety confirmation)
 """
+import os
+import sys
 import glob
 import json
-import os
-import shutil
 import subprocess
-import sys
+import shutil
 
 sys.path.insert(0, os.path.expanduser("~/.local/lib"))
 from theme_engine import is_cache_stale
 
 THEME_SET = os.path.expanduser("~/.local/bin/theme-set")
-THEME_SYNC = os.path.expanduser("~/.local/bin/theme-sync")
 CACHE_DIR = os.path.expanduser("~/.cache/theme/themes")
-PREVIEWS_DIR = os.path.expanduser("~/.cache/theme/previews")
 THEME_RASI = os.path.expanduser("~/.config/rofi/theme-picker-nvchad.rasi")
 BASE46_DIR = os.path.expanduser("~/.config/theme/base46/lua/base46/themes")
 CUSTOM_DIR = os.path.expanduser("~/.config/theme/custom")
@@ -29,7 +23,6 @@ IMPORTED_DIR = os.path.expanduser("~/.config/theme/imported")
 MANIFEST_PATH = os.path.expanduser("~/.cache/theme/manifest.json")
 
 ORDER = ["base08", "base09", "base0A", "base0B", "base0C", "base0D", "base0E", "base0F"]
-
 
 def get_current_theme():
     name_file = os.path.expanduser("~/.local/state/theme/name")
@@ -41,243 +34,83 @@ def get_current_theme():
             pass
     return "gruvchad"
 
-
-def find_theme_source(theme_name):
-    """
-    Locates the underlying source file and its origin type for a given theme name.
-    Handles 'omarchy-' prefixed themes as well as canonical names.
-    Returns (source_path, source_type).
-    """
-    clean = theme_name[8:] if theme_name.startswith("omarchy-") else theme_name
-
-    # 1. Imported themes (Omarchy or other imported)
-    if os.path.isdir(IMPORTED_DIR):
-        for root, _, files in os.walk(IMPORTED_DIR):
-            for f in files:
-                stem, ext = os.path.splitext(f)
-                if ext == ".json" and stem in (theme_name, clean, f"omarchy-{clean}"):
-                    return os.path.join(root, f), "Imported Omarchy"
-
-    # 2. Custom user themes
-    if os.path.isdir(CUSTOM_DIR):
-        for root, _, files in os.walk(CUSTOM_DIR):
-            for f in files:
-                stem, ext = os.path.splitext(f)
-                if ext in (".json", ".yaml", ".toml") and stem in (theme_name, clean):
-                    return os.path.join(root, f), "Custom"
-
-    # 3. Base46 upstream Lua themes
-    base46_candidates = [
-        os.path.join(BASE46_DIR, f"{theme_name}.lua"),
-        os.path.join(BASE46_DIR, f"{clean}.lua"),
-    ]
-    for b in base46_candidates:
-        if os.path.exists(b):
-            return b, "Base46"
-
-    return None, None
-
-
-def delete_theme_source(theme_name, source_path):
-    """
-    Permanently removes the source file, purges cache and preview artifacts,
-    and runs theme-sync to recompile the active manifest.
-    """
-    clean = theme_name[8:] if theme_name.startswith("omarchy-") else theme_name
-
-    # 1. Remove source file
-    if source_path and os.path.exists(source_path):
-        os.remove(source_path)
-
-    # 2. Purge compiled cache files
-    cache_targets = [
-        os.path.join(CACHE_DIR, f"{theme_name}.json"),
-        os.path.join(CACHE_DIR, f"{clean}.json"),
-        os.path.join(CACHE_DIR, f"omarchy-{clean}.json"),
-        os.path.join(PREVIEWS_DIR, f"{theme_name}.png"),
-        os.path.join(PREVIEWS_DIR, f"{clean}.png"),
-        os.path.join(PREVIEWS_DIR, f"omarchy-{clean}.png"),
-    ]
-    for target in cache_targets:
-        if os.path.exists(target):
-            try:
-                os.remove(target)
-            except Exception:
-                pass
-
-    # 3. Re-sync themes atomically
-    subprocess.run([THEME_SYNC], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-
-def confirm_deletion(theme_name, source_type):
-    """
-    Presents a focused Rofi confirmation dialog.
-    Defaults cursor to 'Cancel' to prevent accidental deletion.
-    """
-    options = ["Cancel", f"Delete {theme_name}"]
-    input_text = "\n".join(options) + "\n"
-    cmd = [
-        "rofi",
-        "-dmenu",
-        "-i",
-        "-no-custom",
-        "-p", "Confirm Delete",
-        "-mesg", f"Permanently delete <b>{theme_name}</b> ({source_type})?",
-        "-selected-row", "0",
-        "-theme-str", "window { width: 520px; } listview { lines: 2; }",
-        "-theme", THEME_RASI,
-    ]
-    try:
-        proc = subprocess.run(cmd, input=input_text, text=True, capture_output=True)
-        if proc.returncode == 0 and proc.stdout.strip() == f"Delete {theme_name}":
-            return True
-    except Exception:
-        pass
-    return False
-
-
-def notify(msg, urgency="normal", icon="dialog-information"):
-    subprocess.run([
-        "notify-send",
-        "Theme Engine",
-        msg,
-        "-u", urgency,
-        "-i", icon,
-    ])
-
-
 def main():
     if not os.path.isfile(THEME_SET) or not os.access(THEME_SET, os.X_OK):
         print(f"Error: {THEME_SET} not found or not executable", file=sys.stderr)
         return 1
 
-    while True:
-        current = get_current_theme()
+    current = get_current_theme()
+    theme_files = sorted(glob.glob(os.path.join(CACHE_DIR, "*.json")))
+
+    # Fast O(N) manifest staleness check
+    stale, _ = is_cache_stale([BASE46_DIR, IMPORTED_DIR, CUSTOM_DIR], MANIFEST_PATH)
+    if stale or not theme_files:
+        subprocess.run([os.path.expanduser("~/.local/bin/theme-sync")], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         theme_files = sorted(glob.glob(os.path.join(CACHE_DIR, "*.json")))
 
-        # Fast O(N) manifest staleness check
-        stale, _ = is_cache_stale([BASE46_DIR, IMPORTED_DIR, CUSTOM_DIR], MANIFEST_PATH)
-        if stale or not theme_files:
-            subprocess.run([THEME_SYNC], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            theme_files = sorted(glob.glob(os.path.join(CACHE_DIR, "*.json")))
+    # Place current active theme at the very top (row 0) so it is visible and selected on launch,
+    # and whenever the user filters with a query, focus stays locked on the #1 top match (row 0).
+    theme_files.sort(key=lambda tf: (0 if os.path.splitext(os.path.basename(tf))[0] == current else 1, os.path.basename(tf)))
 
-        # Place current active theme at row 0 so typing keeps focus locked onto top FZF match
-        theme_files.sort(key=lambda tf: (0 if os.path.splitext(os.path.basename(tf))[0] == current else 1, os.path.basename(tf)))
+    lines = []
+    names = []
 
-        lines = []
-        names = []
-
-        for tf in theme_files:
-            theme_name = os.path.splitext(os.path.basename(tf))[0]
-            names.append(theme_name)
-
-            try:
-                with open(tf, "r", encoding="utf-8") as jf:
-                    d = json.load(jf)
-                b16 = d.get("base_16", {})
-            except Exception:
-                b16 = {}
-
-            swatches = ""
-            for k in ORDER:
-                c = b16.get(k.upper(), "#777777")
-                swatches += f"<span foreground=\"{c}\" size=\"large\">● </span>"
-
-            is_current = (theme_name == current)
-            active_col = b16.get("BASE0B", "#a7c080")
-            badge = f" <span foreground=\"{active_col}\" weight=\"bold\" size=\"small\">[ACTIVE]</span>" if is_current else "         "
-            lines.append(f"{theme_name:<26}{badge}  {swatches}")
-
-        input_text = "\n".join(lines) + "\n"
-
-        rofi_cmd = [
-            "rofi",
-            "-dmenu",
-            "-i",
-            "-markup-rows",
-            "-p", " ",
-            "-no-custom",
-            "-sort",
-            "-sorting-method", "fzf",
-            "-matching", "fuzzy",
-            "-format", "s",
-            "-kb-custom-1", "Control+Shift+D,Control+Shift+d,Control+Shift+Delete,Alt+Shift+d",
-            "-theme", THEME_RASI,
-        ]
+    for tf in theme_files:
+        theme_name = os.path.splitext(os.path.basename(tf))[0]
+        names.append(theme_name)
 
         try:
-            proc = subprocess.run(
-                rofi_cmd,
-                input=input_text,
-                text=True,
-                capture_output=True
-            )
-        except Exception as e:
-            print(f"Error launching theme picker: {e}", file=sys.stderr)
-            return 1
+            with open(tf, "r", encoding="utf-8") as jf:
+                d = json.load(jf)
+            b16 = d.get("base_16", {})
+        except Exception:
+            b16 = {}
 
-        # Case 1: User accepted selection with Enter (returncode 0)
-        if proc.returncode == 0:
-            selected_line = proc.stdout.strip()
-            if not selected_line:
-                return 0
-            chosen_theme = selected_line.split()[0]
-            if chosen_theme in names:
-                subprocess.run([THEME_SET, chosen_theme])
+        swatches = ""
+        for k in ORDER:
+            c = b16.get(k.upper(), "#777777")
+            swatches += f"<span foreground=\"{c}\" size=\"large\">● </span>"
+
+        is_current = (theme_name == current)
+        active_col = b16.get("BASE0B", "#a7c080")
+        badge = f" <span foreground=\"{active_col}\" weight=\"bold\" size=\"small\">[ACTIVE]</span>" if is_current else "         "
+        lines.append(f"{theme_name:<26}{badge}  {swatches}")
+
+    input_text = "\n".join(lines) + "\n"
+
+    rofi_cmd = [
+        "rofi",
+        "-dmenu",
+        "-i",
+        "-markup-rows",
+        "-p", " ",
+        "-no-custom",
+        "-sort",
+        "-sorting-method", "fzf",
+        "-matching", "fuzzy",
+        "-format", "s",
+        "-theme", THEME_RASI,
+    ]
+
+    try:
+        proc = subprocess.run(
+            rofi_cmd,
+            input=input_text,
+            text=True,
+            capture_output=True
+        )
+        if proc.returncode != 0 or not proc.stdout.strip():
             return 0
 
-        # Case 2: Custom deletion key pressed (Ctrl+Shift+D -> returncode 10)
-        elif proc.returncode == 10:
-            selected_line = proc.stdout.strip()
-            if not selected_line:
-                continue
-            chosen_theme = selected_line.split()[0]
-            if chosen_theme not in names:
-                continue
-
-            # Safety Rule: Cannot delete currently active theme
-            if chosen_theme == current:
-                notify(
-                    f"Cannot delete '{chosen_theme}'!\nTheme is currently active. Switch to another theme first.",
-                    urgency="critical",
-                    icon="dialog-warning"
-                )
-                subprocess.run([
-                    "rofi", "-e",
-                    f"Cannot delete '{chosen_theme}'!\n\nThis theme is currently active.\nSwitch to another theme before deleting.",
-                    "-theme-str", "window { width: 480px; }",
-                    "-theme", THEME_RASI
-                ])
-                continue
-
-            # Resolve source location
-            source_path, source_type = find_theme_source(chosen_theme)
-            if not source_path:
-                notify(
-                    f"Could not locate source file for '{chosen_theme}'.",
-                    urgency="critical",
-                    icon="dialog-error"
-                )
-                continue
-
-            # Safety Confirmation Dialog
-            if confirm_deletion(chosen_theme, source_type):
-                delete_theme_source(chosen_theme, source_path)
-                notify(
-                    f"Theme '{chosen_theme}' ({source_type}) permanently deleted.",
-                    urgency="normal",
-                    icon="dialog-information"
-                )
-
-            # Re-render refreshed theme list in rofi
-            continue
-
-        # Case 3: Cancelled (Escape or closed)
-        else:
-            return 0
+        selected_line = proc.stdout.strip()
+        chosen_theme = selected_line.split()[0]
+        if chosen_theme in names:
+            subprocess.run([THEME_SET, chosen_theme])
+    except Exception as e:
+        print(f"Error launching theme picker: {e}", file=sys.stderr)
+        return 1
 
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -29,13 +29,35 @@ if command -v bat >/dev/null 2>&1; then
   HIGHLIGHTER="bat -l bash --color=always --style=plain"
 fi
 
-# Nord-inspired colors for FZF
+# Dynamic system theme integration (Schema 1 / Base46)
+if [[ -f "$HOME/.local/state/theme/colors.sh" ]]; then
+  # shellcheck source=/dev/null
+  source "$HOME/.local/state/theme/colors.sh"
+  FZF_THEME_COLOR="bg+:${THEME_SEL:-#3b4252},bg:${THEME_BG:-#2e3440},spinner:${THEME_ACCENT:-#81a1c1},hl:${THEME_ACCENT:-#88c0d0},fg:${THEME_FG:-#d8dee9},header:${THEME_ACCENT:-#81a1c1},info:${THEME_YELLOW:-#ebcb8b},pointer:${THEME_GREEN:-#a3be8c},marker:${THEME_GREEN:-#a3be8c},fg+:${THEME_FG:-#eceff4},prompt:${THEME_ACCENT:-#81a1c1},hl+:${THEME_CYAN:-#8fbcbb},border:${THEME_MUTED:-#4c566a}"
+  COLOR_REPO="pointer:${THEME_GREEN:-#a3be8c},marker:${THEME_GREEN:-#a3be8c},prompt:${THEME_ACCENT:-#88c0d0}"
+  COLOR_AUR="pointer:${THEME_GREEN:-#a3be8c},marker:${THEME_GREEN:-#a3be8c},prompt:${THEME_PURPLE:-#b48ead}"
+  COLOR_ALL="pointer:${THEME_GREEN:-#a3be8c},marker:${THEME_GREEN:-#a3be8c},prompt:${THEME_CYAN:-#8fbcbb}"
+  COLOR_REMOVE="pointer:${THEME_RED:-#bf616a},marker:${THEME_RED:-#bf616a},prompt:${THEME_RED:-#bf616a}"
+  COLOR_CLEAN="pointer:${THEME_RED:-#bf616a},marker:${THEME_RED:-#bf616a},prompt:${THEME_YELLOW:-#ebcb8b}"
+  COLOR_BROWSE="pointer:${THEME_ACCENT:-#81a1c1},marker:${THEME_ACCENT:-#81a1c1},prompt:${THEME_CYAN:-#88c0d0}"
+  COLOR_SEARCH="pointer:${THEME_ACCENT:-#88c0d0},prompt:${THEME_ACCENT:-#88c0d0}"
+else
+  FZF_THEME_COLOR='bg+:#3b4252,bg:#2e3440,spinner:#81a1c1,hl:#88c0d0,fg:#d8dee9,header:#81a1c1,info:#ebcb8b,pointer:#a3be8c,marker:#a3be8c,fg+:#eceff4,prompt:#81a1c1,hl+:#8fbcbb,border:#4c566a'
+  COLOR_REPO='pointer:#a3be8c,marker:#a3be8c,prompt:#88c0d0'
+  COLOR_AUR='pointer:#a3be8c,marker:#a3be8c,prompt:#b48ead'
+  COLOR_ALL='pointer:#a3be8c,marker:#a3be8c,prompt:#8fbcbb'
+  COLOR_REMOVE='pointer:#bf616a,marker:#bf616a,prompt:#bf616a'
+  COLOR_CLEAN='pointer:#bf616a,marker:#bf616a,prompt:#ebcb8b'
+  COLOR_BROWSE='pointer:#81a1c1,marker:#81a1c1,prompt:#88c0d0'
+  COLOR_SEARCH='pointer:#88c0d0,prompt:#88c0d0'
+fi
+
 COMMON_FZF_ARGS=(
   --ansi
   --layout=reverse
   --height=100%
   --border=rounded
-  --color='bg+:#3b4252,bg:#2e3440,spinner:#81a1c1,hl:#88c0d0,fg:#d8dee9,header:#81a1c1,info:#ebcb8b,pointer:#a3be8c,marker:#a3be8c,fg+:#eceff4,prompt:#81a1c1,hl+:#8fbcbb,border:#4c566a'
+  --color="$FZF_THEME_COLOR"
 )
 
 # ------------------------------------------------------------------------------
@@ -65,7 +87,7 @@ install_repo() {
     --bind 'alt-l:reload(paru -Slq | sort -u)+change-prompt(🌐 Install (All)> )+change-header([Tab] Select | [Enter] Install | [Alt-r] Repos | [Alt-a] AUR)' \
     --bind "alt-b:change-preview(paru -Gpa {} 2>/dev/null | $HIGHLIGHTER)" \
     --bind 'alt-B:change-preview(pacman --color=always -Si {} 2>/dev/null || paru --color=always -Siia {} 2>/dev/null)' \
-    --color='pointer:#a3be8c,marker:#a3be8c,prompt:#88c0d0' \
+    --color="$COLOR_REPO" \
     "${COMMON_FZF_ARGS[@]}"
   ) || true
 
@@ -101,7 +123,7 @@ install_aur() {
     --bind "alt-b:change-preview(paru -Gpa {} 2>/dev/null | $HIGHLIGHTER)" \
     --bind 'alt-B:change-preview(paru --color=always -Siia {} 2>/dev/null)' \
     --bind 'alt-r:reload(pacman -Slq | sort -u)+change-prompt(📦 Install (Repo)> )+change-header([Tab] Select | [Enter] Install | [Alt-a] AUR | [Alt-l] All | [Alt-p] Preview)' \
-    --color='pointer:#a3be8c,marker:#a3be8c,prompt:#b48ead' \
+    --color="$COLOR_AUR" \
     "${COMMON_FZF_ARGS[@]}"
   ) || true
 
@@ -136,7 +158,7 @@ install_all() {
     --bind 'alt-k:preview-up,alt-j:preview-down' \
     --bind "alt-b:change-preview(paru -Gpa {} 2>/dev/null | $HIGHLIGHTER)" \
     --bind 'alt-B:change-preview(pacman --color=always -Si {} 2>/dev/null || paru --color=always -Siia {} 2>/dev/null)' \
-    --color='pointer:#a3be8c,marker:#a3be8c,prompt:#8fbcbb' \
+    --color="$COLOR_ALL" \
     "${COMMON_FZF_ARGS[@]}"
   ) || true
 
@@ -174,7 +196,7 @@ remove_pkgs() {
     --bind 'alt-i:change-preview(pacman --color=always -Qi {} 2>/dev/null || paru -Qi {} 2>/dev/null)' \
     --bind 'alt-a:reload(pacman -Qq)+change-prompt(🗑️  Remove (All Installed)> )+change-header([Tab] Select | [Enter] Remove | [Alt-e] Explicit only | [Alt-p] Preview)' \
     --bind 'alt-e:reload(pacman -Qqe)+change-prompt(🗑️  Remove> )+change-header([Tab] Select | [Enter] Remove | [Alt-a] Show all | [Alt-p] Preview)' \
-    --color='pointer:#bf616a,marker:#bf616a,prompt:#bf616a' \
+    --color="$COLOR_REMOVE" \
     "${COMMON_FZF_ARGS[@]}"
   ) || true
 
@@ -206,7 +228,7 @@ clean_orphans() {
     --preview-window="right,60%,wrap,<100(down,60%)" \
     --preview-label="[Alt-j/k] Scroll preview | [Tab] Select" \
     --preview-label-pos="bottom" \
-    --color='pointer:#bf616a,marker:#bf616a,prompt:#ebcb8b' \
+    --color="$COLOR_CLEAN" \
     "${COMMON_FZF_ARGS[@]}"
   ) || true
 
@@ -239,7 +261,7 @@ browse_pkgs() {
     --bind 'alt-p:toggle-preview' \
     --bind 'alt-d:preview-half-page-down,alt-u:preview-half-page-up' \
     --bind 'alt-k:preview-up,alt-j:preview-down' \
-    --color='pointer:#81a1c1,marker:#81a1c1,prompt:#88c0d0' \
+    --color="$COLOR_BROWSE" \
     "${COMMON_FZF_ARGS[@]}" || true
 }
 
@@ -263,7 +285,7 @@ show_menu() {
     --prompt="󰣇 Package Manager> " \
     --header="Select an action [Enter to confirm, Esc to exit]" \
     --height=40% \
-    --color='pointer:#88c0d0,prompt:#88c0d0' \
+    --color="$COLOR_SEARCH" \
     "${COMMON_FZF_ARGS[@]}"
   ) || true
 
