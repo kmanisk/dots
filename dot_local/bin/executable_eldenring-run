@@ -56,7 +56,7 @@ if on_ac_power; then
     trap restore_power EXIT INT TERM
 fi
 
-GAME_DIR="/mnt/Games/Games/ELDEN RING/Game"
+GAME_DIR="/mnt/Games/NonSteamGames/ELDEN RING/Game"
 GAME_EXE="$GAME_DIR/eldenring.exe"
 PROTON_BIN="$HOME/.local/share/Steam/steamapps/common/Proton - Experimental/proton"
 

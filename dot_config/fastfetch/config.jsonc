@@ -54,7 +54,10 @@
         {
             "key": "│ {#33}󰍛 cpu     {#keys}│",
             "type": "cpu",
-            "showPeCoreCount": true
+            // i5-13450HX = 6P+4E physical. fastfetch groups LOGICAL cpus by
+            // clock (12 P-threads @4.6 + 4 E @3.4), so {core-types} wrongly
+            // prints (12+4). Hardcode the physical split (single-machine config).
+            "format": "{name} (6+4) @ {freq-max}"
         },
         {
             "key": "│ {#34}󰉉 disk    {#keys}│",

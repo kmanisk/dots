@@ -3,7 +3,7 @@
     // 1. TYPOGRAPHY & FONTS (All Fonts in One Place)
     // ─────────────────────────────────────────────────────────────────────────────
     // Global Gold Standard Dimensions (Applies to all buffer fonts)
-    "buffer_font_size": 35.0, // <- Adjust once globally for all buffer fonts
+    "buffer_font_size": 32.0, // <- Adjust once globally for all buffer fonts
     "buffer_line_height": {
         "custom": 1.40 // Gold standard line height (clean vertical rhythm for all fonts)
     },
@@ -76,7 +76,7 @@
         "font_fallbacks": [
             "monospace"
         ],
-        "font_size": 23.0,
+        "font_size": 29.0,
         "line_height": {
             "custom": 1.0
         },
@@ -548,5 +548,5 @@
     // ─────────────────────────────────────────────────────────────────────────────
     "telemetry": {
         "diagnostics": false,
-    }
+    },
 }

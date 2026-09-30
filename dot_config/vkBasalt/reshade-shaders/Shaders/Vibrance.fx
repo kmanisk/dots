@@ -20,7 +20,7 @@
 uniform float Vibrance < __UNIFORM_SLIDER_FLOAT1
 	ui_min = -1.0; ui_max = 1.0;
 	ui_tooltip = "Intelligently saturates (or desaturates if you use negative values) the pixels depending on their original saturation.";
-> = 0.55;
+> = 0.60;
 
 uniform float3 VibranceRGBBalance <
 	ui_type = "drag";
