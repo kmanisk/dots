@@ -1,0 +1,37 @@
+/**
+ * System base theme for ALL Rofi menus — single source of truth.
+ *
+ * Invariants (see docs/theme-implementation.md):
+ * - Colors are DYNAMIC via theme-set: ~/.local/state/theme/rofi.rasi
+ *   (generated from ~/.config/theme/templates/rofi.rasi). Never hardcode hex here.
+ * - Corners are SHARP everywhere: every border-radius in every layout = 0.
+ * - Font is VictorMono Nerd Font Mono everywhere.
+ * - Geometry baseline matches theme-picker-nvchad (860px wide, 2px accent border).
+ * - Selection is uniform: accent fill + dark text (#1d2021).
+ */
+@import "~/.local/state/theme/rofi.rasi"
+
+* {
+    /* Typography — VictorMono Nerd Font Mono */
+    font:              "VictorMono Nerd Font Mono Bold 15";
+    font-bold:         "VictorMono Nerd Font Mono Bold 18";
+    font-italic:       "VictorMono Nerd Font Mono Italic 13";
+
+    modal-font:        "VictorMono Nerd Font Mono Bold 15";
+    modal-font-bold:   "VictorMono Nerd Font Mono Bold 18";
+    modal-font-italic: "VictorMono Nerd Font Mono Italic 13";
+
+    /* Geometry baseline */
+    modal-width:       860px;
+    modal-radius:      0px;
+    modal-padding:     22px;
+
+    /* Base colors */
+    background-color:  @background;
+    border-color:      @accent;
+    text-color:        @foreground;
+
+    /* Uniform selection */
+    selected-background: @accent;
+    selected-foreground: #1d2021;
+}

@@ -1,6 +1,8 @@
 /**
- * Large floating cheatsheet modal — system theme (sharp, VictorMono).
- * Geometry only: wide 1200px two-column keybinding matrix.
+ * System floating dmenu — unified baseline for all general floating menus
+ * (wallpaper-menu, audio-hub, etc.).
+ * Matches theme-picker-nvchad baseline: 860px width, 2px accent borders,
+ * boxed inputbar, and VictorMono Bold typography.
  */
 @import "~/.config/rofi/system.rasi"
 
@@ -14,8 +16,7 @@ window {
     border:              2px;
     border-color:        @accent;
     border-radius:       0px;
-    width:               1200px;
-    height:              860px;
+    width:               860px;
     location:            center;
     anchor:              center;
     padding:             22px;
@@ -46,14 +47,14 @@ prompt {
 entry {
     background-color:    transparent;
     text-color:          @foreground;
-    font:                "VictorMono Nerd Font Mono 15";
-    placeholder:         "Filter shortcuts (e.g. workspace, split, zed, audio, rofi)...";
+    placeholder:         "Filter...";
     placeholder-color:   @foreground-alt;
+    font:                "VictorMono Nerd Font Mono Bold 15";
 }
 
 message {
     background-color:    transparent;
-    padding:             4px 6px;
+    padding:             2px 6px;
 }
 
 textbox {
@@ -65,30 +66,37 @@ textbox {
 listview {
     background-color:    transparent;
     columns:             1;
-    lines:               18;
-    spacing:             5px;
+    lines:               8;
+    spacing:             6px;
     cycle:               true;
     dynamic:             true;
     layout:              vertical;
     scrollbar:           false;
+    border:              0px;
+    padding:             4px 0px;
 }
 
 element {
+    orientation:         horizontal;
     background-color:    transparent;
     text-color:          @foreground;
+    padding:             12px 18px;
     border-radius:       0px;
-    padding:             9px 14px;
+    border:              0px;
     children:            [ element-text ];
 }
 
 element selected {
     background-color:    @accent;
     text-color:          #1d2021;
+    border:              0px;
+    border-radius:       0px;
 }
 
 element-text {
-    background-color:    inherit;
+    background-color:    transparent;
     text-color:          inherit;
-    font:                "VictorMono Nerd Font Mono 15";
-    highlight:           bold italic;
+    font:                "VictorMono Nerd Font Mono Bold 15";
+    highlight:           bold;
+    vertical-align:      0.5;
 }

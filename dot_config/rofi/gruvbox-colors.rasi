@@ -1,12 +1,7 @@
-@import "~/.local/state/theme/rofi.rasi"
-
-* {
-    /* Central Control: Typography & Modal Dimensions */
-    font:                "Iosevka Nerd Font 13";
-    modal-font:          "Noto Sans 15";
-    modal-font-bold:     "Noto Sans Bold 15";
-    modal-font-italic:   "Noto Sans Italic 14";
-    modal-width:         720px;
-    modal-radius:        8px;
-    modal-padding:       14px;
-}
+/**
+ * Backward-compat shim. The system theme now lives in system.rasi
+ * (sharp corners, VictorMono, dynamic colors). This file only re-exports
+ * it so older @import "~/.config/rofi/gruvbox-colors.rasi" lines keep working.
+ * New files must @import "~/.config/rofi/system.rasi" directly.
+ */
+@import "~/.config/rofi/system.rasi"

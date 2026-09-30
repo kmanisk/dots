@@ -1,10 +1,11 @@
 /**
- * Dedicated Modal Theme for Theme Selector
+ * Theme selector with split system preview — system theme (sharp, VictorMono).
+ * Geometry only: wide 1260px list + preview pane.
  */
-@import "~/.config/rofi/gruvbox-colors.rasi"
+@import "~/.config/rofi/system.rasi"
 
 configuration {
-    show-icons: false;
+    show-icons: true;
 }
 
 window {
@@ -12,25 +13,26 @@ window {
     text-color:          @foreground;
     border:              2px;
     border-color:        @border-focus;
-    border-radius:       @modal-radius;
-    width:               @modal-width;
+    border-radius:       0px;
+    width:               1260px;
+    height:              640px;
     location:            center;
     anchor:              center;
-    padding:             @modal-padding;
+    padding:             18px;
 }
 
 mainbox {
     background-color:    transparent;
-    children:            [ inputbar, listview ];
-    spacing:             10px;
+    children:            [ inputbar, split-pane ];
+    spacing:             14px;
 }
 
 inputbar {
     background-color:    @background-alt;
-    border-radius:       6px;
-    padding:             8px 14px;
+    border-radius:       0px;
+    padding:             10px 16px;
     children:            [ prompt, entry ];
-    spacing:             10px;
+    spacing:             12px;
 }
 
 prompt {
@@ -42,27 +44,37 @@ prompt {
 entry {
     background-color:    transparent;
     text-color:          @foreground;
-    placeholder:         "Filter themes...";
+    placeholder:         "Search themes (type 'omarchy' for omarchy.org themes)...";
     placeholder-color:   @foreground-alt;
     font:                @modal-font;
+}
+
+split-pane {
+    orientation:         horizontal;
+    spacing:             18px;
+    background-color:    transparent;
+    children:            [ listview, preview-container ];
+    expand:              true;
 }
 
 listview {
     background-color:    transparent;
     columns:             1;
-    lines:               10;
+    lines:               12;
     spacing:             4px;
     cycle:               true;
     dynamic:             true;
     layout:              vertical;
     scrollbar:           false;
+    width:               360px;
+    fixed-height:        true;
 }
 
 element {
     background-color:    transparent;
     text-color:          @foreground;
-    border-radius:       5px;
-    padding:             6px 12px;
+    border-radius:       0px;
+    padding:             8px 14px;
     children:            [ element-text ];
 }
 
@@ -75,4 +87,29 @@ element-text {
     background-color:    inherit;
     text-color:          inherit;
     font:                @modal-font;
+}
+
+preview-container {
+    expand:              true;
+    orientation:         vertical;
+    background-color:    @background-alt;
+    border:              1px;
+    border-color:        @border-col;
+    border-radius:       0px;
+    padding:             8px;
+    children:            [ preview-frame ];
+}
+
+preview-frame {
+    expand:              true;
+    background-color:    transparent;
+    children:            [ icon-current-entry ];
+}
+
+icon-current-entry {
+    expand:              true;
+    size:                560px;
+    horizontal-align:    0.5;
+    vertical-align:      0.5;
+    background-color:    transparent;
 }

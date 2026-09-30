@@ -1,7 +1,8 @@
 /**
- * Tsoding-like bottom bar menu for Rofi (Gruvbox Dark)
+ * Tsoding-like bottom bar menu for Rofi — Alt+Space drun reference look.
+ * Sharp corners, VictorMono, dynamic theme colors via system.rasi.
  */
-@import "~/.config/rofi/gruvbox-colors.rasi"
+@import "~/.config/rofi/system.rasi"
 
 * {
     background-color: @background;
@@ -17,6 +18,7 @@ window {
     padding:          4px 8px;
     border:           2px 0px 0px 0px;
     border-color:     @border-focus;
+    border-radius:    0px;
     children:         [ horibox ];
 }
 
@@ -45,7 +47,7 @@ entry {
 
 element {
     padding:          2px 8px;
-    border-radius:    4px;
+    border-radius:    0px;
 }
 
 element selected {

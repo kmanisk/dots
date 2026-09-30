@@ -123,8 +123,33 @@ def display_name(raw):
     return {"brave-origin": "brave"}.get(s, s) or raw
 
 
+def theme_colors():
+    """Pull live theme colors so markup matches the active theme-set theme."""
+    defaults = {"foreground": "#d3c6aa", "foreground-alt": "#7c6f64",
+                "accent": "#7fbbb3", "accent-bright": "#dbbc7f"}
+    try:
+        with open(os.path.expanduser("~/.local/state/theme/rofi.rasi")) as f:
+            content = f.read()
+    except OSError:
+        return defaults
+    raw = dict(re.findall(r"([a-zA-Z0-9_-]+)\s*:\s*([^;]+);", content))
+
+    def resolve(v, depth=0):
+        v = v.strip().strip('"')
+        if v.startswith("@") and depth < 5:
+            return resolve(raw.get(v[1:], v), depth + 1)
+        return v
+
+    out = {}
+    for key, fallback in defaults.items():
+        val = resolve(raw.get(key, fallback))
+        out[key] = val if re.fullmatch(r"#[0-9a-fA-F]{6}", val) else fallback
+    return out
+
+
 def rows(groups):
-    out = []
+    import html
+    out = []  # list of (name, markup-text)
     agg = []
     for name, g in groups.items():
         if not g["pids"]:
@@ -136,7 +161,18 @@ def rows(groups):
         n = len(g["pids"])
         det = f"{n} procs" + (f", {g['wins']} wins" if g["wins"] else "")
         titles = (" — " + " / ".join(g["titles"])) if g["titles"] else ""
-        out.append(f"{name}\t({det}) │ CPU {cpu:4.1f}% │ RAM {mem:4.1f}%{titles}")
+        rest = html.escape(f"({det}) │ CPU {cpu:4.1f}% │ RAM {mem:4.1f}%{titles}")
+        if g["wins"]:
+            # Foreground app: bold bright name, full-bright details.
+            # (Bold only, no fixed color: a hardcoded color would turn
+            # invisible against the accent fill of the selected row.)
+            text = f"<b>{html.escape(name)}</b>\t{rest}"
+        else:
+            # Background service/daemon: whole row dimmed via alpha.
+            # (Never hardcode foreground color: it overrides selected text-color
+            # and turns invisible against the accent fill of the selected row.)
+            text = f"<span alpha=\"65%\">{html.escape(name)}\t{rest}</span>"
+        out.append((name, text))
     return out
 
 
@@ -183,34 +219,35 @@ def proc_comm(pid):
 
 def main():
     if os.environ.get("ROFI_PKILL_TEST") == "1":
-        print("\n".join(rows(collect())[:15]))
+        print("\n".join(t for _, t in rows(collect())[:15]))
         return 0
     while True:
         groups = collect()
-        lines = rows(groups)
-        if not lines:
+        entries = rows(groups)
+        if not entries:
             notify("Process Killer", "No killable processes")
             return 0
         try:
             p = subprocess.run(
-                ["rofi", "-dmenu", "-i", "-p", "\U0001f6d1 Kill App",
-                 "-mesg", "Enter: Terminate group (SIGTERM) | Alt+d: Force Kill (SIGKILL) | Esc: Cancel",
+                ["rofi", "-dmenu", "-i", "-markup-rows", "-format", "i",
+                 "-p", "Kill App",
+                 "-mesg", "Enter: Terminate (SIGTERM) | Alt+d: Force Kill (SIGKILL) | Esc: Cancel | Bold = foreground app, Dimmed = background service",
                  "-kb-delete-entry", "", "-kb-custom-1", "Alt+d,Shift+Delete",
                  "-theme", THEME],
-                input="\n".join(lines).encode(), stdout=subprocess.PIPE,
+                input="\n".join(t for _, t in entries).encode(), stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL, timeout=300)
         except Exception:
             return 0
-        if p.returncode == 1 or not p.stdout.strip():
+        if p.returncode not in (0, 10) or not p.stdout.strip():
             return 0
-        name = p.stdout.decode(errors="replace").split("\t")[0].strip()
+        try:
+            name = entries[int(p.stdout.decode(errors="replace").strip())][0]
+        except (ValueError, IndexError):
+            return 0
         if not name:
             return 0
         kill_group(name, groups, force=(p.returncode == 10))
-        try:
-            subprocess.call(["sleep", "0.2"], timeout=5)
-        except Exception:
-            pass
+        return 0
     return 0
 
 

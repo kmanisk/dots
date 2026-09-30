@@ -1,7 +1,9 @@
-/* 🖼️ ROFI WALLPAPER GRID THEME (Gruvbox Dark) */
-/* Fixed 4x2 grid with keybind header */
-
-@import "~/.config/rofi/gruvbox-colors.rasi"
+/**
+ * Rofi wallpaper grid — system theme (sharp, VictorMono).
+ * Geometry only: 4x2 thumbnail grid. Selection is a sharp accent outline
+ * (fill would hide thumbnails); everything else follows the system theme.
+ */
+@import "~/.config/rofi/system.rasi"
 
 configuration {
     show-icons: true;
@@ -14,8 +16,8 @@ window {
     width:            60%;
     height:           74%;
     border:           2px;
-    border-color:     @border-focus;
-    border-radius:    12px;
+    border-color:     @accent;
+    border-radius:    0px;
     location:         center;
     anchor:           center;
 }
@@ -24,25 +26,28 @@ window {
 mainbox {
     background-color: transparent;
     children:         [ "inputbar", "message", "listview" ];
-    spacing:          10px;
-    padding:          20px;
+    spacing:          16px;
+    padding:          22px;
 }
 
 /* ---- Inputbar ---- */
 inputbar {
     enabled:          true;
-    padding:          10px;
-    border-radius:    10px;
+    padding:          14px 18px;
+    border:           2px;
+    border-color:     @accent;
+    border-radius:    0px;
     background-color: @background-alt;
     children:         [ "prompt", "entry" ];
+    spacing:          14px;
 }
 
 prompt {
     enabled:          true;
     padding:          0px 10px 0px 0px;
     background-color: transparent;
-    text-color:       @accent-bright;
-    font:             "Iosevka Nerd Font Bold 13";
+    text-color:       @accent;
+    font:             "VictorMono Nerd Font Mono Bold 18";
 }
 
 entry {
@@ -50,14 +55,14 @@ entry {
     placeholder-color: @foreground-alt;
     background-color:  transparent;
     text-color:        @foreground;
-    font:              "Iosevka Nerd Font 13";
+    font:              "VictorMono Nerd Font Mono Bold 15";
 }
 
 /* ---- Message / Keybind Header ---- */
 message {
     enabled:          true;
     padding:          10px 14px;
-    border-radius:    10px;
+    border-radius:    0px;
     background-color: transparent;
     text-color:       @accent;
 }
@@ -65,7 +70,7 @@ message {
 textbox {
     background-color: transparent;
     text-color:       @accent;
-    font:             "Iosevka Nerd Font Italic 12";
+    font:             @modal-font-italic;
 }
 
 /* ---- Listview ---- */
@@ -97,7 +102,7 @@ element {
     orientation:      vertical;
     padding:          10px;
     spacing:          5px;
-    border-radius:    10px;
+    border-radius:    0px;
     cursor:           pointer;
 }
 
@@ -111,6 +116,7 @@ element selected.normal {
     text-color:       @accent-bright;
     border:           2px;
     border-color:     @accent;
+    border-radius:    0px;
 }
 
 element-icon {
@@ -125,5 +131,5 @@ element-text {
     vertical-align:   0.5;
     background-color: transparent;
     text-color:       inherit;
-    font:             "Iosevka Nerd Font 12";
+    font:             "VictorMono Nerd Font Mono 12";
 }

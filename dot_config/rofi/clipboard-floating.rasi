@@ -1,8 +1,9 @@
 /**
- * Balanced Centered Floating Modal Theme for Rofi Clipboard & Modals (Gruvbox Dark)
- * Centrally controlled via ~/.config/rofi/gruvbox-colors.rasi
+ * Floating modal for Rofi Clipboard & process killer — unified system theme.
+ * Matches theme-picker-nvchad baseline: 860px width, 2px accent borders,
+ * boxed inputbar, and VictorMono Bold typography.
  */
-@import "~/.config/rofi/gruvbox-colors.rasi"
+@import "~/.config/rofi/system.rasi"
 
 configuration {
     show-icons: false;
@@ -12,32 +13,34 @@ window {
     background-color:    @background;
     text-color:          @foreground;
     border:              2px;
-    border-color:        @border-focus;
-    border-radius:       @modal-radius;
-    width:               @modal-width;
+    border-color:        @accent;
+    border-radius:       0px;
+    width:               860px;
     location:            center;
     anchor:              center;
-    padding:             @modal-padding;
+    padding:             22px;
 }
 
 mainbox {
     background-color:    transparent;
     children:            [ inputbar, message, listview ];
-    spacing:             10px;
+    spacing:             16px;
 }
 
 inputbar {
     background-color:    @background-alt;
-    border-radius:       6px;
-    padding:             8px 14px;
+    border:              2px;
+    border-color:        @accent;
+    border-radius:       0px;
+    padding:             14px 18px;
     children:            [ prompt, entry ];
-    spacing:             10px;
+    spacing:             14px;
 }
 
 prompt {
     background-color:    transparent;
-    text-color:          @accent-bright;
-    font:                @modal-font-bold;
+    text-color:          @accent;
+    font:                "VictorMono Nerd Font Mono Bold 18";
 }
 
 entry {
@@ -45,46 +48,55 @@ entry {
     text-color:          @foreground;
     placeholder:         "Filter entries...";
     placeholder-color:   @foreground-alt;
-    font:                @modal-font;
+    font:                "VictorMono Nerd Font Mono Bold 15";
 }
 
 message {
     background-color:    @background-alt;
-    border-radius:       5px;
-    padding:             4px 8px;
+    border-radius:       0px;
+    padding:             8px 12px;
 }
 
 textbox {
     background-color:    transparent;
     text-color:          @accent-bright;
-    font:                @modal-font-bold;
+    font:                "VictorMono Nerd Font Mono Bold 14";
 }
 
 listview {
     background-color:    transparent;
     columns:             1;
     lines:               8;
-    spacing:             4px;
+    spacing:             6px;
     cycle:               true;
     dynamic:             true;
     layout:              vertical;
+    scrollbar:           false;
+    border:              0px;
+    padding:             4px 0px;
 }
 
 element {
+    orientation:         horizontal;
     background-color:    transparent;
     text-color:          @foreground;
-    border-radius:       5px;
-    padding:             6px 12px;
+    padding:             12px 18px;
+    border-radius:       0px;
+    border:              0px;
     children:            [ element-text ];
 }
 
 element selected {
     background-color:    @accent;
     text-color:          #1d2021;
+    border:              0px;
+    border-radius:       0px;
 }
 
 element-text {
-    background-color:    inherit;
+    background-color:    transparent;
     text-color:          inherit;
-    font:                @modal-font;
+    font:                "VictorMono Nerd Font Mono Bold 15";
+    highlight:           bold;
+    vertical-align:      0.5;
 }
