@@ -24,6 +24,37 @@
 @define-color content_view_bg {{black}};
 @define-color text_view_bg {{black}};
 
+/* Thunar Sidebar & Views Styling */
+.thunar .sidebar,
+.thunar .sidebar treeview,
+.thunar .sidebar .view,
+window.thunar .sidebar,
+window.thunar .sidebar treeview,
+window.thunar .sidebar .view {
+  background-color: {{black}};
+  color: {{accent}};
+}
+
+.thunar .sidebar treeview:hover,
+.thunar .sidebar .view:hover {
+  color: {{white}};
+}
+
+.thunar .sidebar treeview:selected,
+.thunar .sidebar .view:selected {
+  background-color: {{one_bg}};
+  color: {{white}};
+}
+
+/* Thunar main file view selection */
+.thunar view:selected,
+.thunar treeview:selected,
+window.thunar view:selected,
+window.thunar treeview:selected {
+  background-color: {{one_bg}};
+  color: {{white}};
+}
+
 /* Thunar-only font: Iosevka Nerd Font */
 .thunar, .thunar *, window.thunar, window.thunar * {
   font-family: "Iosevka Nerd Font Mono", monospace;
