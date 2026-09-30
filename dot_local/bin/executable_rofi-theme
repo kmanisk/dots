@@ -48,15 +48,16 @@ def main():
         subprocess.run([os.path.expanduser("~/.local/bin/theme-sync")], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         theme_files = sorted(glob.glob(os.path.join(CACHE_DIR, "*.json")))
 
+    # Place current active theme at the very top (row 0) so it is visible and selected on launch,
+    # and whenever the user filters with a query, focus stays locked on the #1 top match (row 0).
+    theme_files.sort(key=lambda tf: (0 if os.path.splitext(os.path.basename(tf))[0] == current else 1, os.path.basename(tf)))
+
     lines = []
-    selected_row = 0
     names = []
 
-    for idx, tf in enumerate(theme_files):
+    for tf in theme_files:
         theme_name = os.path.splitext(os.path.basename(tf))[0]
         names.append(theme_name)
-        if theme_name == current:
-            selected_row = idx
 
         try:
             with open(tf, "r", encoding="utf-8") as jf:
@@ -90,8 +91,8 @@ def main():
         "-format", "s",
         "-theme", THEME_RASI,
     ]
-    if current:
-        rofi_cmd.extend(["-select", current])
+
+
 
     try:
         proc = subprocess.run(
