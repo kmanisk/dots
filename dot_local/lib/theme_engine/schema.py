@@ -141,6 +141,56 @@ def synthesize_derived(palette, theme_type="dark"):
         "contrast": contrast_info,
     }
 
+def synthesize_cava(palette, semantic, raw_cava=None):
+    """
+    Builds canonical Cava visualizer theme settings.
+    If raw_cava is provided (from an upstream cava_theme), validates and preserves:
+      - gradient (0 or 1)
+      - gradient_count (N)
+      - colors (list of hex colors in gradient order)
+      - background / foreground
+    Otherwise, derives an 8-color gradient from semantic & Base16 tokens.
+    """
+    b16 = palette.get("base_16", {})
+    accent = palette.get("accent", "#58a6ff")
+    bg = semantic.get("background", b16.get("BASE00", "#181818"))
+    fg = semantic.get("foreground", b16.get("BASE05", "#d8d8d8"))
+
+    if raw_cava and isinstance(raw_cava, dict) and raw_cava.get("colors"):
+        colors = [clean_hex(c) for c in raw_cava["colors"] if HEX_RE.match(clean_hex(c))]
+        if colors:
+            g_count = raw_cava.get("gradient_count") or len(colors)
+            return {
+                "source": raw_cava.get("source", "cava_theme"),
+                "gradient": int(raw_cava.get("gradient", 1)),
+                "gradient_count": int(g_count),
+                "colors": colors,
+                "background": clean_hex(raw_cava.get("background") or bg),
+                "foreground": clean_hex(raw_cava.get("foreground") or fg),
+            }
+
+    # Derived 8-stage gradient rising from bottom to top:
+    # accent -> blue -> cyan -> green -> yellow -> orange -> red -> bright_fg
+    colors = [
+        accent,                                             # stage 1 (bottom baseline)
+        clean_hex(b16.get("BASE0D", accent)),               # stage 2 (blue)
+        clean_hex(b16.get("BASE0C", "#56b6c2")),           # stage 3 (cyan)
+        clean_hex(b16.get("BASE0B", "#98c379")),           # stage 4 (green)
+        clean_hex(b16.get("BASE0A", "#e5c07b")),           # stage 5 (yellow)
+        clean_hex(b16.get("BASE09", "#d19a66")),           # stage 6 (orange)
+        clean_hex(b16.get("BASE08", "#e06c75")),           # stage 7 (red)
+        clean_hex(b16.get("BASE07", fg)),                  # stage 8 (peak bright fg)
+    ]
+
+    return {
+        "source": "derived",
+        "gradient": 1,
+        "gradient_count": len(colors),
+        "colors": colors,
+        "background": bg,
+        "foreground": fg,
+    }
+
 def normalize_theme(raw, default_name=None, default_provider="custom"):
     """
     Normalizes any theme input (legacy flat Schema 0 or Schema 1) into canonical Schema 1.
@@ -193,6 +243,12 @@ def normalize_theme(raw, default_name=None, default_provider="custom"):
     # 2. Derive synthesized Base30 and Semantic tokens
     derived = synthesize_derived(palette, theme_type=theme_type)
 
+    # If the author provided custom semantic overrides (e.g. from rich colors.toml), merge them
+    if "semantic" in raw and isinstance(raw["semantic"], dict):
+        for k, v in raw["semantic"].items():
+            if HEX_RE.match(str(v)):
+                derived["semantic"][k] = clean_hex(str(v))
+
     # If the author provided custom base_30 overrides, merge them without erasing fallbacks
     if "base_30" in raw and isinstance(raw["base_30"], dict):
         for k, v in raw["base_30"].items():
@@ -213,7 +269,16 @@ def normalize_theme(raw, default_name=None, default_provider="custom"):
             "tags": raw.get("tags", []),
         }
 
-    # 4. Resolve capabilities
+    # 4. Resolve apps (including Cava)
+    apps = raw.get("apps")
+    if not isinstance(apps, dict):
+        apps = {}
+
+    raw_cava = apps.get("cava") or raw.get("cava")
+    cava_data = synthesize_cava(palette, derived["semantic"], raw_cava)
+    apps["cava"] = cava_data
+
+    # 5. Resolve capabilities
     caps = raw.get("capabilities")
     if not isinstance(caps, dict):
         caps = {
@@ -223,8 +288,9 @@ def normalize_theme(raw, default_name=None, default_provider="custom"):
             "terminal": True,
             "browser": bool(raw.get("browser")),
         }
+    caps["cava"] = True
 
-    # 5. Resolve assets
+    # 6. Resolve assets
     assets = raw.get("assets")
     if not isinstance(assets, dict):
         assets = {
@@ -243,11 +309,13 @@ def normalize_theme(raw, default_name=None, default_provider="custom"):
         "capabilities": caps,
         "palette": palette,
         "derived": derived,
+        "apps": apps,
         "assets": assets,
         # Backward-compatibility aliases for existing templates/tools:
         "base_16": b16,
         "base_30": derived["base_30"],
         "semantic": derived["semantic"],
+        "cava": cava_data,
     }
 
     return normalized

@@ -128,6 +128,7 @@ def normalize_palette(theme_data, name):
 
     r = {
         "name": name,
+        "display_name": theme_data.get("display_name", name),
         "type": theme_type,
         "bg": base00,
         "bg2": base01,
@@ -158,6 +159,25 @@ def normalize_palette(theme_data, name):
     for k, v in semantic.items():
         r[f"semantic_{k}"] = v
 
+    # Add Cava visualizer tokens
+    cava = theme_data.get("apps", {}).get("cava") or theme_data.get("cava", {})
+    cava_colors = cava.get("colors", [])
+    cava_bg = cava.get("background") or r.get("base00", "#181818")
+    cava_fg = cava.get("foreground") or r.get("base05", "#d8d8d8")
+    cava_grad = cava.get("gradient", 1)
+    cava_count = cava.get("gradient_count", len(cava_colors) if cava_colors else 8)
+
+    r["cava_bg"] = cava_bg
+    r["cava_fg"] = cava_fg
+    r["cava_gradient"] = str(cava_grad)
+    r["cava_gradient_count"] = str(cava_count)
+
+    grad_lines = []
+    for idx, c in enumerate(cava_colors, 1):
+        r[f"cava_color_{idx}"] = c
+        grad_lines.append(f"gradient_color_{idx} = '{c}'")
+    r["cava_gradient_lines"] = "\n".join(grad_lines)
+
     # Add _x no-hash variants
     keys_snapshot = list(r.keys())
     for k in keys_snapshot:
@@ -167,11 +187,35 @@ def normalize_palette(theme_data, name):
 
     return r, theme_type
 
+def update_cava_config(cava_config_path, rendered_color_section):
+    """Preserves all sections and non-color settings, replacing only [color]."""
+    if not os.path.exists(cava_config_path):
+        return
+    try:
+        with open(cava_config_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Matches [color] up to the next [section] or EOF
+        pattern = re.compile(r"^\[color\].*?(?=(?:^\[[a-zA-Z0-9_-]+\]|\Z))", re.MULTILINE | re.DOTALL)
+        if pattern.search(content):
+            new_content = pattern.sub(rendered_color_section.strip() + "\n\n", content)
+        else:
+            new_content = content.rstrip() + "\n\n" + rendered_color_section.strip() + "\n"
+
+        write_atomic(cava_config_path, new_content)
+    except Exception as e:
+        print(f"[WARN] Error updating Cava config: {e}", file=sys.stderr)
+
 def apply_theme(name, no_nvim=False):
     theme_json_path = os.path.join(CACHE_DIR, f"{name}.json")
     if not os.path.exists(theme_json_path):
-        print(f"Error: Theme '{name}' not found in cache. Run 'theme-sync' first.", file=sys.stderr)
-        return 1
+        cand = os.path.join(CACHE_DIR, f"omarchy-{name}.json")
+        if os.path.exists(cand):
+            theme_json_path = cand
+            name = f"omarchy-{name}"
+        else:
+            print(f"Error: Theme '{name}' not found in cache. Run 'theme-sync' first.", file=sys.stderr)
+            return 1
 
     try:
         with open(theme_json_path, "r", encoding="utf-8") as f:
@@ -212,6 +256,13 @@ def apply_theme(name, no_nvim=False):
                 staged_zed = os.path.join(next_dir, "nvchad-system.json")
                 write_atomic(staged_zed, rendered)
                 staged_files[staged_zed] = zed_dest
+
+            if fname == "cava.conf":
+                cava_theme_dest = os.path.expanduser("~/.config/cava/themes/current")
+                os.makedirs(os.path.dirname(cava_theme_dest), exist_ok=True)
+                staged_cava = os.path.join(next_dir, "current.cava")
+                write_atomic(staged_cava, rendered)
+                staged_files[staged_cava] = cava_theme_dest
         except Exception as e:
             print(f"Error compiling template {fname}: {e}", file=sys.stderr)
             return 1
@@ -260,12 +311,24 @@ def apply_theme(name, no_nvim=False):
     except Exception:
         pass
 
+    # Update active Cava configuration file preserving all non-color user settings
+    cava_cfg_path = os.path.expanduser("~/.config/cava/config")
+    if os.path.exists(cava_cfg_path):
+        rendered_cava_theme = os.path.join(STATE_DIR, "cava.conf")
+        if os.path.exists(rendered_cava_theme):
+            try:
+                with open(rendered_cava_theme, "r", encoding="utf-8") as cf:
+                    cava_color_block = cf.read()
+                update_cava_config(cava_cfg_path, cava_color_block)
+            except Exception as e:
+                print(f"[WARN] Error updating Cava config: {e}", file=sys.stderr)
+
     # -------------------------------------------------------------
     # RUNTIME IPC / SIGNALS (Best-Effort, isolated)
     # -------------------------------------------------------------
 
     # Single-pass /proc scan to discover all relevant processes at once
-    procs = scan_running_processes({"sway", "btop", "dunst", "mako", "waybar", "yazi"})
+    procs = scan_running_processes({"sway", "btop", "dunst", "mako", "waybar", "yazi", "cava"})
 
     # Neovim RPC (system -> all live NvChad instances via their sockets)
     # NvChad spawns an --embed child that owns the socket; that child responds to RPC.
@@ -387,6 +450,13 @@ def apply_theme(name, no_nvim=False):
         except Exception:
             pass
 
+    # Cava: reload colors only via SIGUSR2 (instantaneous, 0 audio drop)
+    for pid in procs.get("cava", []):
+        try:
+            os.kill(pid, signal.SIGUSR2)
+        except Exception:
+            pass
+
     # 8. Asynchronous non-critical wallpaper application
     wallpaper = theme_data.get("assets", {}).get("wallpaper") or theme_data.get("wallpaper")
     if wallpaper:
@@ -439,8 +509,13 @@ def main():
         target_name = filtered_args[1]
         tf = os.path.join(CACHE_DIR, f"{target_name}.json")
         if not os.path.isfile(tf):
-            print(f"Error: Theme '{target_name}' not found in cache", file=sys.stderr)
-            return 1
+            cand = os.path.join(CACHE_DIR, f"omarchy-{target_name}.json")
+            if os.path.isfile(cand):
+                tf = cand
+                target_name = f"omarchy-{target_name}"
+            else:
+                print(f"Error: Theme '{target_name}' not found in cache", file=sys.stderr)
+                return 1
         with open(tf, "r", encoding="utf-8") as f:
             data = json.load(f)
         src = data.get("source", {})
@@ -460,6 +535,11 @@ def main():
             print(f"Commit:       {src.get('commit')}")
         cap_list = [k for k, v in caps.items() if v]
         print(f"Capabilities: {', '.join(cap_list) if cap_list else 'palette'}")
+        cava_info = data.get("apps", {}).get("cava") or data.get("cava", {})
+        cava_source = cava_info.get("source", "derived")
+        cava_count = cava_info.get("gradient_count") or len(cava_info.get("colors", []))
+        cava_label = f"yes ({cava_source}, {cava_count} colors)" if caps.get("cava") else "no"
+        print(f"Cava:         {cava_label}")
         if cr:
             ratio = cr.get('ratio', 'N/A')
             aa = "Pass" if cr.get('wcag_aa') else "Fail"

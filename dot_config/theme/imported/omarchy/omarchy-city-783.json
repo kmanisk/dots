@@ -6,24 +6,17 @@
   "accent": "#ad2222",
   "source": {
     "provider": "omarchy",
-    "registry": "https://github.com/omacom/omarchy-theme-registry",
     "repository": "https://github.com/OldJobobo/omarchy-city-783-theme",
     "commit": "a9ef3ae0a2e16ec1e4664a9b7625e5450080059e",
-    "author": "OldJobobo",
-    "license": null,
-    "added_at": "2026-09-07",
-    "tags": [
-      "cyberpunk",
-      "neon",
-      "urban"
-    ]
+    "author": "OldJobobo"
   },
   "capabilities": {
     "palette": true,
-    "wallpaper": true,
+    "wallpaper": false,
     "icons": false,
     "terminal": true,
-    "browser": false
+    "browser": false,
+    "cava": true
   },
   "palette": {
     "accent": "#ad2222",
@@ -85,14 +78,18 @@
       "surface_alt": "#2b2f37",
       "foreground": "#b9bec6",
       "muted": "#4b515b",
-      "border": "#ad2222",
+      "border": "#4b515b",
       "accent": "#ad2222",
       "selection": "#2b2f37",
       "error": "#e53939",
       "warning": "#9e1a1a",
       "success": "#dce0e6",
       "info": "#8f949c",
-      "link": "#ad2222"
+      "link": "#ad2222",
+      "readable_muted": "#8f949c",
+      "text_accent": "#ff5c5c",
+      "warning_text": "#f04a4a",
+      "cursor": "#eceff2"
     },
     "contrast": {
       "ratio": 9.32,
@@ -101,9 +98,27 @@
       "warning": null
     }
   },
+  "apps": {
+    "cava": {
+      "source": "cava_theme",
+      "gradient": 1,
+      "gradient_count": 8,
+      "colors": [
+        "#ad2222",
+        "#8f949c",
+        "#dce0e6",
+        "#9e1a1a",
+        "#cc1f1f",
+        "#e53939",
+        "#c3c8d0",
+        "#eceff2"
+      ],
+      "background": "#181a1f",
+      "foreground": "#b9bec6"
+    }
+  },
   "assets": {
-    "wallpaper": "https://raw.githubusercontent.com/OldJobobo/omarchy-city-783-theme/a9ef3ae0a2e16ec1e4664a9b7625e5450080059e/backgrounds/0-gasmask-triad.jpg",
-    "preview": "https://pub-98465b4520f24f9a8f162c4f722a293f.r2.dev/v1/previews/city-783/a9ef3ae0a2e16ec1e4664a9b7625e5450080059e/1200.webp"
+    "preview": "/home/manisk/.cache/theme/previews/omarchy-city-783.png"
   },
   "base_16": {
     "BASE00": "#181a1f",
@@ -161,13 +176,34 @@
     "surface_alt": "#2b2f37",
     "foreground": "#b9bec6",
     "muted": "#4b515b",
-    "border": "#ad2222",
+    "border": "#4b515b",
     "accent": "#ad2222",
     "selection": "#2b2f37",
     "error": "#e53939",
     "warning": "#9e1a1a",
     "success": "#dce0e6",
     "info": "#8f949c",
-    "link": "#ad2222"
+    "link": "#ad2222",
+    "readable_muted": "#8f949c",
+    "text_accent": "#ff5c5c",
+    "warning_text": "#f04a4a",
+    "cursor": "#eceff2"
+  },
+  "cava": {
+    "source": "cava_theme",
+    "gradient": 1,
+    "gradient_count": 8,
+    "colors": [
+      "#ad2222",
+      "#8f949c",
+      "#dce0e6",
+      "#9e1a1a",
+      "#cc1f1f",
+      "#e53939",
+      "#c3c8d0",
+      "#eceff2"
+    ],
+    "background": "#181a1f",
+    "foreground": "#b9bec6"
   }
 }

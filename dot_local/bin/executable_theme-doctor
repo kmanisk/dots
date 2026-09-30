@@ -117,7 +117,7 @@ def main():
     print(f"  Manifest:               {status_label(manifest_ok, '(mtime_ns tracking)')}")
 
     # Templates
-    templates = ["sway.conf", "swaybar.conf", "dunst.conf", "alacritty.toml", "colors.sh", "btop.theme", "rofi.rasi", "yazi.toml", "zed-theme.json"]
+    templates = ["sway.conf", "swaybar.conf", "dunst.conf", "alacritty.toml", "colors.sh", "btop.theme", "rofi.rasi", "yazi.toml", "zed-theme.json", "cava.conf"]
     missing_tpl = [t for t in templates if not os.path.exists(os.path.expanduser(f"~/.config/theme/templates/{t}"))]
     print(f"  Templates:              {status_label(len(missing_tpl) == 0, f'({len(templates)-len(missing_tpl)}/{len(templates)})')}")
 
@@ -130,6 +130,7 @@ def main():
     nvim_count = len(os.listdir(nvim_dir)) if nvim_ok else 0
     yazi_ok = os.path.exists(os.path.expanduser("~/.config/yazi/theme.toml")) or os.path.exists(os.path.expanduser("~/.config/yazi/yazi.toml"))
     btop_ok = os.path.isdir(os.path.expanduser("~/.config/btop/themes"))
+    cava_ok = os.path.exists(os.path.expanduser("~/.config/cava/config"))
     rofi_ok = os.path.exists(os.path.expanduser("~/.local/bin/rofi-theme"))
     hooks_dir = os.path.expanduser("~/.config/theme/hooks.d")
     hooks_ok = os.path.isdir(hooks_dir)
@@ -140,6 +141,7 @@ def main():
     print(f"  Neovim:                 {status_label(nvim_ok, f'({nvim_count} ports)')}")
     print(f"  Yazi:                   {status_label(yazi_ok)}")
     print(f"  btop:                   {status_label(btop_ok)}")
+    print(f"  Cava:                   {status_label(cava_ok, '(visualizer)')}")
     print(f"  Rofi:                   {status_label(rofi_ok)}")
     print(f"  Hooks:                  {status_label(hooks_ok, f'({len(os.listdir(hooks_dir))} scripts)')}")
 

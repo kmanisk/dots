@@ -18,7 +18,7 @@ import urllib.request
 import tomllib
 
 sys.path.insert(0, os.path.expanduser("~/.local/lib"))
-from theme_engine.schema import normalize_theme, clean_hex
+from theme_engine.schema import normalize_theme, clean_hex, HEX_RE
 
 IMPORTED_OMARCHY_DIR = os.path.expanduser("~/.config/theme/imported/omarchy")
 PREVIEWS_DIR = os.path.expanduser("~/.cache/theme/previews")
@@ -209,7 +209,54 @@ def import_catalog(limit=None, dry_run=False):
         print(f"Successfully imported {count} Omarchy themes into {IMPORTED_OMARCHY_DIR} ({errors} errors)")
     return count
 
-def import_local_dir(source_dir):
+def parse_cava_theme(filepath):
+    if not os.path.exists(filepath):
+        return None
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        colors = {}
+        gradient = 1
+        gradient_count = None
+        bg = None
+        fg = None
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith(("#", ";", "[")):
+                continue
+            if "=" in line:
+                k, v = line.split("=", 1)
+                k = k.strip().lower()
+                v = v.strip().strip("'\"")
+                if k == "gradient":
+                    gradient = int(v) if v.isdigit() else 1
+                elif k == "gradient_count":
+                    gradient_count = int(v) if v.isdigit() else None
+                elif k.startswith("gradient_color_"):
+                    num = k.replace("gradient_color_", "")
+                    if num.isdigit() and HEX_RE.match(clean_hex(v)):
+                        colors[int(num)] = clean_hex(v)
+                elif k == "background" and HEX_RE.match(clean_hex(v)):
+                    bg = clean_hex(v)
+                elif k == "foreground" and HEX_RE.match(clean_hex(v)):
+                    fg = clean_hex(v)
+
+        sorted_colors = [colors[i] for i in sorted(colors.keys())]
+        if not sorted_colors:
+            return None
+        return {
+            "source": "cava_theme",
+            "gradient": gradient,
+            "gradient_count": gradient_count or len(sorted_colors),
+            "colors": sorted_colors,
+            "background": bg,
+            "foreground": fg,
+        }
+    except Exception as e:
+        print(f"Warning parsing cava theme {filepath}: {e}", file=sys.stderr)
+        return None
+
+def import_local_dir(source_dir, git_url=None):
     colors_file = os.path.join(source_dir, "colors.toml")
     if not os.path.exists(colors_file):
         raise FileNotFoundError(f"Missing colors.toml in {source_dir}")
@@ -217,7 +264,14 @@ def import_local_dir(source_dir):
     with open(colors_file, "rb") as f:
         toml = tomllib.load(f)
 
-    slug = os.path.basename(os.path.abspath(source_dir)).lower().replace("_", "-")
+    if git_url:
+        raw_name = git_url.rstrip("/").split("/")[-1]
+        if raw_name.endswith(".git"):
+            raw_name = raw_name[:-4]
+        slug = raw_name.lower().replace("_", "-")
+    else:
+        slug = os.path.basename(os.path.abspath(source_dir)).lower().replace("_", "-")
+
     if slug.startswith("omarchy-"):
         slug = slug[8:]
     if slug.endswith("-theme"):
@@ -228,10 +282,48 @@ def import_local_dir(source_dir):
     accent = toml.get("accent") or toml.get("color4") or "#58a6ff"
     b16 = colors_dict_to_base16(toml)
 
+    # Extract rich semantic tokens from colors.toml
+    semantic_keys = ["border", "muted", "selection", "readable_muted", "text_accent", "warning_text", "cursor", "background", "foreground"]
+    semantic_overrides = {}
+    for sk in semantic_keys:
+        if sk in toml and HEX_RE.match(clean_hex(str(toml[sk]))):
+            semantic_overrides[sk] = clean_hex(str(toml[sk]))
+
     preview_src = os.path.join(source_dir, "preview.png")
     preview_dest = os.path.join(PREVIEWS_DIR, f"{canonical_id}.png")
     if os.path.exists(preview_src):
         shutil.copy2(preview_src, preview_dest)
+
+    # Git provenance extraction
+    commit = None
+    repo = git_url
+    author = "Local"
+    if os.path.exists(os.path.join(source_dir, ".git")):
+        try:
+            res = subprocess.run(["git", "-C", source_dir, "rev-parse", "HEAD"], capture_output=True, text=True)
+            if res.returncode == 0:
+                commit = res.stdout.strip()
+        except Exception:
+            pass
+        try:
+            res = subprocess.run(["git", "-C", source_dir, "config", "--get", "remote.origin.url"], capture_output=True, text=True)
+            if res.returncode == 0 and not repo:
+                repo = res.stdout.strip()
+        except Exception:
+            pass
+    if repo:
+        parts = repo.rstrip("/").split("/")
+        if len(parts) >= 2:
+            author = parts[-2]
+
+    # Parse Cava theme if present
+    apps = {}
+    cava_theme_file = os.path.join(source_dir, "cava_theme")
+    if not os.path.exists(cava_theme_file):
+        cava_theme_file = os.path.join(source_dir, "cava.conf")
+    cava_parsed = parse_cava_theme(cava_theme_file)
+    if cava_parsed:
+        apps["cava"] = cava_parsed
 
     raw_theme = {
         "schema": 1,
@@ -240,8 +332,9 @@ def import_local_dir(source_dir):
         "type": mode,
         "source": {
             "provider": "omarchy",
-            "repository": None,
-            "author": "Local",
+            "repository": repo,
+            "commit": commit,
+            "author": author,
         },
         "capabilities": {
             "palette": True,
@@ -249,11 +342,14 @@ def import_local_dir(source_dir):
             "icons": False,
             "terminal": True,
             "browser": False,
+            "cava": bool(cava_parsed),
         },
         "palette": {
             "accent": accent,
             "base_16": b16,
         },
+        "semantic": semantic_overrides,
+        "apps": apps,
         "assets": {
             "preview": preview_dest if os.path.exists(preview_src) else None
         }
@@ -264,7 +360,9 @@ def import_local_dir(source_dir):
     with open(dest_path, "w", encoding="utf-8") as f:
         json.dump(norm, f, indent=2)
 
-    print(f"Imported local Omarchy theme: {canonical_id} -> {dest_path}")
+    print(f"Imported Omarchy theme: {canonical_id} -> {dest_path}")
+    if cava_parsed:
+        print(f"  ✓ Upstream Cava theme integrated ({cava_parsed['gradient_count']} colors)")
     return norm
 
 def main():
@@ -296,7 +394,7 @@ def main():
         with tempfile.TemporaryDirectory() as td:
             print(f"Cloning {arg}...")
             subprocess.run(["git", "clone", "--depth", "1", arg, td], check=True)
-            import_local_dir(td)
+            import_local_dir(td, git_url=arg)
             subprocess.run([os.path.expanduser("~/.local/bin/theme-sync")], check=True)
     elif os.path.isdir(arg):
         import_local_dir(arg)

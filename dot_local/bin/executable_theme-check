@@ -60,6 +60,28 @@ def check_theme_file(filepath, strict=False):
     if accent and not HEX_RE.match(str(accent)):
         errors.append(f"Invalid hex accent color: {accent}")
 
+    # Cava visualizer check
+    cava_app = data.get("apps", {}).get("cava") or data.get("cava")
+    if cava_app and isinstance(cava_app, dict):
+        g = cava_app.get("gradient")
+        if g not in (0, 1, "0", "1", None):
+            errors.append(f"Invalid Cava gradient setting: {g} (expected 0 or 1)")
+        colors = cava_app.get("colors", [])
+        if not isinstance(colors, list) or len(colors) == 0:
+            errors.append("Cava configuration missing color list")
+        else:
+            for idx, c in enumerate(colors, 1):
+                if not HEX_RE.match(str(c)):
+                    errors.append(f"Invalid hex color for Cava gradient_color_{idx}: {c}")
+            g_count = cava_app.get("gradient_count")
+            if g_count is not None:
+                try:
+                    gc_int = int(g_count)
+                    if gc_int < 1 or gc_int > 32:
+                        warnings.append(f"Unusual Cava gradient_count: {gc_int}")
+                except ValueError:
+                    errors.append(f"Invalid non-integer Cava gradient_count: {g_count}")
+
     return errors, warnings
 
 def main():
@@ -86,8 +108,11 @@ def main():
         else:
             candidates = [
                 os.path.expanduser(f"~/.config/theme/custom/{target}.json"),
+                os.path.expanduser(f"~/.config/theme/custom/omarchy-{target}.json"),
                 os.path.expanduser(f"~/.config/theme/imported/omarchy/{target}.json"),
+                os.path.expanduser(f"~/.config/theme/imported/omarchy/omarchy-{target}.json"),
                 os.path.expanduser(f"~/.cache/theme/themes/{target}.json"),
+                os.path.expanduser(f"~/.cache/theme/themes/omarchy-{target}.json"),
             ]
             found = False
             for cand in candidates:
