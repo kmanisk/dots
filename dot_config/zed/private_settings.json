@@ -1,5 +1,3 @@
-// Zed settings
-// Docs: https://zed.dev/docs/configuring-zed
 {
     // ─────────────────────────────────────────────────────────────────────────────
     // 1. TYPOGRAPHY & FONTS (All Fonts in One Place)
@@ -19,23 +17,21 @@
         "liga": true, // Enable standard ligatures
         "calt": true // Contextual alternates (coding ligatures: ->, =>, !=, ===)
     },
-
     // ─────────────────────────────────────────────────────────────────────────────
     // FONT SWITCHER (Uncomment any ONE line to switch font instantly)
     // ─────────────────────────────────────────────────────────────────────────────
     // ── [1] Modern Crisp / Tall / Academic Mono ──────────────────────────────────
-    "buffer_font_family": "Iosevka Nerd Font", // Active Default (Tall Condensed CRT)
+    // "buffer_font_family": "Iosevka Nerd Font", // Active Default (Tall Condensed CRT)
     // "buffer_font_family": "Iosevka Nerd Font Mono",
     // "buffer_font_family": "Aporetic Sans Mono",         // Academic Vintage Vector Sans
     // "buffer_font_family": "Aporetic Serif Mono",        // Academic Vintage Book Serif
     // "buffer_font_family": "JetBrains Mono",             // Modern High-Legibility JetBrains
-    // "buffer_font_family": "JetBrainsMono NL",           // JetBrains Mono (No Ligatures)
+    // "buffer_font_family": "JetBrainsMono NL", // JetBrains Mono (No Ligatures)
     // "buffer_font_family": "Cascadia Mono",              // Windows Terminal Standard
     // "buffer_font_family": "Consolas",                   // Classic Clean Windows Mono
     // "buffer_font_family": "psudoFont Liga Mono",        // Custom Ligature Mono
-
     // ── [2] Mainframe / Cyberpunk / Geometry / Cursive ───────────────────────────
-    // "buffer_font_family": "Share Tech Mono",            // Cyberpunk / Matrix HUD Display
+    // "buffer_font_family": "Share Tech Mono", // Cyberpunk / Matrix HUD Display
     // "buffer_font_family": "3270 Nerd Font",             // IBM 3270 Mainframe Green Terminal
     // "buffer_font_family": "Agave Nerd Font Mono",       // Retro Geometric CRT Terminal
     // "buffer_font_family": "FantasqueSansM Nerd Font Mono", // 70s Typewriter / TTY Console
@@ -43,27 +39,23 @@
     // "buffer_font_family": "IntoneMono Nerd Font Mono",  // Intel One High-Clarity Mono
     // "buffer_font_family": "Victor Mono Nerd Font",      // Slanted Cursive Italic Script
     // "buffer_font_family": "DaddyTimeMono Nerd Font Mono", // Casual Retro Monospace
-
     // ── [3] Early Mac / 90s C++ / 8-Bit Pixel Hacker ─────────────────────────────
     // "buffer_font_family": "Departure Mono",             // Early Macintosh / DEC VT Hybrid
     // "buffer_font_family": "ProggyClean Nerd Font",      // Classic 90s C/C++ Developer Console
     // "buffer_font_family": "ProFontIIx Nerd Font",       // 1980s Mac / Atari ST Console
-    // "buffer_font_family": "Monocraft Nerd Font",        // Chunky 8-Bit Pixel Console
-    // "buffer_font_family": "Comic Mono",                 // Casual Legible Monospace
+    // "buffer_font_family": "Monocraft",        // Chunky 8-Bit Pixel Console
+    "buffer_font_family": "Comic Mono", // Casual Legible Monospace
     // "buffer_font_family": "Pixel Code",                 // Pixel Art Vector Coding Font
     // "buffer_font_family": "OCR-A BT",                   // Classic Optical Character Recognition
     // "buffer_font_family": "OCR-B 10 BT",                // European Standard OCR Monospace
-
     // ── [4] Linux TTY / X11 Unix Bitmap Console ──────────────────────────────────
     // "buffer_font_family": "Terminess Nerd Font",        // Pure Linux TTY Console (Terminus)
     // "buffer_font_family": "GohuFont 14 Nerd Font Mono", // Authentic X11 Unix Bitmap Console 14px
     // "buffer_font_family": "GohuFont 11 Nerd Font Mono", // Ultra Compact X11 Bitmap Console 11px
-
     // ── [5] DOS 6x13 / IRC Bitmap Pixel Vectors ──────────────────────────────────
     // "buffer_font_family": "CozetteVector",              // 6x13 DOS / IRC Bitmap Pixel Vector
     // "buffer_font_family": "CozetteCrossedSevenVector",  // Cozette with Crossed 7 & Z
     // "buffer_font_family": "VT323",                      // DEC VT320 Green CRT Terminal
-
     // ── [6] Vintage Windows / Mechanical Typewriter ──────────────────────────────
     // "buffer_font_family": "Lucida Console",             // Windows 95/NT System Console
     // "buffer_font_family": "Courier New",                // Mechanical Typewriter Standard
@@ -97,8 +89,8 @@
     "icon_theme": "JetBrains New UI Icons (Dark)",
     "theme": {
         "mode": "dark",
-        "light": "VSCode Light+",
-        "dark": "Gruvbox Material Neovim Dark"
+        "light": "NvChad System",
+        "dark": "NvChad System"
     },
     // ─────────────────────────────────────────────────────────────────────────────
     // 3. GENERAL & WINDOW

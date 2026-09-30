@@ -7,15 +7,20 @@ export LD_LIBRARY_PATH="$HOME/.local/lib:${LD_LIBRARY_PATH:-}"
 export PATH="$HOME/.gemini/antigravity-cli/bin:$HOME/.local/bin:$PATH"
 export DISPLAY="${DISPLAY:-:0}"
 
+[ -f "$HOME/.local/state/theme/colors.sh" ] && source "$HOME/.local/state/theme/colors.sh"
+
 FILE="/tmp/screenshot_$(date +%s).png"
 
 # Select region and capture
 if [ -n "${WAYLAND_DISPLAY:-}" ] || [ -n "${SWAYSOCK:-}" ]; then
-    GEOM=$(slurp 2>/dev/null)
+    BORDER_COL="${THEME_ACCENT:-#58a6ff}ff"
+    BG_COL="${THEME_BG:-#000000}80"
+    SEL_COL="${THEME_ACCENT:-#58a6ff}33"
+    GEOM=$(slurp -b "$BG_COL" -c "$BORDER_COL" -s "$SEL_COL" 2>/dev/null)
     [ -z "$GEOM" ] && exit 0
     if grim -g "$GEOM" "$FILE" 2>/dev/null && [ -s "$FILE" ]; then
         wl-copy -t image/png < "$FILE"
-        notify-send -t 1500 -i camera-photo "Screenshot" "Region copied to clipboard"
+        notify-send -a "Screenshot" -t 1500 -i camera-photo "Screenshot" "Region copied to clipboard"
         rm -f "$FILE"
     fi
 else

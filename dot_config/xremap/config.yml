@@ -92,11 +92,18 @@ keymap:
       CapsLock-w:
         launch: ["/home/manisk/.local/bin/rofi-pkill"]
 
+      # Silent Steam Launcher:
+      CapsLock-e:
+        launch: ["/home/manisk/.local/bin/steam-workspace", "--silent"]
+
+      # Kill Steam & Games (Force Terminator):
+      CapsLock-r:
+        launch: ["/home/manisk/.local/bin/killgame"]
+
       # Passthrough
       CapsLock-a: a
       CapsLock-b: b
       CapsLock-c: c
-      CapsLock-e: e
       CapsLock-t: t
       CapsLock-v: v
       CapsLock-x: x

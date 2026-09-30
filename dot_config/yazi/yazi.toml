@@ -106,7 +106,7 @@ suppress_preload = false
 [plugin]
 fetchers = [
 	# Git status (official git.yazi plugin)
-	{ url = "*", run = "git", prio = "high" },
+	{ url = "*", run = "git", prio = "high", group = "git" },
 	# MIME-type
 	{ url = "*/",         run = "mime.dir",    prio = "high", group = "mime" },
 	{ url = "local://*",  run = "mime.local",  prio = "high", group = "mime" },

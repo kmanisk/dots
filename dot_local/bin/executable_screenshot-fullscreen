@@ -27,9 +27,9 @@ if [ -n "${WAYLAND_DISPLAY:-}" ] || [ -n "${SWAYSOCK:-}" ]; then
         flock -u 200 2>/dev/null || true
         exec 200>&-
         wl-copy -t image/png < "$FILE"
-        notify-send -t 1500 -i camera-photo "Screenshot" "Fullscreen copied to clipboard"
+        notify-send -a "Screenshot" -t 1500 -i camera-photo "Screenshot" "Fullscreen copied to clipboard"
     else
-        notify-send -t 1500 -i dialog-error "Screenshot Failed"
+        notify-send -a "Screenshot" -t 1500 -i dialog-error "Screenshot Failed"
         rm -f "$FILE"
     fi
 else
@@ -37,9 +37,9 @@ else
         flock -u 200 2>/dev/null || true
         exec 200>&-
         xclip -selection clipboard -t image/png -i "$FILE"
-        notify-send -t 1500 -i camera-photo "Screenshot" "Fullscreen copied to clipboard"
+        notify-send -a "Screenshot" -t 1500 -i camera-photo "Screenshot" "Fullscreen copied to clipboard"
     else
-        notify-send -t 1500 -i dialog-error "Screenshot Failed"
+        notify-send -a "Screenshot" -t 1500 -i dialog-error "Screenshot Failed"
         rm -f "$FILE"
     fi
 fi

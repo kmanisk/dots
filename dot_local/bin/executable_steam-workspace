@@ -24,8 +24,18 @@ if [ -n "${SWAYSOCK:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
     export STEAM_FORCE_DESKTOPUI_SCALING="${STEAM_FORCE_DESKTOPUI_SCALING:-1}"
 fi
 
-# Always switch to workspace 3
-$IPC_CMD "workspace number $WS" >/dev/null 2>&1
+# Parse arguments
+SILENT=0
+for arg in "$@"; do
+    case "$arg" in
+        --silent|-s) SILENT=1 ;;
+    esac
+done
+
+if [ "$SILENT" -eq 0 ]; then
+    # Switch to workspace 3 when not launched in background
+    $IPC_CMD "workspace number $WS" >/dev/null 2>&1
+fi
 
 if ! pgrep -x steam >/dev/null 2>&1; then
     # 1. Cold boot: Steam process is not running at all
@@ -39,29 +49,35 @@ if ! pgrep -x steam >/dev/null 2>&1; then
     if [ "${STEAM_DGPU:-0}" = "1" ]; then
         export __NV_PRIME_RENDER_OFFLOAD=1 __VK_LAYER_NV_optimus=NVIDIA_only __GLX_VENDOR_LIBRARY_NAME=nvidia
     fi
-    nohup steam >/dev/null 2>&1 &
-    (
-        for _ in $(seq 1 30); do
-            sleep 0.5
-            if has_window; then
-                $IPC_CMD "[instance=\"steamwebhelper\"] focus; workspace number $WS" >/dev/null 2>&1
-                break
-            fi
-        done
-    ) &
+    nohup steam -silent >/dev/null 2>&1 &
+    if [ "$SILENT" -eq 0 ]; then
+        (
+            for _ in $(seq 1 30); do
+                sleep 0.5
+                if has_window; then
+                    $IPC_CMD "[instance=\"steamwebhelper\"] focus; workspace number $WS" >/dev/null 2>&1
+                    break
+                fi
+            done
+        ) &
+    fi
 elif ! has_window; then
     # 2. Process is running in background/tray, but window is closed/hidden
     nohup steam steam://open/main >/dev/null 2>&1 &
-    (
-        for _ in $(seq 1 15); do
-            sleep 0.2
-            if has_window; then
-                $IPC_CMD "[instance=\"steamwebhelper\"] focus; workspace number $WS" >/dev/null 2>&1
-                break
-            fi
-        done
-    ) &
+    if [ "$SILENT" -eq 0 ]; then
+        (
+            for _ in $(seq 1 15); do
+                sleep 0.2
+                if has_window; then
+                    $IPC_CMD "[instance=\"steamwebhelper\"] focus; workspace number $WS" >/dev/null 2>&1
+                    break
+                fi
+            done
+        ) &
+    fi
 else
-    # 3. Window already exists: focus immediately
-    $IPC_CMD "[instance=\"steamwebhelper\"] focus; workspace number $WS" >/dev/null 2>&1
+    # 3. Window already exists
+    if [ "$SILENT" -eq 0 ]; then
+        $IPC_CMD "[instance=\"steamwebhelper\"] focus; workspace number $WS" >/dev/null 2>&1
+    fi
 fi

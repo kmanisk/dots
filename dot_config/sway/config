@@ -63,12 +63,6 @@ bindsym Mod1+Shift+m exec --no-startup-id ~/.local/bin/rofi-theme
 bindsym $mod+e exec thunar ~
 bindsym $mod+z exec --no-startup-id zed
 
-# Time/date notification (Win + c)
-bindsym $mod+c exec notify-send "Clock" "$(date '+%A, %B %d%n%I:%M %P')"
-
-# Bluetooth battery notification (Win + v)
-bindsym $mod+v exec --no-startup-id ~/.local/bin/bt-battery-notify
-
 # Process Killer Menu (Alt + Escape, Win + ')
 bindsym Mod1+Escape exec --no-startup-id ~/.local/bin/rofi-pkill
 bindsym $mod+apostrophe exec --no-startup-id ~/.local/bin/rofi-pkill
@@ -167,8 +161,8 @@ bindsym Mod1+Shift+F mode "gaming", exec notify-send -t 1500 -i input-gaming "Ga
 bindsym --inhibited Mod1+Shift+F mode "gaming", exec notify-send -t 1500 -i input-gaming "Gaming Mode: ON" "Workspaces, Screenshot & OBS hotkeys active"
 
 # System Utilities
-bindsym $mod+Mod1+1 exec $term --class nmtui -e nmtui
-bindsym $mod+Mod1+2 exec blueman-manager
+bindsym $mod+Mod1+1 exec --no-startup-id ~/.local/bin/wifi-menu
+bindsym $mod+Mod1+2 exec --no-startup-id ~/.local/bin/rofi-bluetooth
 bindsym $mod+Mod1+3 exec pavucontrol
 bindsym Mod1+Shift+o exec --no-startup-id ~/.local/bin/toggle-audio-sink
 bindsym $mod+Control+m exec --no-startup-id ~/.local/bin/toggle-headset-mic
@@ -239,11 +233,9 @@ bindsym $mod+w layout tabbed
 bindsym $mod+semicolon exec --no-startup-id ~/.local/bin/smart-layout-toggle
 bindsym $mod+a exec --no-startup-id ~/.local/bin/smart-layout-toggle
 
-# Focus activation: always jump to windows requesting focus (e.g. Steam
-# Big Picture raising itself from another workspace). Sway default is
-# "smart" (often just marks urgent). NOTE: this is global — any app can
-# steal focus, not just Steam. Revert to smart if background apps yank focus.
-focus_on_window_activation focus
+# Focus activation: smart (only focus window requesting focus if it is already
+# visible on the active workspace; otherwise set urgent without switching workspace).
+focus_on_window_activation smart
 
 # Focus Navigation (hjkl & arrows)
 bindsym $mod+h focus left
@@ -445,8 +437,6 @@ for_window [instance="(?i)^AppRun\.wrapped$"] floating enable, resize set 1200 7
 for_window [instance="(?i)^pkg-float$"] floating enable, resize set 1250 780, move position center
 for_window [app_id="(?i)^lsfg-vk-ui$"] floating enable, resize set 1250 820, move position center
 for_window [class="(?i)^lsfg-vk-ui$"] floating enable, resize set 1250 820, move position center
-for_window [app_id="(?i)^nmtui$"] floating enable, resize set 900 600, move position center
-for_window [class="(?i)^nmtui$"] floating enable, resize set 900 600, move position center
 for_window [app_id="(?i)^vkcube.*"] floating enable, resize set 900 650, move position center
 for_window [class="(?i)^vkcube.*"] floating enable, resize set 900 650, move position center
 
@@ -560,6 +550,10 @@ assign [class="(?i)^steam$"] workspace number $ws3
 assign [app_id="(?i)^steam$"] workspace number $ws3
 assign [instance="(?i)^steam.*$"] workspace number $ws3
 
+no_focus [class="(?i)^steam$"]
+no_focus [app_id="(?i)^steam$"]
+no_focus [instance="(?i)^steam.*$"]
+
 for_window [class="(?i)^steam$"] move to workspace number $ws3
 for_window [app_id="(?i)^steam$"] move to workspace number $ws3
 for_window [instance="(?i)^steam.*$"] move to workspace number $ws3
@@ -586,7 +580,13 @@ for_window [instance="steamwebhelper" title="^Friends List$"] move to workspace 
 for_window [instance="steamwebhelper" title=".* - Chat$"] move to workspace number $ws3, floating enable
 
 # Games go to ws4 only (native XWayland + gamescope-nested + native Wayland cs2)
-# for_window [workspace="^4$"] move container to workspace number $ws1, workspace number $ws1
+assign [class="(?i)^(launcher\.exe|socialclubhelper\.exe|playgtaiv\.exe|gtaiv|gtaiv\.exe)$"] workspace number $ws4
+assign [instance="(?i)^(launcher\.exe|socialclubhelper\.exe|playgtaiv\.exe|gtaiv|gtaiv\.exe)$"] workspace number $ws4
+assign [title="(?i).*(rockstar|social club|grand theft auto iv|gtaiv).*"] workspace number $ws4
+
+no_focus [class="(?i)^(launcher\.exe|socialclubhelper\.exe|playgtaiv\.exe|gtaiv|gtaiv\.exe)$"]
+no_focus [instance="(?i)^(launcher\.exe|socialclubhelper\.exe|playgtaiv\.exe|gtaiv|gtaiv\.exe)$"]
+no_focus [title="(?i).*(rockstar|social club|grand theft auto iv|gtaiv).*"]
 
 # Whitelist of game & launcher windows allowed on ws4 (re-assert ws4 after eviction rule)
 for_window [class="^steam_app_.*$"] move to workspace number $ws4
@@ -599,9 +599,9 @@ for_window [title="(?i)^GTAIV$"] move to workspace number $ws4
 for_window [title="(?i)^Grand Theft Auto IV$"] move to workspace number $ws4
 for_window [title="(?i).*(rockstar|social club).*$"] move to workspace number $ws4, floating enable
 
-# Re-assert Steam windows on ws3 if affected by ws4 eviction
-for_window [class="(?i)^steam$"] move to workspace number $ws3
-for_window [instance="(?i)^steam.*$"] move to workspace number $ws3
+# Re-assert Steam windows on ws3 (strictly Steam itself, never game/launcher executables)
+for_window [class="(?i)^steam$" title="^(?!.*(Grand Theft Auto|GTA|Rockstar)).*$"] move to workspace number $ws3
+for_window [instance="(?i)^steam.*$" title="^(?!.*(Grand Theft Auto|GTA|Rockstar)).*$"] move to workspace number $ws3
 
 # Autostart Services
 exec dbus-update-activation-environment --systemd WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP=sway SWAYSOCK QT_QPA_PLATFORMTHEME XCURSOR_THEME XCURSOR_SIZE

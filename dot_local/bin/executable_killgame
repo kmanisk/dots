@@ -4,10 +4,17 @@
 # ==============================================================================
 echo "==> Terminating hung game processes and compositors..."
 
-# 1. Kill CS2, Gamescope, and Steam processes
-killall -9 -v cs2 gamescope gamescopereaper steam steamwebhelper 2>/dev/null || true
-pkill -9 -e -f "gamescope|cs2|steam" 2>/dev/null || true
+# 1. Kill Games, Launchers, Wine/Proton processes, and Steam
+killall -9 -v cs2 gamescope gamescopereaper steam steamwebhelper eldenring.exe GTAIV.exe PlayGTAIV.exe LaunchGTAIV.exe wineserver 2>/dev/null || true
+pkill -9 -e -f "gamescope|cs2|steam|eldenring|gtaiv|wineserver|pressure-vessel" 2>/dev/null || true
+
+# Session sidecars: ensure restore will never resurrect killed Steam
+mkdir -p "$HOME/.config/sway/session" 2>/dev/null || true
+touch "$HOME/.config/sway/session/steam_was_killed" 2>/dev/null || true
 touch /tmp/steam_killed_by_user 2>/dev/null || true
+
+# Desktop notification if GUI is alive
+notify-send -t 2000 -i application-exit "Steam & Games Terminated" "All Steam and game processes force killed" 2>/dev/null || true
 
 # 2. Restore display / bar (X11 only bits are gated; Wayland needs none)
 if [ -n "$SWAYSOCK" ] || [ -n "$WAYLAND_DISPLAY" ]; then
