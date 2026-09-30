@@ -9,6 +9,7 @@ Operates in native Rofi Script Mode (man rofi-script) for dynamic in-place mutat
   • 0 resident daemons, <10ms generation, instant Wayland repaint without window reload.
 """
 import glob
+import html
 import json
 import os
 import shutil
@@ -44,7 +45,7 @@ DEFAULT_HINT = (
     "<span weight='bold'>Enter:</span> Apply  │  "
     "<span weight='bold'>Ctrl+D:</span> Delete  │  "
     "<span weight='bold'>Ctrl+R:</span> Sync  │  "
-    "<span weight='bold'>Ctrl+I:</span> Info"
+    "<span weight='bold'>Ctrl+I:</span> Preview HUD"
 )
 
 
@@ -108,40 +109,88 @@ def purge_cache(theme_name):
                 pass
 
 
-def get_theme_metadata(theme_name):
+def get_theme_cache_path(theme_name):
     clean = theme_name[8:] if theme_name.startswith("omarchy-") else theme_name
     candidates = [
         os.path.join(CACHE_DIR, f"{theme_name}.json"),
         os.path.join(CACHE_DIR, f"{clean}.json"),
         os.path.join(CACHE_DIR, f"omarchy-{clean}.json"),
     ]
-    target_path = next((c for c in candidates if os.path.exists(c)), None)
+    return next((c for c in candidates if os.path.exists(c)), None)
+
+
+def generate_preview_hud(theme_name):
+    clean = theme_name[8:] if theme_name.startswith("omarchy-") else theme_name
+    target_path = get_theme_cache_path(clean)
     if not target_path:
-        return f"<span foreground='#ea6962' weight='bold'>No compiled metadata found for '{theme_name}'</span>"
+        return f"<span foreground='#ea6962' weight='bold'>No compiled metadata found for '{html.escape(clean)}'</span>"
 
     try:
         with open(target_path, "r", encoding="utf-8") as jf:
             d = json.load(jf)
-        prov = d.get("source", {}).get("provider", "unknown")
-        typ = d.get("type", "dark")
-        accent = d.get("accent", "#d8a657")
-        disp = d.get("name", theme_name)
-        return (
-            f"<span foreground='{accent}' weight='bold'>{disp}</span>  │  "
-            f"Type: <span weight='bold'>{typ}</span>  │  "
-            f"Provider: <span foreground='#83a598'>{prov}</span>  │  "
-            f"Accent: <span foreground='{accent}'>{accent}</span>"
-        )
     except Exception as e:
-        return f"<span foreground='#ea6962'>Error parsing metadata: {e}</span>"
+        return f"<span foreground='#ea6962'>Error parsing metadata: {html.escape(str(e))}</span>"
+
+    b16 = d.get("palette", {}).get("base_16", {}) or d.get("base_16", {})
+    sem = d.get("derived", {}).get("semantic", {}) or d.get("semantic", {})
+
+    bg = sem.get("background") or b16.get("BASE00", "#181a1f")
+    fg = sem.get("foreground") or b16.get("BASE05", "#b9bec6")
+    accent = d.get("accent") or sem.get("accent") or b16.get("BASE0D", "#ad2222")
+    sel_bg = sem.get("selection") or b16.get("BASE02", "#2b2f37")
+    sel_fg = sem.get("selection_fg") or fg
+    border = sem.get("border") or accent
+    muted = sem.get("muted") or b16.get("BASE03", "#4b515b")
+
+    b00 = b16.get("BASE00", "#181a1f")
+    b01 = b16.get("BASE01", "#101216")
+    b02 = b16.get("BASE02", "#2b2f37")
+    b03 = b16.get("BASE03", "#4b515b")
+    b04 = b16.get("BASE04", "#6a707a")
+    b05 = b16.get("BASE05", "#b9bec6")
+    b06 = b16.get("BASE06", "#d3d7dd")
+    b07 = b16.get("BASE07", "#eceff2")
+    b08 = b16.get("BASE08", "#e53939")
+    b09 = b16.get("BASE09", "#cc1f1f")
+    b0A = b16.get("BASE0A", "#9e1a1a")
+    b0B = b16.get("BASE0B", "#dce0e6")
+    b0C = b16.get("BASE0C", "#8f949c")
+    b0D = b16.get("BASE0D", "#ad2222")
+    b0E = b16.get("BASE0E", "#c3c8d0")
+    b0F = b16.get("BASE0F", "#6a3030")
+
+    row1 = " ".join([f"<span foreground='{c}'>██</span>" for c in [b00, b01, b02, b03, b04, b05, b06, b07]])
+    row2 = " ".join([f"<span foreground='{c}'>██</span>" for c in [b08, b09, b0A, b0B, b0C, b0D, b0E, b0F]])
+
+    display_name = d.get("display_name") or d.get("name") or clean
+    author = d.get("source", {}).get("author") or "Unknown"
+    provider = d.get("source", {}).get("provider") or "custom"
+    theme_type = d.get("type") or "dark"
+
+    safe_name = html.escape(str(display_name))
+    safe_author = html.escape(str(author))
+    safe_provider = html.escape(str(provider))
+    safe_type = html.escape(str(theme_type))
+    safe_id = html.escape(str(clean))
+
+    lines = [
+        f"<span weight='bold' size='large' foreground='{accent}'>{safe_name.upper()}</span>  <span size='small' foreground='{muted}'>by {safe_author} ({safe_provider} • {safe_type})</span>  │  <span foreground='{accent}' size='small'>[Ctrl+I: Hide HUD]</span>",
+        f"  <span foreground='{bg}'>██</span> Bg: {bg}   <span foreground='{fg}'>██</span> Fg: {fg}   <span foreground='{accent}'>██</span> Accent: {accent}   <span foreground='{sel_bg}'>██</span> Sel: {sel_bg}",
+        f"  <span size='small' foreground='{muted}'>Base16:</span> {row1}  <span size='small' foreground='{muted}'>00-07</span>   {row2}  <span size='small' foreground='{muted}'>08-0F</span>",
+        f"  <span background='{bg}' foreground='{fg}'> <span foreground='{b0E}' weight='bold'>fn</span> <span foreground='{b0D}'>main</span>() {{ <span foreground='{b08}'>println!</span>(<span foreground='{b0B}'>&quot;Hello, {safe_name}!&quot;</span>); }} </span>  <span background='{accent}' foreground='{bg}' weight='bold'> NORMAL </span><span background='{sel_bg}' foreground='{sel_fg}'> {safe_id}.rs </span>",
+    ]
+
+    return "&#10;".join(lines)
 
 
-def output_mode_header(message_str):
+def output_mode_header(message_str, data_str=None):
     sys.stdout.write(f"{NULL}prompt{US}Theme:\n")
     sys.stdout.write(f"{NULL}markup-rows{US}true\n")
     sys.stdout.write(f"{NULL}use-hot-keys{US}true\n")
     sys.stdout.write(f"{NULL}no-custom{US}true\n")
     sys.stdout.write(f"{NULL}message{US}{message_str}\n")
+    if data_str is not None:
+        sys.stdout.write(f"{NULL}data{US}{data_str}\n")
     sys.stdout.write(f"{NULL}new-selection{US}0\n")
 
 
@@ -241,7 +290,7 @@ def main():
                     start_new_session=True,
                     close_fds=True,
                 )
-        output_mode_header(DEFAULT_HINT)
+        output_mode_header(DEFAULT_HINT, "")
         output_theme_rows(current)
         return 0
 
@@ -275,7 +324,7 @@ def main():
         # Active theme safety rule
         if clean == current or target == current:
             msg = f"<span foreground='#ea6962' weight='bold'>⚠ Cannot delete active theme '{clean}'! Switch themes first.</span>"
-            output_mode_header(msg)
+            output_mode_header(msg, "")
             output_theme_rows(current)
             return 0
 
@@ -307,7 +356,7 @@ def main():
         else:
             msg = f"<span foreground='#ea6962' weight='bold'>Theme '{clean}' not found in any source directory.</span>"
 
-        output_mode_header(msg)
+        output_mode_header(msg, "")
         output_theme_rows(current)
         return 0
 
@@ -316,16 +365,30 @@ def main():
         subprocess.run([THEME_SYNC], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         current = get_current_theme()
         msg = "<span foreground='#7daea3' weight='bold'>✓ Themes synchronized and cache recompiled</span>"
-        output_mode_header(msg)
+        output_mode_header(msg, "")
         output_theme_rows(current)
         return 0
 
-    # User pressed Ctrl+I: Inspect theme details
+    # User pressed Ctrl+I: Toggle preview HUD
     if retv == "12":
         target = os.environ.get("ROFI_INFO") or (sys.argv[1].split()[0] if len(sys.argv) > 1 else "")
         clean = target[8:] if target.startswith("omarchy-") else target
-        msg = get_theme_metadata(clean)
-        output_mode_header(msg)
+        if not clean:
+            output_mode_header(DEFAULT_HINT, "")
+            output_theme_rows(current)
+            return 0
+
+        prev_preview = os.environ.get("ROFI_DATA", "")
+        if prev_preview == clean:
+            # Toggled OFF for same theme
+            msg = DEFAULT_HINT
+            new_data = ""
+        else:
+            # Toggled ON or switched to newly selected theme
+            msg = generate_preview_hud(clean)
+            new_data = clean
+
+        output_mode_header(msg, new_data)
         output_theme_rows(current)
         return 0
 
