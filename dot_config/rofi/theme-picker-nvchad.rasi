@@ -22,10 +22,10 @@ window {
     border:              2px;
     border-color:        @accent;
     border-radius:       0px;
-    width:               860px;
+    width:               780px;
     location:            center;
     anchor:              center;
-    padding:             22px;
+    padding:             18px;
 }
 
 mainbox {
@@ -47,7 +47,7 @@ inputbar {
 prompt {
     background-color:    transparent;
     text-color:          @accent;
-    font:                "VictorMono Nerd Font Mono Bold 20";
+    font:                "VictorMono Nerd Font Mono Bold 18";
 }
 
 entry {
@@ -55,7 +55,7 @@ entry {
     text-color:          @foreground;
     placeholder:         "Search themes...";
     placeholder-color:   @foreground-alt;
-    font:                "VictorMono Nerd Font Mono Bold 17";
+    font:                "VictorMono Nerd Font Mono Bold 16";
 }
 
 message {
@@ -105,7 +105,7 @@ element selected {
 element-text {
     background-color:    transparent;
     text-color:          inherit;
-    font:                "VictorMono Nerd Font Mono Bold 17";
+    font:                "VictorMono Nerd Font Mono Bold 16";
     highlight:           bold;
     vertical-align:      0.5;
 }

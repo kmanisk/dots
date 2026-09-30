@@ -61,14 +61,25 @@ GAME_EXE="$GAME_DIR/eldenring.exe"
 PROTON_BIN="$HOME/.local/share/Steam/steamapps/common/Proton - Experimental/proton"
 
 cd "$GAME_DIR"
+
+# LSFG-VK isolation:
+# gamescope is a Vulkan micro-compositor. If lsfg-vk is loaded on gamescope itself,
+# it corrupts Wayland sync fences (dri_create_fence_fd) and crashes Sway.
+# Always shield gamescope with DISABLE_LSFGVK=1, and inject LSFG only into the game process.
+if [[ "${ENABLE_LSFG:-1}" == "1" && "${DISABLE_LSFGVK:-0}" != "1" ]]; then
+    GAME_ENV=(env -u DISABLE_LSFGVK LSFGVK_PROFILE="${LSFGVK_PROFILE:-Elden Ring}")
+else
+    GAME_ENV=(env DISABLE_LSFGVK=1)
+fi
+
 if [ -n "$SWAYSOCK" ] || [ -n "$WAYLAND_DISPLAY" ]; then
     # Sway fractional scale (1.2x) exposes only 1599x999 to XWayland.
     # Gamescope nests a native 1920x1200 session so the game renders
     # full-res fullscreen; compositor upscales. Mangohud env from the
     # caller passes through gamescope to the game process.
-    gamescope -W 1920 -H 1200 -w 1920 -h 1200 -f -r 165 -- "$PROTON_BIN" run "$GAME_EXE" "$@"
+    DISABLE_LSFGVK=1 gamescope -W 1920 -H 1200 -w 1920 -h 1200 -f -r 165 -- "${GAME_ENV[@]}" "$PROTON_BIN" run "$GAME_EXE" "$@"
 else
-    "$PROTON_BIN" run "$GAME_EXE" "$@"
+    "${GAME_ENV[@]}" "$PROTON_BIN" run "$GAME_EXE" "$@"
 fi
 STATUS=$?
 # TRAP on EXIT restores Balanced/powersave (no exec above, on purpose)

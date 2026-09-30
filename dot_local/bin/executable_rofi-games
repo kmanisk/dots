@@ -12,9 +12,9 @@ chosen=$(echo -e "$options" | rofi -dmenu -i \
 
 case "$chosen" in
     *"Steam"*)          env STEAM_DGPU=1 steam-workspace ;;
-    *"+ FG"*)           env LSFGVK_PROFILE='Elden Ring 2x' mangohud eldenring-run ;;
-    *"Gamescope test"*) env DISABLE_LSFGVK=1 mangohud eldenring-run ;;
-    *"ELDEN RING"*)     env DISABLE_LSFGVK=1 mangohud eldenring-run ;;
+    *"+ FG"*)           env ENABLE_LSFG=1 LSFGVK_PROFILE='Elden Ring' mangohud eldenring-run ;;
+    *"Gamescope test"*) env ENABLE_LSFG=0 DISABLE_LSFGVK=1 mangohud eldenring-run ;;
+    *"ELDEN RING"*)     env ENABLE_LSFG=0 DISABLE_LSFGVK=1 mangohud eldenring-run ;;
     *"Configure LSFG"*) ( ~/.local/bin/lsfg-vk-ui >/dev/null 2>&1 & ) ;;
     *"Kill"*)           killgame ;;
 esac

@@ -28,26 +28,94 @@ def notify(title, msg, icon="audio-headphones"):
         msg
     ])
 
+DUSKY_SOCK = os.path.expanduser("~/.config/dusky/settings/dusky_studio/dusky_audio.sock")
+DUSKY_CONF = os.path.expanduser("~/.config/dusky/settings/dusky_studio/config.json")
+
+def notify_dusky_sink(sink_name):
+    """Notify Dusky Audio Studio DSP to re-route its output to the new sink."""
+    if os.path.exists(DUSKY_SOCK):
+        try:
+            import socket
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+                s.settimeout(0.6)
+                s.connect(DUSKY_SOCK)
+                s.sendall(f"CMD SINK_TGT {sink_name}\n".encode("utf-8"))
+                s.recv(64)
+        except Exception:
+            pass
+
+    if os.path.exists(DUSKY_CONF):
+        try:
+            import json
+            with open(DUSKY_CONF, "r", encoding="utf-8") as f:
+                dconf = json.load(f)
+            if dconf.get("pre_sink") != sink_name:
+                dconf["pre_sink"] = sink_name
+                with open(DUSKY_CONF, "w", encoding="utf-8") as f:
+                    json.dump(dconf, f, indent=2)
+        except Exception:
+            pass
+
 def switch_audio_to_bluetooth(mac_clean, device_name):
-    # Allow Pipewire/Wireplumber half a second to initialize the audio sink node
-    time.sleep(0.6)
+    # Poll PipeWire/WirePlumber with retries (up to 5s) to allow node creation
+    card_name = f"bluez_card.{mac_clean}"
+    target_sink = None
+
+    for attempt in range(15):
+        time.sleep(0.3)
+        try:
+            # If after a few tries sink hasn't appeared, ensure card profile is active
+            if attempt == 3:
+                subprocess.run(["pactl", "set-card-profile", card_name, "a2dp-sink"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            sinks_out = subprocess.check_output(["pactl", "list", "sinks", "short"]).decode()
+            for line in sinks_out.strip().split("\n"):
+                if not line:
+                    continue
+                parts = line.split("\t")
+                if len(parts) >= 2:
+                    sink_name = parts[1]
+                    if "bluez_output" in sink_name and mac_clean.lower() in sink_name.lower():
+                        target_sink = sink_name
+                        break
+            if target_sink:
+                break
+        except Exception:
+            pass
+
+    if not target_sink:
+        print(f"[-] Could not find sink for {mac_clean} after 5s", file=sys.stderr)
+        return
+
     try:
-        sinks_out = subprocess.check_output(["pactl", "list", "sinks", "short"]).decode()
-        for line in sinks_out.strip().split("\n"):
-            if not line:
-                continue
-            parts = line.split("\t")
-            sink_name = parts[1]
-            if "bluez_output" in sink_name and mac_clean.lower() in sink_name.lower():
-                subprocess.run(["pactl", "set-default-sink", sink_name], check=True)
-                # Move all active sink inputs to this sink
-                inputs_out = subprocess.check_output(["pactl", "list", "sink-inputs", "short"]).decode()
-                for input_line in inputs_out.strip().split("\n"):
-                    if input_line:
-                        input_id = input_line.split("\t")[0]
-                        subprocess.run(["pactl", "move-sink-input", input_id, sink_name], check=False)
-                notify("Bluetooth Audio Connected", f"Audio switched to {device_name}", "audio-headphones")
-                return
+        # 1. Set PulseAudio default sink
+        subprocess.run(["pactl", "set-default-sink", target_sink], check=True)
+
+        # 2. Update WirePlumber native default
+        try:
+            wp_out = subprocess.check_output(["wpctl", "status"]).decode()
+            for line in wp_out.split("\n"):
+                if target_sink in line or device_name in line:
+                    m = re.search(r'(\d+)\.\s+.*bluez', line) or re.search(r'(\d+)\.\s+' + re.escape(device_name), line)
+                    if m:
+                        wp_id = m.group(1)
+                        subprocess.run(["wpctl", "set-default", wp_id], check=False, stdout=subprocess.DEVNULL)
+                        break
+        except Exception:
+            pass
+
+        # 3. Notify Dusky Audio Studio DSP to route processed audio to Bluetooth
+        notify_dusky_sink(target_sink)
+
+        # 4. Move active regular streams to the Bluetooth sink
+        inputs_out = subprocess.check_output(["pactl", "list", "sink-inputs", "short"]).decode()
+        for input_line in inputs_out.strip().split("\n"):
+            if input_line:
+                input_id = input_line.split("\t")[0]
+                subprocess.run(["pactl", "move-sink-input", input_id, target_sink], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        notify("Bluetooth Audio Connected", f"Audio switched to {device_name}", "audio-headphones")
+        print(f"[+] Audio successfully routed to {device_name} ({target_sink})")
     except Exception as e:
         print(f"Error routing audio: {e}", file=sys.stderr)
 
@@ -121,8 +189,17 @@ def check_all_devices():
                 name = props.get('Name', 'Unknown Device')
                 paired = props.get('Paired', False)
                 trusted = props.get('Trusted', False)
+                connected = props.get('Connected', False)
+                uuids = props.get('UUIDs', [])
+
                 if paired and not trusted:
                     trust_device(path, name)
+
+                # If device is already connected on startup (e.g. after restart/crash), ensure audio is routed
+                is_audio = any("110b" in str(u).lower() or "110a" in str(u).lower() or "111e" in str(u).lower() for u in uuids)
+                if connected and is_audio:
+                    mac_clean = path.split("dev_")[-1]
+                    GLib.timeout_add(200, lambda m=mac_clean, n=name: (switch_audio_to_bluetooth(m, n), False)[1])
     except Exception as e:
         print(f"Error checking devices: {e}", file=sys.stderr)
 
