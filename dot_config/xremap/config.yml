@@ -14,7 +14,7 @@ keymap:
   # --- Alacritty Universal Copy / Paste / Cut (Safe against SIGINT) ---
   - name: Alacritty Universal Clipboard
     application:
-      only: ["Alacritty"]
+      only: ["Alacritty", "scratch-term", "scratch-notes"]
     exact_match: true
     remap:
       Super-c: C-S-c # Win+C -> Ctrl+Shift+C (safe copy without killing running processes)
@@ -23,7 +23,7 @@ keymap:
   # --- General Universal Copy / Paste / Cut (All GUI Applications) ---
   - name: Universal Copy Paste
     application:
-      not: ["Alacritty"]
+      not: ["Alacritty", "scratch-term", "scratch-notes"]
     exact_match: true
     remap:
       Super-c: C-c # Win+C -> Ctrl+C (Universal Copy)
