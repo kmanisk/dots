@@ -227,19 +227,44 @@ def main():
 
     # Initial invocation: render rows and default hint header
     if retv == "0":
-        stale, _ = is_cache_stale([BASE46_DIR, IMPORTED_DIR, CUSTOM_DIR], MANIFEST_PATH)
-        if stale:
+        theme_files = glob.glob(os.path.join(CACHE_DIR, "*.json"))
+        if not theme_files:
             subprocess.run([THEME_SYNC], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            stale, _ = is_cache_stale([BASE46_DIR, IMPORTED_DIR, CUSTOM_DIR], MANIFEST_PATH)
+            if stale:
+                subprocess.Popen(
+                    [THEME_SYNC],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL,
+                    start_new_session=True,
+                    close_fds=True,
+                )
         output_mode_header(DEFAULT_HINT, keep_selection=False)
         output_theme_rows(current)
         return 0
 
-    # User pressed Enter: apply theme atomically and exit
+    # User pressed Enter: apply theme atomically and immediately close Rofi
     if retv == "1":
         chosen_theme = os.environ.get("ROFI_INFO") or (sys.argv[1].split()[0] if len(sys.argv) > 1 else "")
         if chosen_theme:
             clean = chosen_theme[8:] if chosen_theme.startswith("omarchy-") else chosen_theme
-            subprocess.Popen([THEME_SET, clean], start_new_session=True)
+            # Detach completely with DEVNULL so zero output leaks into Rofi's pipe
+            subprocess.Popen(
+                [THEME_SET, clean],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+                close_fds=True,
+            )
+        # Explicitly flush, close stdout, and exit with code 0 so Rofi sees 0 entries & EOF immediately
+        try:
+            sys.stdout.close()
+            sys.stderr.close()
+        except Exception:
+            pass
         return 0
 
     # User pressed Ctrl+D / Ctrl+Shift+D: Delete theme
@@ -259,12 +284,24 @@ def main():
             try:
                 os.remove(source_path)
                 purge_cache(clean)
-                subprocess.run([THEME_SYNC], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                subprocess.run(
+                # Fire notification and background sync asynchronously so GUI repaints in <20ms
+                subprocess.Popen(
                     ["notify-send", "Theme Engine", f"Deleted theme '{clean}' ({source_type})", "-i", "dialog-information"],
-                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL,
+                    start_new_session=True,
+                    close_fds=True,
                 )
-                msg = f"<span foreground='#a7c080' weight='bold'>✓ Deleted '{clean}' ({source_type})</span>  │  Cache updated"
+                subprocess.Popen(
+                    [THEME_SYNC],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL,
+                    start_new_session=True,
+                    close_fds=True,
+                )
+                msg = f"<span foreground='#a7c080' weight='bold'>✓ Deleted '{clean}' ({source_type})</span>"
             except Exception as e:
                 msg = f"<span foreground='#ea6962' weight='bold'>Error deleting '{clean}': {e}</span>"
         else:
