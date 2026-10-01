@@ -37,7 +37,9 @@ cmd="${1:-get}"
 case "${cmd}" in
     get)
         cfg="$(get_current_config)"
+        win_pct=$(awk -v s="${cfg}" 'BEGIN { printf "%g%%", s * 50 }')
         echo "Configured saturation : ${cfg} (~/.config/vibrance)"
+        echo "Windows equivalent    : ${win_pct}"
         echo "--- Live Hardware State ---"
         if [[ -x "${CTM_BIN}" ]]; then
             "${CTM_BIN}" --inspect
@@ -105,6 +107,8 @@ case "${cmd}" in
             echo "Translated ${raw_val} -> Linux scalar ${val}."
         fi
         echo "Saved saturation ${val} to ${CONFIG_FILE}."
+        win_pct=$(awk -v s="${val}" 'BEGIN { printf "%g%%", s * 50 }')
+        echo "Windows equivalent    : ${win_pct}"
 
         # If --restart / -r requested, save session and restart Sway to latch immediately
         if [[ "${3:-}" == "-r" || "${3:-}" == "--restart" ]]; then
@@ -137,6 +141,7 @@ case "${cmd}" in
     off|reset)
         echo "1.0" > "${CONFIG_FILE}"
         echo "Reset saturation to 1.0 in ${CONFIG_FILE}."
+        echo "Windows equivalent    : 50%"
         if [[ -z "${SWAYSOCK:-}" ]] || ! pgrep -x sway >/dev/null 2>&1; then
             if [[ -x "${CTM_BIN}" ]]; then
                 "${CTM_BIN}" --identity
