@@ -1,0 +1,201 @@
+#!/usr/bin/env python3
+"""
+sway-mcp: Model Context Protocol server for Sway window manager inspection & control.
+Same JSON-RPC 2.0 stdio shape as i3-mcp (sway speaks the i3 IPC protocol),
+using swaymsg / sway natively. Complies with OpenCode / Antigravity MCP spec.
+"""
+import json
+import os
+import subprocess
+import sys
+
+def run_cmd(cmd, timeout=10):
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        if res.returncode != 0:
+            return {"error": res.stderr.strip() or f"Exit {res.returncode}"}
+        return res.stdout.strip()
+    except Exception as e:
+        return {"error": str(e)}
+
+def sway_version():
+    raw = run_cmd(["swaymsg", "-t", "get_version"])
+    if isinstance(raw, dict) and "error" in raw:
+        return raw
+    try:
+        return json.loads(raw)
+    except Exception as e:
+        return {"error": f"Failed to parse sway version JSON: {e}"}
+
+def sway_validate_config():
+    res = subprocess.run(["sway", "-C"], capture_output=True, text=True, timeout=10)
+    return {
+        "valid": res.returncode == 0,
+        "output": res.stdout.strip(),
+        "error": res.stderr.strip()
+    }
+
+def _json_ipc(args):
+    raw = run_cmd(["swaymsg"] + args)
+    if isinstance(raw, dict) and "error" in raw:
+        return raw
+    try:
+        return json.loads(raw)
+    except Exception as e:
+        return {"error": f"Failed to parse swaymsg JSON: {e}"}
+
+def sway_get_tree():
+    return _json_ipc(["-t", "get_tree"])
+
+def sway_get_workspaces():
+    return _json_ipc(["-t", "get_workspaces"])
+
+def sway_get_outputs():
+    return _json_ipc(["-t", "get_outputs"])
+
+def sway_get_marks():
+    return _json_ipc(["-t", "get_marks"])
+
+def sway_command(command):
+    raw = run_cmd(["swaymsg", command])
+    if isinstance(raw, dict) and "error" in raw:
+        return raw
+    try:
+        return json.loads(raw)
+    except Exception:
+        return {"result": raw}
+
+def sway_reload():
+    # First validate syntax with sway -C
+    val = sway_validate_config()
+    if not val.get("valid"):
+        return {"error": "sway config validation failed! Refusing to reload.", "details": val}
+    return sway_command("reload")
+
+TOOLS = [
+    {
+        "name": "sway_version",
+        "description": "Get current running Sway version information.",
+        "inputSchema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "sway_validate_config",
+        "description": "Validate sway configuration syntax using 'sway -C'. Always run before reloading.",
+        "inputSchema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "sway_get_tree",
+        "description": "Get the complete layout tree of all workspaces, containers, and windows in Sway.",
+        "inputSchema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "sway_get_workspaces",
+        "description": "Get list of active workspaces, focused state, output assignments, and urgency status.",
+        "inputSchema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "sway_get_outputs",
+        "description": "Get connected display outputs (e.g. eDP-1) configured in Sway.",
+        "inputSchema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "sway_get_marks",
+        "description": "Get all window marks assigned in Sway.",
+        "inputSchema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "sway_command",
+        "description": "Execute a sway IPC command (e.g. 'workspace 4', 'fullscreen toggle', 'layout tabbed').",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "The sway IPC command to execute"}
+            },
+            "required": ["command"]
+        }
+    },
+    {
+        "name": "sway_reload",
+        "description": "Safely validate and reload Sway configuration in-place.",
+        "inputSchema": {"type": "object", "properties": {}}
+    }
+]
+
+def read_message():
+    line = sys.stdin.readline()
+    if not line:
+        return None
+    return json.loads(line)
+
+def write_message(msg):
+    sys.stdout.write(json.dumps(msg) + "\n")
+    sys.stdout.flush()
+
+def main():
+    while True:
+        req = read_message()
+        if req is None:
+            break
+        req_id = req.get("id")
+        method = req.get("method")
+
+        if method == "initialize":
+            write_message({
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {"tools": {}},
+                    "serverInfo": {"name": "sway-mcp", "version": "1.0.0"}
+                }
+            })
+        elif method == "notifications/initialized":
+            pass
+        elif method == "tools/list":
+            write_message({
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {"tools": TOOLS}
+            })
+        elif method == "tools/call":
+            params = req.get("params", {})
+            name = params.get("name")
+            args = params.get("arguments", {})
+
+            res = {}
+            if name == "sway_version":
+                res = sway_version()
+            elif name == "sway_validate_config":
+                res = sway_validate_config()
+            elif name == "sway_get_tree":
+                res = sway_get_tree()
+            elif name == "sway_get_workspaces":
+                res = sway_get_workspaces()
+            elif name == "sway_get_marks":
+                res = sway_get_marks()
+            elif name == "sway_get_outputs":
+                res = sway_get_outputs()
+            elif name == "sway_command":
+                res = sway_command(args.get("command", ""))
+            elif name == "sway_reload":
+                res = sway_reload()
+            else:
+                res = {"error": f"Unknown tool: {name}"}
+
+            write_message({
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "content": [{"type": "text", "text": json.dumps(res, indent=2)}]
+                }
+            })
+        else:
+            if req_id is not None:
+                write_message({
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": {"code": -32601, "message": f"Method {method} not found"}
+                })
+
+if __name__ == "__main__":
+    main()

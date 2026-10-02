@@ -524,17 +524,18 @@ for_window [class="(?i)spotify"] floating enable, resize set 1700 1050, move pos
 
 # Layout: ws1/3 forced tabbed, ws2 (browser) default tiled
 workspace 1 layout tabbed
-workspace 2 layout default
+workspace 2 layout tabbed
 workspace 3 layout tabbed
 for_window [workspace="^1$"] layout tabbed
+for_window [workspace="^2$"] layout tabbed
 for_window [workspace="^3$"] layout tabbed
 
 
-# Web Browser Rules (Workspace 2: Normal Tiled Windows)
+# Web Browser Rules (Workspace 2: Tabbed Windows)
 assign [app_id="(?i)^(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)$"] workspace number $ws2
 assign [class="(?i)^(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)$"] workspace number $ws2
-for_window [app_id="(?i)^(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)$"] move to workspace number $ws2, floating disable
-for_window [class="(?i)^(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)$"] move to workspace number $ws2, floating disable
+for_window [app_id="(?i)^(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)$"] move to workspace number $ws2, floating disable, layout tabbed
+for_window [class="(?i)^(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)$"] move to workspace number $ws2, floating disable, layout tabbed
 # Browser popups, web app dialogs float instead of being swallowed into tabbed view
 for_window [app_id="(?i)^(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)$" window_role="pop-up"] floating enable, move position center
 for_window [app_id="(?i)^(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)$" window_role="bubble"] floating enable, move position center
