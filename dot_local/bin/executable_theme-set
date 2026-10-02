@@ -521,10 +521,10 @@ def apply_theme(name, no_nvim=False):
         except Exception:
             pass
 
-    # btop: direct SIGWINCH signal to redraw safely without crashing
+    # btop: direct SIGUSR2 signal for instantaneous in-memory theme & config reload
     for pid in procs["btop"]:
         try:
-            os.kill(pid, signal.SIGWINCH)
+            os.kill(pid, signal.SIGUSR2)
         except Exception:
             pass
 
