@@ -2,7 +2,7 @@
 # Theme: nvchad (compiled from {{name}})
 
 # Main background, empty for terminal default, or hex code
-theme[main_bg]="{{black}}"
+theme[main_bg]=""
 
 # Main text color
 theme[main_fg]="{{fg}}"
