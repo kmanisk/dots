@@ -381,7 +381,7 @@ bindgesture hold:4 exec --no-startup-id ~/.local/bin/powermenu
 
 # Cursor: explicit theme + size (37 -> 48); without this Sway falls back
 # to theme defaults and ignores Xcursor.size for Wayland surfaces
-seat seat0 xcursor_theme phinger-cursors-gruvbox-material 40
+seat seat0 xcursor_theme phinger-cursors-gruvbox-material-light 40
 
 # Output Configuration (Internal Display @ 165Hz, Native 1:1 hardware pixels)
 # Locked 165Hz tear-free presentation: adaptive_sync off prevents LCD voltage/gamma
@@ -522,23 +522,19 @@ for_window [app_id="scratch-notes"] floating enable, resize set 1700 1050, move 
 for_window [instance="scratch-notes"] floating enable, resize set 1700 1050, move position center, move to scratchpad
 for_window [class="(?i)spotify"] floating enable, resize set 1700 1050, move position center, move to scratchpad
 
-# Layout: ws1/2/3 forced tabbed (user policy: tab strip always
-# visible, including single-window "[T|...]" bars). `workspace layout`
-# alone only applies at startup, so for_window rules re-assert tabbed
-# on every new window to hold it across restarts and moves.
+# Layout: ws1/3 forced tabbed, ws2 (browser) default tiled
 workspace 1 layout tabbed
-workspace 2 layout tabbed
+workspace 2 layout default
 workspace 3 layout tabbed
 for_window [workspace="^1$"] layout tabbed
-for_window [workspace="^2$"] layout tabbed
 for_window [workspace="^3$"] layout tabbed
 
 
-# Web Browser Rules (Workspace 2)
+# Web Browser Rules (Workspace 2: Normal Tiled Windows)
 assign [app_id="(?i)^(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)$"] workspace number $ws2
 assign [class="(?i)^(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)$"] workspace number $ws2
-for_window [app_id="(?i)^(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)$"] move to workspace number $ws2, layout tabbed, floating disable
-for_window [class="(?i)^(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)$"] move to workspace number $ws2, layout tabbed, floating disable
+for_window [app_id="(?i)^(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)$"] move to workspace number $ws2, floating disable
+for_window [class="(?i)^(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)$"] move to workspace number $ws2, floating disable
 # Browser popups, web app dialogs float instead of being swallowed into tabbed view
 for_window [app_id="(?i)^(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)$" window_role="pop-up"] floating enable, move position center
 for_window [app_id="(?i)^(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)$" window_role="bubble"] floating enable, move position center
