@@ -36,8 +36,10 @@
     foreground-alt:      @gruvbox-fg4;
     accent:              {{accent}};
     accent-bright:       {{base0a}};
+    selected-foreground: {{selected_fg}};
     border-col:          @gruvbox-bg2;
     border-focus:        {{accent}};
     urgent:              @gruvbox-red-dark;
     urgent-bright:       @gruvbox-red-light;
 }
+

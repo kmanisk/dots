@@ -53,6 +53,13 @@ else
     alias ll="ls -la --color=auto"
 fi
 
+# LS_COLORS highlight discipline: strip solid background boxes on other-writable (ow) & sticky (tw/st) dirs
+if [[ -z "$LS_COLORS" ]] && command -v dircolors >/dev/null 2>&1; then
+    eval "$(dircolors -b)"
+fi
+export LS_COLORS="$(echo "$LS_COLORS" | sed -E 's/ow=[0-9;]+/ow=01;34/g; s/tw=[0-9;]+/tw=01;34/g; s/st=[0-9;]+/st=01;34/g')"
+
+
 # Chezmoi
 alias st="chezmoi status"
 alias chm="chezmoi managed"

@@ -43,6 +43,7 @@ alias des="cd ~/Desktop"
 alias dot="cd ~/.local/share/chezmoi"
 alias dots="cd ~/.local/share/chezmoi"
 alias local="cd ~/.local"
+alias fm="yazi"
 
 # General Utilities
 alias agy="command agy --dangerously-skip-permissions"
@@ -75,6 +76,17 @@ else
     alias la="ls -A"
     alias ll="ls -la"
 end
+
+# LS_COLORS highlight discipline: strip solid background boxes on other-writable (ow) & sticky (tw/st) dirs
+if not set -q LS_COLORS
+    if type -q dircolors
+        set -gx LS_COLORS (dircolors -c 2>/dev/null | string match -r "setenv LS_COLORS '([^']*)'")[2]
+    end
+end
+set -gx LS_COLORS (string replace -r 'ow=[0-9;]*' 'ow=01;34' "$LS_COLORS")
+set -gx LS_COLORS (string replace -r 'tw=[0-9;]*' 'tw=01;34' "$LS_COLORS")
+set -gx LS_COLORS (string replace -r 'st=[0-9;]*' 'st=01;34' "$LS_COLORS")
+
 
 # Chezmoi
 alias st="chezmoi status"

@@ -33,5 +33,4 @@
 
     /* Uniform selection */
     selected-background: @accent;
-    selected-foreground: #1d2021;
 }

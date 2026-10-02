@@ -231,9 +231,8 @@ def output_theme_rows(current):
             swatches += f"<span foreground=\"{c}\" size=\"large\">● </span>"
 
         is_current = (theme_name == current)
-        active_col = b16.get("BASE0B", "#a7c080")
         badge = (
-            f" <span foreground=\"{active_col}\" weight=\"bold\" size=\"small\">[ACTIVE]</span>"
+            " <span weight=\"bold\" size=\"small\">[ACTIVE]</span>"
             if is_current
             else "         "
         )

@@ -97,7 +97,7 @@ element {
 
 element selected {
     background-color:    @accent;
-    text-color:          #1d2021;
+    text-color:          @selected-foreground;
     border:              0px;
     border-radius:       0px;
 }

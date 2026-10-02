@@ -17,3 +17,7 @@ export THEME_PURPLE="{{purple}}"
 export THEME_CYAN="{{cyan}}"
 export THEME_TEAL="{{teal}}"
 export THEME_ORANGE="{{orange}}"
+
+# Clean LS_COLORS avoiding glaring background fills on other-writable (ow) & sticky (tw/st) dirs
+export LS_COLORS="di=01;34:ln=01;36:so=01;35:pi=33:ex=01;32:bd=33;01:cd=33;01:su=37;41:sg=30;43:ca=30;41:tw=01;34:ow=01;34:st=01;34:${LS_COLORS}"
+

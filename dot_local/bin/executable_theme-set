@@ -12,7 +12,10 @@ import json
 import re
 import subprocess
 import tempfile
+import math
+import colorsys
 import signal
+
 
 STATE_DIR = os.path.expanduser("~/.local/state/theme")
 CACHE_DIR = os.path.expanduser("~/.cache/theme/themes")
@@ -94,10 +97,50 @@ def generate_qt_palette(r):
     disabled = qt_colors(True)
     return f"[ColorScheme]\nactive_colors={active}\ndisabled_colors={disabled}\ninactive_colors={active}\n"
 
+def hex_to_rgb(h):
+    h = str(h).strip().lstrip("#")
+    if len(h) != 6:
+        return 255, 255, 255
+    try:
+        return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    except ValueError:
+        return 255, 255, 255
+
+def srgb_channel_to_linear(c):
+    c_norm = c / 255.0
+    return c_norm / 12.92 if c_norm <= 0.04045 else math.pow((c_norm + 0.055) / 1.055, 2.4)
+
+def relative_luminance(h):
+    r, g, b = hex_to_rgb(h)
+    return 0.2126 * srgb_channel_to_linear(r) + 0.7152 * srgb_channel_to_linear(g) + 0.0722 * srgb_channel_to_linear(b)
+
+def contrast_ratio(h1, h2):
+    l1 = relative_luminance(h1)
+    l2 = relative_luminance(h2)
+    return (max(l1, l2) + 0.05) / (min(l1, l2) + 0.05)
+
+def ensure_contrast(fg_hex, bg_hex, min_ratio=7.0, is_dark=True):
+    ratio = contrast_ratio(fg_hex, bg_hex)
+    if ratio >= min_ratio:
+        return fg_hex
+    r, g, b = hex_to_rgb(fg_hex)
+    h, l, s = colorsys.rgb_to_hls(r / 255.0, g / 255.0, b / 255.0)
+    current_l = l
+    best_hex = fg_hex
+    for _ in range(40):
+        current_l = min(1.0, current_l + 0.02) if is_dark else max(0.0, current_l - 0.02)
+        nr, ng, nb = colorsys.hls_to_rgb(h, current_l, s)
+        cand = '#{:02x}{:02x}{:02x}'.format(int(round(nr * 255)), int(round(ng * 255)), int(round(nb * 255)))
+        if contrast_ratio(cand, bg_hex) >= min_ratio:
+            return cand
+        best_hex = cand
+    return best_hex
+
 def normalize_palette(theme_data, name):
     b16 = theme_data.get("base_16", {})
     b30 = theme_data.get("base_30", {})
     theme_type = theme_data.get("type", "dark")
+    is_dark = (theme_type == "dark")
 
     # Semantic roles
     base00 = b16.get("BASE00", "#1e2122")
@@ -126,6 +169,17 @@ def normalize_palette(theme_data, name):
         or base0A
     )
 
+    # Smart contrast adjustment for foreground text (guarantee minimum 7.0:1 contrast)
+    smart_fg = ensure_contrast(base05, base00, min_ratio=7.0, is_dark=is_dark)
+    bright_fg = ensure_contrast(smart_fg, base00, min_ratio=9.5, is_dark=is_dark)
+
+    # Smart selection foreground against accent:
+    accent_lum = relative_luminance(accent)
+    if accent_lum > 0.35:
+        accent_fg = base00 if relative_luminance(base00) < 0.1 else "#121212"
+    else:
+        accent_fg = "#ffffff"
+
     r = {
         "name": name,
         "display_name": theme_data.get("display_name", name),
@@ -134,7 +188,8 @@ def normalize_palette(theme_data, name):
         "bg2": base01,
         "sel": base02,
         "muted": base03,
-        "fg": base05,
+        "fg": smart_fg,
+        "bright_fg": bright_fg,
         "red": base08,
         "orange": base09,
         "yellow": base0A,
@@ -143,6 +198,8 @@ def normalize_palette(theme_data, name):
         "blue": base0D,
         "purple": base0E,
         "accent": accent,
+        "accent_fg": accent_fg,
+        "selected_fg": accent_fg,
     }
 
     # Add base_16 keys in lower and upper
@@ -150,14 +207,21 @@ def normalize_palette(theme_data, name):
         r[k.lower()] = v
         r[k.upper()] = v
 
-    # Add all base_30 keys
+    # Add all base_30 keys, safeguarding white contrast
     for k, v in b30.items():
-        r[k] = v
+        if k == "white" and is_dark and contrast_ratio(v, base00) < 7.0:
+            r[k] = smart_fg
+        else:
+            r[k] = v
+
+    if "white" not in r:
+        r["white"] = smart_fg
 
     # Add semantic tokens (e.g. semantic_background, semantic_border)
     semantic = theme_data.get("derived", {}).get("semantic", {}) or theme_data.get("semantic", {})
     for k, v in semantic.items():
         r[f"semantic_{k}"] = v
+    r["semantic_foreground"] = smart_fg
 
     # Add Cava visualizer tokens (solid prominent accent, gradient = 0)
     accent = r.get("accent", "#58a6ff")
