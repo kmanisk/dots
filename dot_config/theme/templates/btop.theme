@@ -5,10 +5,10 @@
 theme[main_bg]="{{black}}"
 
 # Main text color
-theme[main_fg]="{{white}}"
+theme[main_fg]="{{fg}}"
 
 # Title color for boxes
-theme[title]="{{white}}"
+theme[title]="{{fg}}"
 
 # Highlight color for keyboard shortcuts
 theme[hi_fg]="{{accent}}"
@@ -17,65 +17,77 @@ theme[hi_fg]="{{accent}}"
 theme[selected_bg]="{{one_bg2}}"
 
 # Foreground color of selected item in processes box
-theme[selected_fg]="{{white}}"
+theme[selected_fg]="{{bright_fg}}"
 
 # Color of inactive/disabled text
 theme[inactive_fg]="{{grey_fg}}"
+
+# Color of text appearing on top of graphs, i.e uptime and current network graph scaling
+theme[graph_text]="{{grey_fg}}"
+
+# Background color of the percentage meters (battery, memory, CPU bars)
+theme[meter_bg]="{{meter_bg}}"
 
 # Misc colors for processes box including mini cpu graphs, details memory graph and details status text
 theme[proc_misc]="{{accent}}"
 
 # Cpu box outline color
-theme[cpu_box]="{{grey}}"
+theme[cpu_box]="{{btop_cpu_box}}"
 
 # Memory/disks box outline color
-theme[mem_box]="{{grey}}"
+theme[mem_box]="{{btop_mem_box}}"
 
 # Net up/down box outline color
-theme[net_box]="{{grey}}"
+theme[net_box]="{{btop_net_box}}"
 
 # Processes box outline color
-theme[proc_box]="{{grey}}"
+theme[proc_box]="{{btop_proc_box}}"
 
 # Box divider line and small boxes line color
-theme[div_line]="{{one_bg2}}"
+theme[div_line]="{{div_line}}"
 
 # Temperature graph colors
-theme[temp_start]="{{green}}"
-theme[temp_mid]="{{yellow}}"
-theme[temp_end]="{{red}}"
+theme[temp_start]="{{btop_temp_start}}"
+theme[temp_mid]="{{btop_temp_mid}}"
+theme[temp_end]="{{btop_temp_end}}"
 
 # CPU graph colors
-theme[cpu_start]="{{green}}"
-theme[cpu_mid]="{{yellow}}"
-theme[cpu_end]="{{red}}"
+theme[cpu_start]="{{btop_cpu_start}}"
+theme[cpu_mid]="{{btop_cpu_mid}}"
+theme[cpu_end]="{{btop_cpu_end}}"
 
 # Mem/Disk free meter
-theme[free_start]="{{green}}"
-theme[free_mid]="{{yellow}}"
-theme[free_end]="{{red}}"
+theme[free_start]="{{btop_free_start}}"
+theme[free_mid]="{{btop_free_mid}}"
+theme[free_end]="{{btop_free_end}}"
 
 # Mem/Disk cached meter
-theme[cached_start]="{{green}}"
-theme[cached_mid]="{{yellow}}"
-theme[cached_end]="{{red}}"
+theme[cached_start]="{{btop_cached_start}}"
+theme[cached_mid]="{{btop_cached_mid}}"
+theme[cached_end]="{{btop_cached_end}}"
 
 # Mem/Disk available meter
-theme[available_start]="{{green}}"
-theme[available_mid]="{{yellow}}"
-theme[available_end]="{{red}}"
+theme[available_start]="{{btop_avail_start}}"
+theme[available_mid]="{{btop_avail_mid}}"
+theme[available_end]="{{btop_avail_end}}"
 
 # Mem/Disk used meter
-theme[used_start]="{{green}}"
-theme[used_mid]="{{yellow}}"
-theme[used_end]="{{red}}"
+theme[used_start]="{{btop_used_start}}"
+theme[used_mid]="{{btop_used_mid}}"
+theme[used_end]="{{btop_used_end}}"
 
-# Download graph colors
-theme[download_start]="{{green}}"
-theme[download_mid]="{{yellow}}"
-theme[download_end]="{{red}}"
+# Download graph colors (cool cyan / blue)
+theme[download_start]="{{btop_download_start}}"
+theme[download_mid]="{{btop_download_mid}}"
+theme[download_end]="{{btop_download_end}}"
 
-# Upload graph colors
-theme[upload_start]="{{green}}"
-theme[upload_mid]="{{yellow}}"
-theme[upload_end]="{{red}}"
+# Upload graph colors (warm magenta / purple / orange)
+theme[upload_start]="{{btop_upload_start}}"
+theme[upload_mid]="{{btop_upload_mid}}"
+theme[upload_end]="{{btop_upload_end}}"
+
+# Process box color gradient for threads, mem and cpu usage
+theme[process_start]="{{btop_process_start}}"
+theme[process_mid]="{{btop_process_mid}}"
+theme[process_end]="{{btop_process_end}}"
+

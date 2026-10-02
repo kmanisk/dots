@@ -223,6 +223,71 @@ def normalize_palette(theme_data, name):
         r[f"semantic_{k}"] = v
     r["semantic_foreground"] = smart_fg
 
+    # Graph & meter color contrast enforcement (minimum 4.0:1 contrast against bg)
+    safe_green = ensure_contrast(r.get("green", base0B), base00, min_ratio=4.0, is_dark=is_dark)
+    safe_yellow = ensure_contrast(r.get("yellow", base0A), base00, min_ratio=4.0, is_dark=is_dark)
+    safe_orange = ensure_contrast(r.get("orange", base09), base00, min_ratio=4.0, is_dark=is_dark)
+    safe_red = ensure_contrast(r.get("red", base08), base00, min_ratio=4.0, is_dark=is_dark)
+    safe_cyan = ensure_contrast(r.get("cyan", base0C), base00, min_ratio=4.0, is_dark=is_dark)
+    safe_blue = ensure_contrast(r.get("blue", base0D), base00, min_ratio=4.0, is_dark=is_dark)
+    safe_purple = ensure_contrast(r.get("purple", base0E), base00, min_ratio=4.0, is_dark=is_dark)
+    safe_teal = ensure_contrast(r.get("teal", base0C), base00, min_ratio=4.0, is_dark=is_dark)
+    safe_pink = ensure_contrast(r.get("baby_pink", base0E), base00, min_ratio=4.0, is_dark=is_dark)
+
+    # Meter background (battery meter, percentage bar empty backgrounds):
+    # Must NEVER be pitch black on light themes!
+    meter_bg = r.get("one_bg2", base02)
+    r["meter_bg"] = meter_bg
+    r["div_line"] = meter_bg
+
+
+    # Distinct box outline colors:
+    r["btop_cpu_box"] = accent
+    r["btop_mem_box"] = safe_teal
+    r["btop_net_box"] = safe_orange
+    r["btop_proc_box"] = safe_purple
+
+    # Distinct graph tokens:
+    r["btop_cpu_start"] = safe_blue
+    r["btop_cpu_mid"] = safe_yellow
+    r["btop_cpu_end"] = safe_red
+
+    r["btop_temp_start"] = safe_teal
+    r["btop_temp_mid"] = safe_orange
+    r["btop_temp_end"] = safe_red
+
+    r["btop_used_start"] = safe_green
+    r["btop_used_mid"] = safe_orange
+    r["btop_used_end"] = safe_red
+
+    r["btop_free_start"] = safe_teal
+    r["btop_free_mid"] = safe_cyan
+    r["btop_free_end"] = safe_blue
+
+    r["btop_cached_start"] = safe_purple
+    r["btop_cached_mid"] = safe_pink
+    r["btop_cached_end"] = safe_cyan
+
+    r["btop_avail_start"] = safe_green
+    r["btop_avail_mid"] = safe_yellow
+    r["btop_avail_end"] = safe_orange
+
+    # Download graph: cool incoming tones (teal -> cyan -> blue)
+    r["btop_download_start"] = safe_teal
+    r["btop_download_mid"] = safe_cyan
+    r["btop_download_end"] = safe_blue
+
+    # Upload graph: warm outgoing tones (pink -> purple -> orange)
+    r["btop_upload_start"] = safe_pink
+    r["btop_upload_mid"] = safe_purple
+    r["btop_upload_end"] = safe_orange
+
+    # Process box usage gradient
+    r["btop_process_start"] = safe_teal
+    r["btop_process_mid"] = safe_orange
+    r["btop_process_end"] = safe_red
+
+
     # Add Cava visualizer tokens (solid prominent accent, gradient = 0)
     accent = r.get("accent", "#58a6ff")
     cava = theme_data.get("apps", {}).get("cava") or theme_data.get("cava", {})
@@ -456,10 +521,10 @@ def apply_theme(name, no_nvim=False):
         except Exception:
             pass
 
-    # btop: direct os.kill SIGUSR2 signal without spawning pgrep/pkill
+    # btop: direct SIGWINCH signal to redraw safely without crashing
     for pid in procs["btop"]:
         try:
-            os.kill(pid, signal.SIGUSR2)
+            os.kill(pid, signal.SIGWINCH)
         except Exception:
             pass
 
