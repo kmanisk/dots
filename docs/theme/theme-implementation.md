@@ -109,6 +109,25 @@ Located at: [`~/.local/bin/theme-set`](file:///home/manisk/.local/bin/theme-set)
   client.focused {{accent}} {{bg2}} {{fg}} {{accent}} {{accent}}
   ```
 
+### 5. btop Upstream Cache Bypass & Terminal Canvas Theming
+- **The Problem:** 
+  1. When switching from dark to light themes, `0.00W` retained a hardcoded black background block, and the CPU graph area showed a temporary dark block before its next collection tick.
+  2. In upstream btop ([`src/btop_draw.cpp`](https://github.com/aristocratos/btop/blob/main/src/btop_draw.cpp)), `bat_meter` is declared as a function-local static variable: `static Draw::Meter bat_meter {10, "cpu", true};`. Unlike `cpu_meter` or `mem_meter`, `bat_meter` is never re-instantiated on reload or resize; its internal `cache` array permanently retains the first-rendered ANSI sequence ending in `Fx::reset`.
+  3. When `theme_background = true`, `Fx::reset` bakes the dark 24-bit RGB background (`\x1b[48;2;...m`) into the cache. When drawing `0.00W` (which specifies only foreground color via `Theme::c("title")`), the text inherits the cached dark background. On AC power, watts and battery percentages are constant, keeping the stale block visible indefinitely.
+- **The Fix:**
+  - Configured `theme_background = false` in `~/.config/btop/btop.conf`.
+  - Configured `theme[main_bg]=""` in `~/.config/theme/templates/btop.theme`.
+  - When `theme_background = false` and `main_bg` is empty, btop outputs `\x1b[49m` (the ANSI sequence for "terminal default background").
+  - This delegates background rasterization directly to Alacritty's active theme. `Fx::reset` caches `\x1b[49m` rather than a hardcoded dark RGB background, completely eliminating the dark block behind `0.00W` and preventing graph transition artifacts.
+  - Live reloads continue via `SIGUSR2` dispatch in `theme-set`.
+
+### 6. Mathematical WCAG Contrast Enforcement Engine
+- **The Problem:** In monochrome or low-contrast imported themes, graph curves and box borders collapsed into visually identical or illegible shades against the background.
+- **The Engine:** Implemented WCAG 2.1 relative luminance and contrast ratio calculations inside `~/.local/bin/theme-set`:
+  - Enforces a minimum contrast ratio of `4.0:1` against the active background (`bg`) for all graph gradients and box borders.
+  - If a color fails the threshold, the engine iteratively adjusts lightness in HSL color space until the target contrast ratio is met.
+  - Distinct, dedicated color tokens are computed automatically across every theme (CPU: blue→yellow→red, Download: teal→cyan→blue, Upload: magenta→purple→orange, Memory/Disks: distinct dedicated gradients, Box borders: accent/teal/orange/purple) without manually editing individual theme JSON files.
+
 ---
 
 ## 6. GUI File Manager Runtime Theme Reload Investigation
@@ -149,4 +168,21 @@ GTK3/THUNAR (AND NEMO) CANNOT RELIABLY HOT-RELOAD UNDER OUR CURRENT SWAY ARCHITE
 - **Chezmoi Invariant:** All configuration changes are tracked via `chezmoi add`.
 - **MangoHud Invariant:** `~/.config/MangoHud/MangoHud.conf` remains protected and is never modified by automated retheming tools.
 - **Resource Discipline:** Zero background daemons, cron loops, or resident inotify wrappers are introduced.
+
+---
+
+## 8. TUI Daily-Driver Expansion Roadmap
+
+Candidate terminal applications for integration into the `theme-set` compiler pipeline, evaluated for daily utility, resource efficiency, and hot-reload mechanism:
+
+| Application | Category | Hot-Reload Mechanism | Integration Feasibility | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| **CAVA** | Audio Visualizer | POSIX Signal (`SIGUSR1`) | **Immediate / Native** | `pkill -USR1 cava` instantly reloads `~/.config/cava/config` with active theme gradients without stopping audio capture. Template already exists. |
+| **FZF** | Interactive Fuzzy Finder | Shell Env File / Hook | **Instant** | Writes `~/.local/state/theme/fzf.sh` (or `fzf.fish`) setting `$FZF_DEFAULT_OPTS="--color=..."`. Sourced on shell prompt or subshell invocation; no restart required. |
+| **BAT & DELTA** | Pager / Git Diff Viewer | Environment variable / Theme file | **Instant on invocation** | Generates dynamic tmTheme or passes `--theme` / sets `BAT_THEME` / `DELTA_FEATURES` dynamically based on dark/light mode. |
+| **Lazygit** | Git TUI Client | Atomic config write (`config.yml`) | **On-focus / Launch** | Configures `gui.theme` palette dynamically. Light and responsive. |
+| **Zellij** | Terminal Multiplexer | CLI Action IPC | **Instant** | Dispatches `zellij action switch-theme <name>` over runtime IPC socket to switch all panes and tabs live. |
+| **Fastfetch** | System Information Fetch | Config generation (`config.jsonc`) | **Instant on invocation** | Injects theme primary accent into logo and key colors. |
+| **Spotify-Player / NCspot** | Music Player TUI | Config rewrite + IPC | **Fast** | Generates TOML theme file; can be reloaded via IPC command. |
+
 
