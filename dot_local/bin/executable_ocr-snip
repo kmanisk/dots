@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Region snip -> OCR -> clipboard (Win+Shift+S).
+# Select a region with slurp, capture with grim, read text with tesseract,
+# copy result with wl-copy. Esc cancels silently.
+# ==============================================================================
+export PATH="$HOME/.local/bin:$PATH"
+
+[ -f "$HOME/.local/state/theme/colors.sh" ] && source "$HOME/.local/state/theme/colors.sh"
+
+GEOM=$(slurp -b "${THEME_BG:-#000000}80" -c "${THEME_ACCENT:-#58a6ff}ff" -s "${THEME_ACCENT:-#58a6ff}33" 2>/dev/null)
+[ -z "$GEOM" ] && exit 0
+
+TEXT=$(grim -g "$GEOM" - 2>/dev/null | tesseract stdin stdout -l eng 2>/dev/null)
+TEXT="$(echo "$TEXT" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+[ -z "$TEXT" ] && { notify-send -t 1500 "OCR" "No text found in region"; exit 0; }
+
+printf "%s" "$TEXT" | wl-copy 2>/dev/null
+notify-send -t 2500 "OCR → Clipboard" "$(echo "$TEXT" | head -c 120)"

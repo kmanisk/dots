@@ -27,12 +27,79 @@ def sway_version():
     except Exception as e:
         return {"error": f"Failed to parse sway version JSON: {e}"}
 
+def _parse_sway_config_lines(filepath, visited=None):
+    if visited is None:
+        visited = set()
+    filepath = os.path.expanduser(filepath)
+    if filepath in visited or not os.path.exists(filepath):
+        return []
+    visited.add(filepath)
+    lines = []
+    import glob
+    try:
+        with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+            for idx, line in enumerate(f, start=1):
+                sline = line.strip()
+                if sline.startswith("include "):
+                    pattern = os.path.expanduser(sline[8:].strip().strip("\"'"))
+                    for match in sorted(glob.glob(pattern)):
+                        lines.extend(_parse_sway_config_lines(match, visited))
+                else:
+                    lines.append((filepath, idx, sline))
+    except Exception:
+        pass
+    return lines
+
 def sway_validate_config():
     res = subprocess.run(["sway", "-C"], capture_output=True, text=True, timeout=10)
+    config_path = os.path.expanduser("~/.config/sway/config")
+    collisions = []
+    import re
+    all_lines = _parse_sway_config_lines(config_path)
+    current_scope = "default"
+    scope_bindings = {"default": {}}
+    for fpath, idx, sline in all_lines:
+        if not sline or sline.startswith("#"):
+            continue
+        mode_match = re.match(r'^mode\s+["\']?([^"\'\s{]+)["\']?\s*\{?', sline)
+        if mode_match:
+            current_scope = mode_match.group(1)
+            if current_scope not in scope_bindings:
+                scope_bindings[current_scope] = {}
+            continue
+        if sline == "}" and current_scope != "default":
+            current_scope = "default"
+            continue
+        if sline.startswith("bindsym ") or sline.startswith("bindcode "):
+            parts = sline.split()
+            flags = set()
+            key_idx = 1
+            while key_idx < len(parts) and parts[key_idx].startswith("--"):
+                flags.add(parts[key_idx])
+                key_idx += 1
+            if key_idx < len(parts):
+                chord = parts[key_idx]
+                state_flags = tuple(sorted([f for f in flags if f in ("--inhibited", "--release")]))
+                key_sig = (state_flags, chord)
+                loc_str = f"{os.path.basename(fpath)}:{idx}"
+                if key_sig in scope_bindings[current_scope]:
+                    prev_loc, prev_line = scope_bindings[current_scope][key_sig]
+                    collisions.append({
+                        "scope": current_scope,
+                        "chord": chord,
+                        "first": f"{prev_loc}: {prev_line}",
+                        "second": f"{loc_str}: {sline}"
+                    })
+                else:
+                    scope_bindings[current_scope][key_sig] = (loc_str, sline)
+
+    is_valid = (res.returncode == 0) and (len(collisions) == 0)
     return {
-        "valid": res.returncode == 0,
+        "valid": is_valid,
+        "syntax_ok": res.returncode == 0,
         "output": res.stdout.strip(),
-        "error": res.stderr.strip()
+        "error": res.stderr.strip() if res.returncode != 0 else "",
+        "collisions": collisions
     }
 
 def _json_ipc(args):

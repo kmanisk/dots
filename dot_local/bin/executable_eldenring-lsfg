@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# eldenring-lsfg: Elden Ring with LSFG-VK 2.0 frame generation (2x, vsync pacing).
+# Variant of eldenring-run: same dGPU offload + Blackwell VKD3D fixes +
+# Performance profile, but Proton CachyOS-SLR and LSFG enabled via the
+# "Elden Ring" profile in ~/.config/lsfg-vk/conf.toml (multiplier 2).
+# If this crashes (historic gamescope/Sway fence issue), use plain eldenring-run.
+set -e
+
+export STEAM_COMPAT_CLIENT_INSTALL_PATH="$HOME/.local/share/Steam"
+export STEAM_COMPAT_DATA_PATH="$HOME/.local/share/Steam/steamapps/compatdata/2703476723"
+
+# Offload directly to RTX 5050 Mobile
+export __NV_PRIME_RENDER_OFFLOAD=1
+export __GLX_VENDOR_LIBRARY_NAME=nvidia
+export __VK_LAYER_NV_optimus=NVIDIA_only
+
+# Blackwell (RTX 50-series) VKD3D memory alignment & stability fixes
+export VKD3D_CONFIG="no_upload_hvv,force_host_cached"
+export PROTON_ENABLE_NVAPI=0
+
+# LSFG-VK 2.0: enable the "Elden Ring" profile (2x). Do NOT set DISABLE_LSFGVK.
+export LSFGVK_PROFILE="Elden Ring"
+unset DISABLE_LSFGVK
+
+# Focus Workspace 4 automatically (i3 or Sway IPC)
+if [ -n "$SWAYSOCK" ] || [ -n "$WAYLAND_DISPLAY" ]; then
+    swaymsg "workspace 4" >/dev/null 2>&1 || true
+else
+    i3-msg "workspace 4" >/dev/null 2>&1 || true
+fi
+
+# Auto power profile: Performance while playing, Balanced again on exit (AC only).
+on_ac_power() {
+    for ps in /sys/class/power_supply/A*/online /sys/class/power_supply/ADP*/online; do
+        [[ -f "$ps" && $(cat "$ps" 2>/dev/null) == "1" ]] && return 0
+    done
+    return 1
+}
+set_governor() {
+    echo "$1" | sudo -n tee /sys/devices/system/cpu/cpufreq/policy*/scaling_governor >/dev/null 2>&1 || true
+}
+MAXFREQ_CAP=3800000
+ORIG_MAXFREQ=""
+cap_maxfreq() {
+    ORIG_MAXFREQ=$(cat /sys/devices/system/cpu/cpufreq/policy0/scaling_max_freq 2>/dev/null)
+    echo "$MAXFREQ_CAP" | sudo -n tee /sys/devices/system/cpu/cpufreq/policy*/scaling_max_freq >/dev/null 2>&1 || true
+}
+restore_power() {
+    [[ -n "$ORIG_MAXFREQ" ]] && echo "$ORIG_MAXFREQ" | sudo -n tee /sys/devices/system/cpu/cpufreq/policy*/scaling_max_freq >/dev/null 2>&1 || true
+    asusctl profile set Balanced >/dev/null 2>&1 || true
+    set_governor powersave
+}
+if on_ac_power; then
+    asusctl profile set Performance >/dev/null 2>&1 || true
+    set_governor performance
+    cap_maxfreq
+    trap restore_power EXIT INT TERM
+fi
+
+GAME_DIR="/mnt/Games/NonSteamGames/ELDEN RING/Game"
+GAME_EXE="$GAME_DIR/eldenring.exe"
+PROTON_BIN="$HOME/.local/share/Steam/compatibilitytools.d/proton-cachyos-slr/proton"
+
+cd "$GAME_DIR"
+
+if [ -n "$SWAYSOCK" ] || [ -n "$WAYLAND_DISPLAY" ]; then
+    gamescope -W 1920 -H 1200 -w 1920 -h 1200 -f -r 165 -- env "$PROTON_BIN" run "$GAME_EXE" "$@"
+else
+    env "$PROTON_BIN" run "$GAME_EXE" "$@"
+fi
+STATUS=$?
+exit "$STATUS"

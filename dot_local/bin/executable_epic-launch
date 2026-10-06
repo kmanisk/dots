@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# epic-launch: Run any installed Epic game via legendary (auth) + umu
+# (container/EAC) + Proton-GE + prime-run (dGPU).
+# Usage: epic-launch <appid> [prefix-dir-name]  (prefix defaults to appid)
+# Why umu: raw `proton run` outside the Steam runtime has no GStreamer codecs
+# (broken videos) and no EAC service bridge (dead input at menu).
+# EOS exchange codes are single-use — always minted fresh via --dry-run.
+# ==============================================================================
+set -u
+
+APP="${1:-}"; PREFIX="${2:-$1}"
+[ -n "$APP" ] || { echo "epic-launch: usage: epic-launch <appid> [prefix]" >&2; exit 1; }
+
+export WINEPREFIX="$HOME/.local/share/legendary/compatdata/$PREFIX"
+export PROTONPATH="$HOME/.local/share/Steam/compatibilitytools.d/GE-Proton11-7-x86_64"
+export GAMEID="umu-$APP"
+export STORE="egs"
+
+[ -x "$PROTONPATH/proton" ] || { echo "epic-launch: Proton-GE missing at $PROTONPATH" >&2; exit 1; }
+
+# Fresh EOS auth ticket. Retry: parallel legendary calls race the metadata lock.
+OUT=""
+for _ in 1 2 3; do
+    OUT="$(legendary launch "$APP" --dry-run 2>&1)"
+    echo "$OUT" | grep -q 'Launch parameters:' && break
+    OUT=""; sleep 5
+done
+LINE="$(echo "$OUT" | grep 'Launch parameters:' | sed 's/.*Launch parameters: //')"
+[ -z "$LINE" ] && { echo "epic-launch: legendary dry-run failed (login?)" >&2; exit 1; }
+GAMEDIR="$(echo "$OUT" | grep 'Working directory:' | sed 's/.*Working directory: //')"
+
+# Format: <wine-wrapper> <exe> <args...> (no spaces in these paths).
+# shellcheck disable=SC2086
+set -- $LINE
+shift          # drop legendary's configured wine wrapper
+EXE="$1"; shift
+[ -f "$EXE" ] || { echo "epic-launch: exe not found: $EXE" >&2; exit 1; }
+
+[ -n "$GAMEDIR" ] && [ -d "$GAMEDIR" ] && cd "$GAMEDIR"
+exec prime-run umu-run "$EXE" "$@"

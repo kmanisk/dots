@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# hll-launch: Hell Let Loose via epic-launch (legendary auth + umu + Proton-GE).
+# Keeps the historic short prefix dir (compatdata/hll) instead of the app id.
+exec epic-launch 3e02273b543f4ff0a1c24d3b534a9ac3 hll

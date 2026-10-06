@@ -1,62 +1,190 @@
-#!/usr/bin/env bash
-# game-workspace-daemon: backstop for game windows that set class/title
-# AFTER mapping (Rockstar Launcher/CEF), which static assign rules miss.
-# Event-driven via sway subscribe — no polling. Singleton via flock.
-set -u
-LOCK="/tmp/game-workspace-daemon.lock"
-LOG="/tmp/game-workspace-daemon.log"
-exec 9>"$LOCK"
-flock -n 9 || { echo "$(date '+%T') another instance holds lock, exiting" >> "$LOG"; exit 0; }
-echo "$(date '+%T') daemon started pid=$$" >> "$LOG"
+#!/usr/bin/env python3
+"""
+game-workspace-daemon:
+Event-driven Sway IPC daemon to guarantee:
+- Workspace 2: Browsers (Brave, Firefox, etc.) and Video players (mpv, vlc)
+- Workspace 4: Games & Game Launchers (Steam games, CS2, Elden Ring, GTA IV, Rockstar)
+- Picture-in-Picture: Floats freely on the active workspace without eviction
+Pure Python, zero external dependencies, direct UNIX socket IPC over $SWAYSOCK.
+"""
+import os
+import sys
+import socket
+import struct
+import json
+import re
+import fcntl
+import time
 
-is_game() { # $1 = "app_id|class|instance|title"
-    local app_id=$(echo "$1" | cut -d'|' -f1)
-    local class=$(echo "$1" | cut -d'|' -f2)
-    local instance=$(echo "$1" | cut -d'|' -f3)
-    local title=$(echo "$1" | cut -d'|' -f4)
+LOCK_FILE = "/tmp/game-workspace-daemon.lock"
+LOG_FILE = "/tmp/game-workspace-daemon.log"
 
-    # Never match non-game applications (browsers, terminals, editors, Steam client)
-    if echo "$app_id $class $instance" | grep -qiE "\b(steam|steamwebhelper|brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha|alacritty|kitty|zed|code)\b"; then
-        return 1
-    fi
+def log(msg):
+    try:
+        t = time.strftime("%H:%M:%S")
+        with open(LOG_FILE, "a") as f:
+            f.write(f"{t} {msg}\n")
+    except Exception:
+        pass
 
-    # Match actual game binaries or dedicated game launchers
-    if echo "$app_id $class $instance" | grep -qiE "steam_app_|gamescope|cs2|eldenring|dyinglight|farcry|gtaiv|launcher\.exe|socialclubhelper\.exe|playgtaiv"; then
-        return 0
-    fi
+def create_ipc_socket():
+    sock_path = os.environ.get("SWAYSOCK")
+    if not sock_path:
+        # Fallback to sway socket if environment missing
+        uid = os.getuid()
+        for candidate in [f"/run/user/{uid}/sway-ipc.{uid}.sock"]:
+            if os.path.exists(candidate):
+                sock_path = candidate
+                break
+    if not sock_path or not os.path.exists(sock_path):
+        raise RuntimeError(f"Sway IPC socket not found: {sock_path}")
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.connect(sock_path)
+    return s
 
-    # For titles, only match standalone game titles (never browser tabs or editor titles)
-    if echo "$title" | grep -qiE "^(rockstar games.*|grand theft auto iv|gtaiv)$"; then
-        return 0
-    fi
+def send_ipc(sock, msg_type, payload_str):
+    payload = payload_str.encode("utf-8")
+    header = b"i3-ipc" + struct.pack("<II", len(payload), msg_type)
+    sock.sendall(header + payload)
 
-    return 1
-}
+def recv_ipc(sock):
+    magic = sock.recv(6)
+    if not magic or magic != b"i3-ipc":
+        return None, None
+    raw_header = sock.recv(8)
+    if len(raw_header) < 8:
+        return None, None
+    length, msg_type = struct.unpack("<II", raw_header)
+    data = b""
+    while len(data) < length:
+        chunk = sock.recv(min(length - len(data), 65536))
+        if not chunk:
+            break
+        data += chunk
+    return msg_type, json.loads(data.decode("utf-8"))
 
-move_if_game() { # $1 = container id
-    local id="$1" info
-    info=$(swaymsg -t get_tree 2>/dev/null | jq -r --argjson id "$1" '
-        .. | objects | select(.id == $id) |
-        "\(.app_id // "-")|\((.window_properties // {}).class // "-")|\((.window_properties // {}).instance // "-")|\(.name // "-")"' 2>/dev/null)
-    if is_game "$info"; then
-        echo "$(date '+%T') MOVE id=$id info=$info" >> "$LOG"
-        swaymsg "[con_id=$id] move to workspace number 4" >/dev/null 2>&1
-    fi
-}
+def ipc_cmd(sock, cmd):
+    send_ipc(sock, 0, cmd)
+    return recv_ipc(sock)
 
-# Initial sweep (catch anything already open) + late-set recheck loop.
-swaymsg -t get_tree 2>/dev/null | jq -r '.. | objects | select(.type=="con" and .pid != null) | .id' 2>/dev/null | while read -r id; do move_if_game "$id"; done
+def get_tree(sock):
+    send_ipc(sock, 4, "")
+    _, tree = recv_ipc(sock)
+    return tree
 
-# NOTE: stdbuf -o0 is required — swaymsg block-buffers when piped, which
-# would delay events indefinitely. Verified 2026-09-21.
-stdbuf -o0 swaymsg -t subscribe '["window"]' 2>/dev/null | while read -r ev; do
-    # "new" catches mapping; "title" catches CEF/XWayland windows whose
-    # class/title only materialize seconds after mapping (proven miss:
-    # Rockstar launcher mapped blank, titled later, sat on ws1).
-    echo "$ev" | grep -qE '"change":[[:space:]]*"(new|title)"' || continue
-    id=$(echo "$ev" | jq -r '.container.id // empty' 2>/dev/null)
-    [ -n "$id" ] || continue
-    move_if_game "$id"
-    # Recheck after 3s for late class/title changes (CEF launchers).
-    ( sleep 3; move_if_game "$id" ) &
-done
+def find_window_workspace(tree, con_id):
+    def search(node, current_ws):
+        if node.get("type") == "workspace":
+            current_ws = node.get("name")
+        if node.get("id") == con_id:
+            return current_ws
+        for child in node.get("nodes", []) + node.get("floating_nodes", []):
+            res = search(child, current_ws)
+            if res is not None:
+                return res
+        return None
+    return search(tree, None)
+
+BROWSER_RE = re.compile(r"\b(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)\b", re.I)
+VIDEO_RE = re.compile(r"\b(mpv|vlc)\b", re.I)
+PIP_RE = re.compile(r"picture[- ]in[- ]picture", re.I)
+GAME_RE = re.compile(r"steam_app_|gamescope|cs2|eldenring|dyinglight|farcry|gtaiv|hll|hellletloose|launcher\.exe|socialclubhelper\.exe|playgtaiv", re.I)
+GAME_TITLE_RE = re.compile(r"^(rockstar games.*|grand theft auto iv|gtaiv)$", re.I)
+
+def route_container(cmd_sock, con, tree=None):
+    cid = con.get("id")
+    if not cid:
+        return
+    app_id = con.get("app_id") or ""
+    props = con.get("window_properties") or {}
+    class_name = props.get("class") or ""
+    instance = props.get("instance") or ""
+    title = con.get("name") or ""
+
+    ident = f"{app_id} {class_name} {instance}"
+
+    # Bypass: Picture-in-Picture video popups float on current workspace
+    if PIP_RE.search(title):
+        return
+
+    # Backstop 1: Browsers to Workspace 2
+    if BROWSER_RE.search(ident):
+        if tree is None:
+            tree = get_tree(cmd_sock)
+        cur_ws = find_window_workspace(tree, cid)
+        if cur_ws and cur_ws != "2":
+            log(f"ROUTE BROWSER con_id={cid} ({ident}) from ws {cur_ws} -> ws2")
+            ipc_cmd(cmd_sock, f"[con_id={cid}] move to workspace number 2")
+        return
+
+    # Backstop 2: Video players to Workspace 2
+    if VIDEO_RE.search(ident):
+        if tree is None:
+            tree = get_tree(cmd_sock)
+        cur_ws = find_window_workspace(tree, cid)
+        if cur_ws and cur_ws != "2":
+            log(f"ROUTE VIDEO con_id={cid} ({ident}) from ws {cur_ws} -> ws2")
+            ipc_cmd(cmd_sock, f"[con_id={cid}] move to workspace number 2, focus")
+        return
+
+    # Backstop 3: Games to Workspace 4
+    if not BROWSER_RE.search(ident) and not VIDEO_RE.search(ident):
+        if GAME_RE.search(ident) or GAME_TITLE_RE.search(title):
+            if tree is None:
+                tree = get_tree(cmd_sock)
+            cur_ws = find_window_workspace(tree, cid)
+            if cur_ws and cur_ws != "4":
+                log(f"ROUTE GAME con_id={cid} ({ident}) from ws {cur_ws} -> ws4")
+                ipc_cmd(cmd_sock, f"[con_id={cid}] move to workspace number 4")
+            return
+
+def scan_tree_and_route(cmd_sock):
+    tree = get_tree(cmd_sock)
+    def traverse(node):
+        if node.get("type") in ("con", "floating_con") and node.get("pid"):
+            route_container(cmd_sock, node, tree)
+        for child in node.get("nodes", []) + node.get("floating_nodes", []):
+            traverse(child)
+    traverse(tree)
+
+def main():
+    lock_fd = open(LOCK_FILE, "w")
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except IOError:
+        sys.exit(0)
+
+    log(f"daemon started pid={os.getpid()}")
+
+    cmd_sock = create_ipc_socket()
+    sub_sock = create_ipc_socket()
+
+    # Initial sweep of all current windows
+    try:
+        scan_tree_and_route(cmd_sock)
+    except Exception as e:
+        log(f"Initial sweep error: {e}")
+
+    # Subscribe to window events
+    send_ipc(sub_sock, 2, json.dumps(["window"]))
+    _, sub_res = recv_ipc(sub_sock)
+    if not sub_res or not sub_res.get("success"):
+        log("Failed to subscribe to window events")
+        sys.exit(1)
+
+    while True:
+        try:
+            msg_type, event = recv_ipc(sub_sock)
+            if event is None:
+                break
+            change = event.get("change")
+            if change in ("new", "title", "focus"):
+                con = event.get("container")
+                if con:
+                    route_container(cmd_sock, con)
+        except Exception as e:
+            log(f"Event loop exception: {e}")
+            time.sleep(1)
+
+if __name__ == "__main__":
+    main()

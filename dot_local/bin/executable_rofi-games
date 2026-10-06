@@ -2,7 +2,15 @@
 # rofi-games — game launcher menu (Alt+g). All entries use Proton, never vanilla Wine.
 export PATH="$HOME/.local/bin:$PATH"
 
-options="🗡️ ELDEN RING\n✨ ELDEN RING + FG (2x) [Disabled]\n🧪 ELDEN RING (Gamescope test)\n🎮 Steam library\n⚙️ Configure LSFG (GUI)\n🛑 Kill game"
+options="ELDEN RING\nELDEN RING + LSFG 2x\nSteam library\nConfigure LSFG (GUI)\nKill game"
+# Dynamic Epic entries (auto-registered by legendary-tui): Title|appid|prefix per line.
+REG="$HOME/.config/rofi/epic-games.list"
+if [ -f "$REG" ]; then
+    while IFS='|' read -r title _ _; do
+        [ -n "$title" ] && options="$options
+$title"
+    done < "$REG"
+fi
 chosen=$(echo -e "$options" | rofi -dmenu -i \
     -sort \
     -sorting-method "fzf" \
@@ -10,11 +18,20 @@ chosen=$(echo -e "$options" | rofi -dmenu -i \
     -p "Games" \
     -theme "$HOME/.config/rofi/games.rasi")
 
+# Epic registry hit? Dispatch generically — no per-game edits needed.
+if [ -f "$REG" ]; then
+    GOT="$(awk -F'|' -v sel="$chosen" '$1==sel{print $2"\t"$3; exit}' "$REG")"
+    if [ -n "$GOT" ]; then
+        AID="$(echo "$GOT" | cut -f1)"; PFX="$(echo "$GOT" | cut -f2)"
+        if [ -n "$PFX" ]; then epic-launch "$AID" "$PFX"; else epic-launch "$AID"; fi
+        exit 0
+    fi
+fi
+
 case "$chosen" in
-    *"Steam"*)          env STEAM_DGPU=1 steam-workspace ;;
-    *"+ FG"*)           notify-send -t 3000 -i dialog-warning "Elden Ring" "LSFG frame gen is disabled for now due to Gamescope crash. Launching vanilla." ; env DISABLE_LSFGVK=1 mangohud eldenring-run ;;
-    *"Gamescope test"*) env DISABLE_LSFGVK=1 mangohud eldenring-run ;;
+    *"ELDEN RING + LSFG"*) mangohud eldenring-lsfg ;;
     *"ELDEN RING"*)     env DISABLE_LSFGVK=1 mangohud eldenring-run ;;
+    *"Steam"*)          env STEAM_DGPU=1 steam-workspace ;;
     *"Configure LSFG"*) ( ~/.local/bin/lsfg-vk-ui >/dev/null 2>&1 & ) ;;
     *"Kill"*)           killgame ;;
 esac

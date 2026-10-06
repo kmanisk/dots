@@ -1,50 +1,248 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# ASUS GPU MUX Switch Controller (OS-level hardware MUX switching)
+# gpu-mode: Authoritative GPU Architecture & MUX Switch Manager
 # ==============================================================================
-CMD="${1:-status}"
+# Hardware: ASUS TUF Gaming F16 (Intel Raptor Lake iGPU + NVIDIA RTX 5050 Mobile)
+# Authoritative backend: supergfxd / supergfxctl + asus-nb-wmi hardware MUX
+# ==============================================================================
+set -euo pipefail
 
-get_status() {
-    local cur
-    local pend
-    cur=$(cat /sys/class/firmware-attributes/asus-armoury/attributes/gpu_mux_mode/current_value 2>/dev/null || echo "unknown")
-    pend=$(cat /sys/class/firmware-attributes/asus-armoury/attributes/pending_reboot 2>/dev/null || echo "0")
+# Ensure standard tools in path
+export PATH="/usr/bin:/usr/sbin:/usr/local/bin:$HOME/.local/bin:$PATH"
 
-    echo "=== ASUS GPU MUX Status ==="
-    if [[ "$cur" == "0" ]]; then
-        echo "Active Mode:     Dedicated NVIDIA dGPU (Ultimate)"
-    elif [[ "$cur" == "1" ]]; then
-        echo "Active Mode:     Hybrid / Optimus (Intel iGPU display)"
+SUPERGFXCTL=$(command -v supergfxctl 2>/dev/null || true)
+if [ -z "$SUPERGFXCTL" ]; then
+    echo "ERROR: supergfxctl binary not found." >&2
+    exit 1
+fi
+
+get_current_mode() {
+    "$SUPERGFXCTL" -g 2>/dev/null || echo "Unknown"
+}
+
+get_supported_modes() {
+    "$SUPERGFXCTL" -s 2>/dev/null | tr -d '[]' | tr ',' ' ' || echo "AsusMuxDgpu Hybrid"
+}
+
+get_gpu_power() {
+    "$SUPERGFXCTL" -S 2>/dev/null || echo "Unknown"
+}
+
+is_sway_running() {
+    pgrep -x sway >/dev/null 2>&1
+}
+
+normalize_mode() {
+    case "$(echo "$1" | tr '[:upper:]' '[:lower:]')" in
+        dgpu|asusmuxdgpu|mux|dedicated)
+            echo "AsusMuxDgpu"
+            ;;
+        hybrid|optimus|igpu|integrated)
+            # On this ASUS TUF MUX architecture, switching off MUX returns panel to Hybrid.
+            # (Intel UHD Graphics drives the panel eDP-1, RTX 5050 is available for offload).
+            echo "Hybrid"
+            ;;
+        *)
+            echo "INVALID"
+            ;;
+    esac
+}
+
+show_status() {
+    local cur_mode sup_modes pwr sway_status cur_panel
+    cur_mode=$(get_current_mode)
+    sup_modes=$(get_supported_modes)
+    pwr=$(get_gpu_power)
+
+    if is_sway_running; then
+        sway_status="Running (Wayland)"
     else
-        echo "Active Mode:     Unknown ($cur)"
+        sway_status="Not running"
     fi
 
-    if [[ "$pend" == "1" ]]; then
-        echo "Pending Action:  A MUX switch is scheduled and will apply on NEXT REBOOT."
+    # Detect active panel connection
+    if [ -d /sys/class/drm/card1-eDP-1 ] || [ -d /sys/class/drm/card0-eDP-1 ]; then
+        cur_panel="eDP-1 (Internal Panel)"
+    elif [ -d /sys/class/drm/card2-eDP-2 ] || [ -d /sys/class/drm/card1-eDP-2 ]; then
+        cur_panel="eDP-2 (NVIDIA Direct Scanout)"
     else
-        echo "Pending Action:  None (Current mode is active)"
+        cur_panel="eDP (Active)"
+    fi
+
+    cat << EOF
+==============================================================================
+GPU MODE AUDIT & STATUS
+==============================================================================
+Current Mode        : $cur_mode
+Supported Targets   :
+  - dgpu            : AsusMuxDgpu (RTX 5050 direct hardware scanout)
+  - hybrid          : Hybrid (Intel iGPU scanout + RTX 5050 offload)
+Hardware MUX Backend: supergfxd / asus-nb-wmi
+dGPU Power State    : $pwr
+Display Scanout     : $cur_panel
+Graphical Session   : $sway_status
+Reboot Required     : YES (ASUS hardware MUX requires firmware ACPI cycle)
+Hot-Switching       : UNSUPPORTED (Hardware traces physically repinned)
+Risk Level          : Low (Non-destructive, staged via supergfxd, fully reversible)
+==============================================================================
+EOF
+}
+
+plan_switch() {
+    local target_raw="$1"
+    local target_mode cur_mode
+
+    target_mode=$(normalize_mode "$target_raw")
+    if [ "$target_mode" = "INVALID" ]; then
+        echo "ERROR: Invalid target mode '$target_raw'." >&2
+        echo "Valid targets: dgpu (AsusMuxDgpu) | igpu / hybrid (Hybrid)" >&2
+        exit 1
+    fi
+
+    cur_mode=$(get_current_mode)
+
+    echo "------------------------------------------------------------------------------"
+    echo "GPU MODE TRANSITION PLAN"
+    echo "------------------------------------------------------------------------------"
+    echo "Current Mode        : $cur_mode"
+    echo "Requested Mode      : $target_mode"
+    echo "Hardware Capability : Hardware MUX Switch (ASUS TUF eDP Display Redirection)"
+
+    if [ "$cur_mode" = "$target_mode" ]; then
+        echo "Action Required     : None (Target mode is already active)"
+        echo "Reboot Required     : No"
+        echo "Status              : ALREADY ACTIVE"
+        echo "------------------------------------------------------------------------------"
+        return 0
+    fi
+
+    echo "Mechanism           : supergfxctl -m $target_mode (updates /etc/supergfxd.conf & BIOS MUX flag)"
+    echo "Sway Restart        : Not sufficient (Hardware MUX requires cold PCIe/DRM re-enumeration)"
+    echo "Hot-Switching       : UNSUPPORTED (Hardware MUX physically repins display traces)"
+    echo "Reboot Required     : YES (Firmware applies MUX change during UEFI boot)"
+    echo ""
+    echo "Planned Actions on Apply:"
+    echo "  1. Invoke 'supergfxctl -m $target_mode' to stage MUX change in firmware."
+    echo "  2. Validate staged configuration in /etc/supergfxd.conf."
+    echo "  3. Prompt to reboot via 'gpu-mode reboot' or 'systemctl reboot'."
+    echo "------------------------------------------------------------------------------"
+}
+
+apply_switch() {
+    local target_raw="$1"
+    local target_mode cur_mode output
+
+    target_mode=$(normalize_mode "$target_raw")
+    if [ "$target_mode" = "INVALID" ]; then
+        echo "ERROR: Invalid target mode '$target_raw'." >&2
+        echo "Valid targets: dgpu | igpu / hybrid" >&2
+        exit 1
+    fi
+
+    cur_mode=$(get_current_mode)
+    if [ "$cur_mode" = "$target_mode" ]; then
+        echo "Target mode '$target_mode' is already active. No changes needed."
+        return 0
+    fi
+
+    echo "Staging GPU mode change to: $target_mode..."
+
+    # Call authoritative backend
+    if ! output=$("$SUPERGFXCTL" -m "$target_mode" 2>&1); then
+        echo "ERROR: supergfxctl failed to stage mode change:" >&2
+        echo "$output" >&2
+        exit 1
+    fi
+
+    # Verify staged configuration
+    local staged_mode
+    staged_mode=$(grep '"mode":' /etc/supergfxd.conf 2>/dev/null | awk -F'"' '{print $4}' || echo "Unknown")
+
+    if [ "$staged_mode" = "$target_mode" ]; then
+        echo "SUCCESS: GPU mode change staged successfully."
+        echo "Staged Target: $staged_mode"
+        echo "Reboot is REQUIRED for the ASUS MUX hardware switch to take effect."
+        echo ""
+        echo "Execute 'gpu-mode reboot' when you are ready to restart."
+    else
+        echo "WARNING: /etc/supergfxd.conf mode mismatch (expected $target_mode, found $staged_mode)." >&2
+        exit 1
     fi
 }
 
-case "$CMD" in
-    status)
-        get_status
+do_reboot() {
+    local cur_mode staged_mode
+    cur_mode=$(get_current_mode)
+    staged_mode=$(grep '"mode":' /etc/supergfxd.conf 2>/dev/null | awk -F'"' '{print $4}' || echo "Unknown")
+
+    echo "=============================================================================="
+    echo "GPU MODE REBOOT CONFIRMATION"
+    echo "=============================================================================="
+    echo "Current Active Mode : $cur_mode"
+    echo "Staged Boot Mode    : $staged_mode"
+    echo "=============================================================================="
+    
+    if [ "$cur_mode" = "$staged_mode" ]; then
+        echo "Notice: Active and staged modes are identical ($cur_mode). Rebooting anyway..."
+    else
+        echo "System will reboot now to apply the hardware MUX switch."
+    fi
+
+    systemctl reboot
+}
+
+# ------------------------------------------------------------------------------
+# CLI Router
+# ------------------------------------------------------------------------------
+case "${1:-status}" in
+    status|current|-g|--get)
+        show_status
         ;;
-    dgpu|ultimate|nvidia)
-        echo "Setting GPU MUX mode to Dedicated NVIDIA dGPU (Ultimate)..."
-        asusctl armoury set gpu_mux_mode 0
-        get_status
-        echo ""
-        echo "Please reboot your system for the hardware MUX switch to take effect."
+    plan)
+        if [ -z "${2:-}" ]; then
+            echo "Usage: gpu-mode plan [dgpu|igpu|hybrid]" >&2
+            exit 1
+        fi
+        plan_switch "$2"
         ;;
-    hybrid|optimus|integrated)
-        echo "Setting GPU MUX mode to Hybrid / Optimus..."
-        asusctl armoury set gpu_mux_mode 1
-        get_status
-        echo ""
-        echo "Please reboot your system for the hardware MUX switch to take effect."
+    switch|set|apply|-m)
+        if [ -z "${2:-}" ]; then
+            echo "Usage: gpu-mode switch [dgpu|igpu|hybrid]" >&2
+            exit 1
+        fi
+        apply_switch "$2"
+        ;;
+    dgpu)
+        apply_switch "dgpu"
+        ;;
+    igpu|hybrid)
+        apply_switch "hybrid"
+        ;;
+    reboot)
+        do_reboot
+        ;;
+    help|-h|--help)
+        cat << 'EOF'
+Usage: gpu-mode [COMMAND] [ARGS]
+
+Commands:
+  status               Show current GPU mode, power state, and hardware details (default)
+  current              Quick query of active mode
+  plan <mode>          Dry-run / preview transition actions without changing state
+  switch <mode>        Stage mode change (dgpu | igpu | hybrid)
+  dgpu                 Shortcut for 'gpu-mode switch dgpu'
+  igpu                 Shortcut for 'gpu-mode switch hybrid'
+  reboot               Reboot system to apply staged hardware MUX change
+  help                 Display this help menu
+
+Modes:
+  dgpu   : AsusMuxDgpu (RTX 5050 drives internal display directly via hardware MUX)
+  igpu   : Hybrid (Intel iGPU drives internal display; RTX 5050 powers down until offloaded)
+EOF
         ;;
     *)
-        echo "Usage: gpu-mode [status | dgpu | hybrid]"
+        echo "Unknown command: $1" >&2
+        echo "Run 'gpu-mode help' for usage." >&2
+        exit 1
         ;;
 esac

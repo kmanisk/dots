@@ -68,6 +68,21 @@ Never describe a process as having "zero overhead" without measuring it on the a
 * Use `paru` for AUR packages when necessary.
 * Avoid unnecessary `-git` packages when a stable repository package satisfies the requirement.
 * Minimize duplicate implementations of the same functionality.
+* **Mandatory Pre-Completion Verification & Collision Audit:**
+  - Before declaring any task complete or configuration modification finished, ALWAYS run live configuration syntax validation (e.g., `sway -C`, `systemd-analyze verify`, `shellcheck`, `python3 -m py_compile`).
+  - Actively audit for duplicate or shadowed keybindings (e.g., `grep bindsym` across root and modal scopes in Sway/i3).
+  - Check service health with `systemctl --user status <service>` and inspect journal logs for recent errors.
+  - Test live reload (`swaymsg reload`) and confirm no warnings or regressions. Fix all issues before finishing.
+
+---
+
+## Modular Configuration & Token Efficiency
+
+To minimize context window token usage and latency for AI agents and human maintainers:
+* **Modular Configuration Layout:** Avoid monolithic multi-hundred-line configs. Break configurations into discrete, single-responsibility files inside `<app>.d/` or `conf.d/` subdirectories:
+  * **Sway Window Manager:** `~/.config/sway/config.d/` (`00-variables.conf`, `10-display.conf`, `20-input.conf`, `30-window-rules.conf`, `40-keybindings.conf`, `50-gaming-mode.conf`, `60-autostart.conf`, `70-bar.conf`).
+  * **Fish Shell:** `~/.config/fish/conf.d/` (`00-env.fish`, `10-prompt.fish`, `20-aliases.fish`, `30-bindings.fish`, `40-login.fish`) and lazy-loaded standalone functions in `~/.config/fish/functions/*.fish`.
+* **Targeted Agent Inspection:** Agents MUST only inspect the specific modular file relevant to their task rather than reading the entire root configuration, drastically accelerating reasoning and reducing prompt token overhead.
 
 ---
 

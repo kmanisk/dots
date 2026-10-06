@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# clipboard-wipe: Wipe cliphist clipboard history with notification
+# ==============================================================================
+set -euo pipefail
+
+if command -v cliphist >/dev/null 2>&1; then
+    cliphist wipe
+    # Clear active wl-clipboard paste buffer as well
+    if command -v wl-copy >/dev/null 2>&1; then
+        wl-copy -c 2>/dev/null || true
+    fi
+    notify-send -a "Clipboard" -u normal -i edit-clear "Clipboard Cleared" "History and active paste buffer wiped"
+fi

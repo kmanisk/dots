@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# wset: Point any image file as wallpaper (sway native, no extra app).
+# Usage: wset <image> [fill|fit|stretch|tile|centered]  (mode defaults to fit)
+# Persists to ~/.config/current_wallpaper so it survives reboots (restored by
+# sway config line with exec_always swaymsg output "*" bg ...).
+# Win+Shift+W (random-wallpaper) is untouched and keeps working as before.
+# ==============================================================================
+set -u
+
+IMG="${1:-}"
+MODE="${2:-fit}"
+
+die() { echo "wset: $1" >&2; exit 1; }
+
+[ -n "$IMG" ] || die "usage: wset <image> [fill|fit|stretch|tile|centered]"
+[ -f "$IMG" ] || die "file not found: $IMG"
+case "$MODE" in
+    fill|fit|stretch|tile|centered) ;;
+    *) die "bad mode '$MODE' (want fill|fit|stretch|tile|centered)" ;;
+esac
+file -b --mime-type "$IMG" 2>/dev/null | grep -q "^image/" \
+    || die "not an image file: $IMG"
+
+# Resolve to absolute path (sway needs a stable path across restarts).
+ABS="$(realpath "$IMG")"
+
+if [ -n "${SWAYSOCK:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
+    swaymsg output "*" bg "$ABS" "$MODE" 2>/dev/null \
+        || die "sway rejected the image (unsupported format?)"
+fi
+
+# Only persist after a successful apply — a bad path can never blank next login.
+echo "$ABS" > "$HOME/.config/current_wallpaper"
+command -v notify-send >/dev/null \
+    && notify-send -i preferences-desktop-wallpaper -t 1500 "Wallpaper" "$(basename "$ABS") ($MODE)"

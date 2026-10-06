@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Alt+Shift+W: SEQUENTIAL Dark Souls 3 wallpaper stepper.
+# Every press advances to the next cached wallpaper in sorted order,
+# so it never repeats until a full cycle completes. Static pack
+# (wallpapercave + imgur gallery) — no background fetching.
+set -u
+STORE="$HOME/.local/share/wallpapers"
+
+mapfile -t POOL < <(ls -1 "$STORE"/ds3_* 2>/dev/null | sort)
+[[ ${#POOL[@]} -eq 0 ]] && { notify-send -t 2000 "Wallpaper" "No Dark Souls 3 wallpapers cached"; exit 1; }
+
+# Step to next-after-current.
+CURRENT="$(cat "$HOME/.config/current_wallpaper" 2>/dev/null)"
+NEXT="${POOL[0]:-}"
+for i in "${!POOL[@]}"; do
+    if [[ "${POOL[$i]}" == "$CURRENT" ]]; then
+        NEXT="${POOL[$(( (i + 1) % ${#POOL[@]} ))]}"
+        break
+    fi
+done
+[[ -n "$NEXT" && -f "$NEXT" ]] || NEXT="${POOL[0]:-}"
+if [[ -n "${NEXT:-}" && -f "$NEXT" ]]; then
+    swaymsg output "*" bg "$NEXT" fill 2>/dev/null
+    echo "$NEXT" > "$HOME/.config/current_wallpaper"
+    IDX=0
+    for i in "${!POOL[@]}"; do [[ "${POOL[$i]}" == "$NEXT" ]] && IDX=$i; done
+    command -v notify-send >/dev/null && notify-send -i preferences-desktop-wallpaper -t 1500 "Wallpaper" "Dark Souls 3 $((IDX + 1))/${#POOL[@]}"
+fi

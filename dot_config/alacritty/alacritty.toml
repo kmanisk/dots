@@ -33,3 +33,9 @@ bindings = [
   { key = "U", mods = "Alt|Shift", action = "IncreaseFontSize" },
   { key = "Y", mods = "Alt|Shift", action = "DecreaseFontSize" }
 ]
+
+# Middle-click pastes clipboard (Ctrl+Shift+V equivalent, no keyboard needed)
+[[mouse.bindings]]
+mouse = "Middle"
+mods = "None"
+action = "Paste"

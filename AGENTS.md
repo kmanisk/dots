@@ -23,18 +23,32 @@ or Cursor, both of those now read `AGENTS.md` too, so this one file covers all t
   install/removal, confirm a Snapper pre-update snapshot exists or trigger one first.
 - **Never run `pacman -Sy`** (partial upgrade risk) — always `pacman -Syu`.
 - **Never put a raw secret/token in this file or in any command it runs.**
+- **Mandatory Pre-Completion Verification & Collision Audit:** Never report a task complete without actively validating configs, services, and scripts. For Sway/i3, always run `sway -C`, audit for duplicate or shadowed keybindings across modes/scopes, and test live reload (`swaymsg reload`). For systemd units, check `systemctl --user status` and journal logs. For scripts, run syntax checks. Fix all regressions and collisions before marking the task done.
 
 ---
 
-## 2. Hybrid GPU Strategy (Intel iGPU + RTX 5050 Mobile)
+## 2. Dynamic GPU Architecture (Intel iGPU + RTX 5050 Mobile MUX)
 
-- Desktop session and 2D apps run on the **Intel iGPU** for idle power/thermals (`DISPLAY=:0`, `LIBVA_DRIVER_NAME=iHD`).
-- Games/3D/CUDA offload to the RTX 5050 explicitly, never globally:
-  ```
-  prime-run %command%
-  ```
-  *(Note: Do not combine `gamemoderun` with `ananicy-cpp` unless ananicy-cpp is stopped/disabled for that session).*
-- Keep the dGPU suspended (D3cold) until something actually requests it.
+The machine supports dynamic switching via `supergfxctl` across three distinct architectures:
+
+1. **Integrated (`Integrated`)**:
+   - Desktop and apps run on Intel UHD Graphics (`LIBVA_DRIVER_NAME=iHD`).
+   - Hardware vibrance via Intel CRTC CTM (`ctm-test`).
+   - No NVIDIA offload variables; dGPU remains powered down.
+
+2. **Hybrid (`Hybrid`)**:
+   - Desktop and 2D apps run on Intel UHD Graphics for idle power/thermals (`LIBVA_DRIVER_NAME=iHD`).
+   - Hardware vibrance via Intel CRTC CTM (`ctm-test`).
+   - Games/3D/CUDA offload explicitly via `prime-run` (`__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia`).
+   - dGPU suspended (D3cold) until an offloaded workload requests it.
+
+3. **Direct dGPU MUX (`AsusMuxDgpu`)**:
+   - RTX 5050 Mobile connects directly to eDP-1 internal panel (hardware MUX bypasses iGPU).
+   - Desktop compositor (Sway) and video decode run on NVIDIA (`LIBVA_DRIVER_NAME=nvidia`).
+   - Hardware vibrance via NVIDIA NVKMS direct ioctl (`nvibrant`).
+   - No Intel VA-API forcing (`iHD`), no Intel CTM attempts, and no redundant PRIME offload variables in game launchers (`cs2-launch`).
+
+*(Note: Do not combine `gamemoderun` with `ananicy-cpp` unless ananicy-cpp is stopped/disabled for that session).*
 
 ---
 
@@ -123,6 +137,7 @@ the strength of a description alone.
 - **Headless services:** System features (such as autologin, clipboard) must run headless in the background; never require manual GUI interaction to activate essential system functions.
 - **Btrfs snapshot pruning:** Keep only verified stable baselines. Do not allow dozens of transient package snapshots to consume exclusive disk space.
 - **Fact-checked research via headless browser:** When researching technical solutions, driver quirks, or configurations, perform live web searches and headless browser fetches. Record verified outcomes in markdown skill files (`SKILL.md`) for persistent cross-session knowledge.
+- **Modular configuration & token efficiency:** Configurations must be structured modularly in subdirectories (e.g. `~/.config/sway/config.d/`, `~/.config/fish/conf.d/`). Agents must inspect only the relevant submodule file rather than dumping or reading full multi-hundred-line monolithic files.
 
 ---
 

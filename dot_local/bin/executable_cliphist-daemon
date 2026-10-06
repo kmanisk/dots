@@ -7,8 +7,26 @@
 export PATH="$HOME/.local/bin:$PATH"
 export DISPLAY="${DISPLAY:-:0}"
 
-# --- Wayland watcher: catches native app copies (Brave, Firefox, etc.) ---
-wl-paste --watch cliphist store 2>/dev/null &
+# --- Wayland watcher loop: catches native app copies (Brave, Firefox, Zed, Alacritty) ---
+(
+while true; do
+    if [ -z "$WAYLAND_DISPLAY" ]; then
+        WAYLAND_DISPLAY=$(systemctl --user show-environment 2>/dev/null | sed -n 's/^WAYLAND_DISPLAY=//p')
+    fi
+    if [ -z "$WAYLAND_DISPLAY" ]; then
+        latest_sock=$(ls -t "${XDG_RUNTIME_DIR:-/run/user/$UID}"/wayland-[0-9]* 2>/dev/null | grep -v '\.lock$' | head -n 1)
+        if [ -n "$latest_sock" ]; then
+            WAYLAND_DISPLAY=$(basename "$latest_sock")
+        fi
+    fi
+
+    if [ -n "$WAYLAND_DISPLAY" ] && [ -S "${XDG_RUNTIME_DIR:-/run/user/$UID}/$WAYLAND_DISPLAY" ]; then
+        export WAYLAND_DISPLAY
+        wl-paste --watch cliphist store 2>/dev/null
+    fi
+    sleep 2
+done
+) &
 WL_PID=$!
 
 # --- X11 watcher: catches XWayland app copies ---

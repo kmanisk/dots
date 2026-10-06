@@ -97,14 +97,34 @@ def generate_qt_palette(r):
     disabled = qt_colors(True)
     return f"[ColorScheme]\nactive_colors={active}\ndisabled_colors={disabled}\ninactive_colors={active}\n"
 
+HEX_RE = re.compile(r"^#?[0-9a-fA-F]{6}$")
+
+def clean_hex(h, default="#ffffff"):
+    if not h or not isinstance(h, str):
+        return default
+    h = h.strip()
+    if not h.startswith("#"):
+        h = "#" + h
+    if HEX_RE.match(h):
+        return h.lower()
+    return default
+
 def hex_to_rgb(h):
-    h = str(h).strip().lstrip("#")
+    h = clean_hex(h).lstrip("#")
     if len(h) != 6:
         return 255, 255, 255
     try:
         return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
     except ValueError:
         return 255, 255, 255
+
+def rgb_to_hex(r, g, b):
+    return f"#{int(round(max(0, min(255, r)))):02x}{int(round(max(0, min(255, g)))):02x}{int(round(max(0, min(255, b)))):02x}"
+
+def blend_colors(c1, c2, alpha):
+    r1, g1, b1 = hex_to_rgb(c1)
+    r2, g2, b2 = hex_to_rgb(c2)
+    return rgb_to_hex(r1 + (r2 - r1) * alpha, g1 + (g2 - g1) * alpha, b1 + (b2 - b1) * alpha)
 
 def srgb_channel_to_linear(c):
     c_norm = c / 255.0
@@ -119,7 +139,9 @@ def contrast_ratio(h1, h2):
     l2 = relative_luminance(h2)
     return (max(l1, l2) + 0.05) / (min(l1, l2) + 0.05)
 
-def ensure_contrast(fg_hex, bg_hex, min_ratio=7.0, is_dark=True):
+def ensure_contrast(fg_hex, bg_hex, min_ratio=4.5, is_dark=True):
+    fg_hex = clean_hex(fg_hex)
+    bg_hex = clean_hex(bg_hex)
     ratio = contrast_ratio(fg_hex, bg_hex)
     if ratio >= min_ratio:
         return fg_hex
@@ -137,12 +159,19 @@ def ensure_contrast(fg_hex, bg_hex, min_ratio=7.0, is_dark=True):
     return best_hex
 
 def normalize_palette(theme_data, name):
-    b16 = theme_data.get("base_16", {})
-    b30 = theme_data.get("base_30", {})
+    b16 = dict(theme_data.get("base_16", {}))
+    b30 = dict(theme_data.get("base_30", {}))
+    if "derived" in theme_data and isinstance(theme_data["derived"], dict):
+        if not b30 and "base_30" in theme_data["derived"]:
+            b30 = dict(theme_data["derived"]["base_30"])
+    if "palette" in theme_data and isinstance(theme_data["palette"], dict):
+        if not b16 and "base_16" in theme_data["palette"]:
+            b16 = dict(theme_data["palette"]["base_16"])
+
     theme_type = theme_data.get("type", "dark")
     is_dark = (theme_type == "dark")
 
-    # Semantic roles
+    # Semantic roles from base16
     base00 = b16.get("BASE00", "#1e2122")
     base01 = b16.get("BASE01", "#282b2c")
     base02 = b16.get("BASE02", "#393c3d")
@@ -159,24 +188,67 @@ def normalize_palette(theme_data, name):
     base0D = b16.get("BASE0D", "#6d8dad")
     base0E = b16.get("BASE0E", "#9385b4")
     base0F = b16.get("BASE0F", "#d65d0e")
-    # Signature accent selection: explicit accent -> folder_bg (brand UI color) -> BASE0D -> blue
-    accent = (
-        theme_data.get("accent")
-        or b30.get("folder_bg")
-        or b16.get("BASE0D")
-        or b30.get("nord_blue")
-        or b30.get("blue")
-        or base0A
-    )
 
-    # Smart contrast adjustment for foreground text (guarantee minimum 7.0:1 contrast)
-    smart_fg = ensure_contrast(base05, base00, min_ratio=7.0, is_dark=is_dark)
-    bright_fg = ensure_contrast(smart_fg, base00, min_ratio=9.5, is_dark=is_dark)
+    # Signature UI accent selection:
+    # 1. folder_bg (brand UI color explicitly chosen by theme designer)
+    # 2. explicit custom accent if provider is custom
+    # 3. blue / nord_blue
+    # 4. BASE0D / BASE0A
+    provider = theme_data.get("source", {}).get("provider", "")
+    if provider == "custom" and theme_data.get("accent"):
+        accent = theme_data["accent"]
+    else:
+        accent = (
+            b30.get("folder_bg")
+            or theme_data.get("accent")
+            or theme_data.get("palette", {}).get("accent")
+            or b30.get("blue")
+            or b30.get("nord_blue")
+            or base0D
+            or base0A
+        )
+    accent = clean_hex(accent)
+
+    # Extract authentic named colors: prefer b30 (designer's canonical palette),
+    # falling back to base16 slots
+    true_red    = b30.get("red") or base08
+    true_orange = b30.get("orange") or base09
+    true_yellow = b30.get("yellow") or b30.get("sun") or base0A
+    true_green  = b30.get("green") or base0B
+    true_cyan   = b30.get("cyan") or base0C
+    true_blue   = b30.get("blue") or b30.get("nord_blue") or base0D
+    true_purple = b30.get("purple") or b30.get("dark_purple") or base0E
+    true_pink   = b30.get("pink") or b30.get("baby_pink") or true_purple
+    true_teal   = b30.get("teal") or true_cyan
+
+    # Background, surface, selection, muted
+    bg    = b30.get("black") or base00
+    bg2   = b30.get("one_bg") or base01
+    sel   = b30.get("one_bg2") or base02
+    muted = b30.get("grey_fg") or b30.get("grey") or base03
+    raw_fg = b30.get("white") or base05
+
+    # Surface & selection polarity guard:
+    if is_dark:
+        if relative_luminance(sel) > 0.22 or contrast_ratio(sel, bg) > 3.0:
+            sel = blend_colors(bg, accent, 0.14)
+        if relative_luminance(bg2) > 0.22:
+            bg2 = blend_colors(bg, accent, 0.08)
+    else:
+        if relative_luminance(sel) < 0.40:
+            sel = blend_colors(bg, "#000000", 0.10)
+        if relative_luminance(bg2) < 0.40:
+            bg2 = blend_colors(bg, "#000000", 0.04)
+
+    # Smart contrast adjustment: WCAG AA is 4.5:1 for body text
+    # Non-destructive: if authentic fg already meets 4.5:1, it is kept 100% authentic
+    smart_fg = ensure_contrast(raw_fg, bg, min_ratio=4.5, is_dark=is_dark)
+    bright_fg = ensure_contrast(b30.get("white", smart_fg), bg, min_ratio=7.0, is_dark=is_dark)
 
     # Smart selection foreground against accent:
     accent_lum = relative_luminance(accent)
     if accent_lum > 0.35:
-        accent_fg = base00 if relative_luminance(base00) < 0.1 else "#121212"
+        accent_fg = bg if relative_luminance(bg) < 0.1 else "#121212"
     else:
         accent_fg = "#ffffff"
 
@@ -184,108 +256,153 @@ def normalize_palette(theme_data, name):
         "name": name,
         "display_name": theme_data.get("display_name", name),
         "type": theme_type,
-        "bg": base00,
-        "bg2": base01,
-        "sel": base02,
-        "muted": base03,
+        "bg": bg,
+        "bg2": bg2,
+        "sel": sel,
+        "muted": muted,
         "fg": smart_fg,
         "bright_fg": bright_fg,
-        "red": base08,
-        "orange": base09,
-        "yellow": base0A,
-        "green": base0B,
-        "cyan": base0C,
-        "blue": base0D,
-        "purple": base0E,
+        "red": true_red,
+        "orange": true_orange,
+        "yellow": true_yellow,
+        "green": true_green,
+        "cyan": true_cyan,
+        "blue": true_blue,
+        "purple": true_purple,
+        "pink": true_pink,
+        "teal": true_teal,
         "accent": accent,
         "accent_fg": accent_fg,
         "selected_fg": accent_fg,
     }
 
-    # Add base_16 keys in lower and upper
-    for k, v in b16.items():
-        r[k.lower()] = v
-        r[k.upper()] = v
+    # Harmonize base_16 keys in lower and upper
+    r["base00"] = bg
+    r["base01"] = bg2
+    r["base02"] = sel
+    r["base03"] = muted
+    r["base04"] = b30.get("grey_fg2") or b16.get("BASE04", muted)
+    r["base05"] = smart_fg
+    r["base06"] = b16.get("BASE06", smart_fg)
+    r["base07"] = bright_fg
+    r["base08"] = true_red
+    r["base09"] = true_orange
+    r["base0a"] = true_yellow
+    r["base0b"] = true_green
+    r["base0c"] = true_cyan
+    r["base0d"] = true_blue
+    r["base0e"] = true_purple
+    r["base0f"] = true_pink
 
-    # Add all base_30 keys, safeguarding white contrast
+    for k in [f"base0{x}" for x in "0123456789abcdef"]:
+        r[k.upper()] = r[k]
+
+    # Add all base_30 keys, safeguarding white contrast and surface polarity
+    surface_keys = {"black2", "one_bg", "one_bg2", "one_bg3", "line", "lightbg", "pmenu_bg", "statusline_bg", "darker_black"}
     for k, v in b30.items():
-        if k == "white" and is_dark and contrast_ratio(v, base00) < 7.0:
+        if k == "white" and is_dark and contrast_ratio(v, bg) < 4.5:
             r[k] = smart_fg
+        elif k in surface_keys:
+            l_v = relative_luminance(v)
+            if is_dark and l_v > 0.25:
+                r[k] = sel if k in ("one_bg2", "lightbg") else (bg2 if k in ("one_bg", "darker_black") else blend_colors(bg, accent, 0.10))
+            elif not is_dark and l_v < 0.35:
+                r[k] = sel if k in ("one_bg2", "lightbg") else (bg2 if k in ("one_bg", "darker_black") else blend_colors(bg, "#000000", 0.08))
+            else:
+                r[k] = v
         else:
             r[k] = v
 
     if "white" not in r:
         r["white"] = smart_fg
 
-    # Add semantic tokens (e.g. semantic_background, semantic_border)
+    # Add semantic tokens
     semantic = theme_data.get("derived", {}).get("semantic", {}) or theme_data.get("semantic", {})
     for k, v in semantic.items():
         r[f"semantic_{k}"] = v
+    r["semantic_background"] = bg
     r["semantic_foreground"] = smart_fg
+    r["semantic_border"] = accent
+    r["semantic_accent"] = accent
+    r["semantic_error"] = true_red
+    r["semantic_warning"] = true_yellow
+    r["semantic_success"] = true_green
+    r["semantic_info"] = true_cyan
+    r["semantic_link"] = true_blue
 
-    # Graph & meter color contrast enforcement (minimum 4.0:1 contrast against bg)
-    safe_green = ensure_contrast(r.get("green", base0B), base00, min_ratio=4.0, is_dark=is_dark)
-    safe_yellow = ensure_contrast(r.get("yellow", base0A), base00, min_ratio=4.0, is_dark=is_dark)
-    safe_orange = ensure_contrast(r.get("orange", base09), base00, min_ratio=4.0, is_dark=is_dark)
-    safe_red = ensure_contrast(r.get("red", base08), base00, min_ratio=4.0, is_dark=is_dark)
-    safe_cyan = ensure_contrast(r.get("cyan", base0C), base00, min_ratio=4.0, is_dark=is_dark)
-    safe_blue = ensure_contrast(r.get("blue", base0D), base00, min_ratio=4.0, is_dark=is_dark)
-    safe_purple = ensure_contrast(r.get("purple", base0E), base00, min_ratio=4.0, is_dark=is_dark)
-    safe_teal = ensure_contrast(r.get("teal", base0C), base00, min_ratio=4.0, is_dark=is_dark)
-    safe_pink = ensure_contrast(r.get("baby_pink", base0E), base00, min_ratio=4.0, is_dark=is_dark)
+    # Graph & meter color contrast enforcement (WCAG AA non-text standard is 3.0:1 against bg)
+    safe_green  = ensure_contrast(true_green, bg, min_ratio=3.0, is_dark=is_dark)
+    safe_yellow = ensure_contrast(true_yellow, bg, min_ratio=3.0, is_dark=is_dark)
+    safe_orange = ensure_contrast(true_orange, bg, min_ratio=3.0, is_dark=is_dark)
+    safe_red    = ensure_contrast(true_red, bg, min_ratio=3.0, is_dark=is_dark)
+    safe_cyan   = ensure_contrast(true_cyan, bg, min_ratio=3.0, is_dark=is_dark)
+    safe_blue   = ensure_contrast(true_blue, bg, min_ratio=3.0, is_dark=is_dark)
+    safe_purple = ensure_contrast(true_purple, bg, min_ratio=3.0, is_dark=is_dark)
+    safe_teal   = ensure_contrast(true_teal, bg, min_ratio=3.0, is_dark=is_dark)
+    safe_pink   = ensure_contrast(true_pink, bg, min_ratio=3.0, is_dark=is_dark)
 
     # Meter background (battery meter, percentage bar empty backgrounds):
-    # Must NEVER be pitch black on light themes!
-    meter_bg = r.get("one_bg2", base02)
+    meter_bg = b30.get("one_bg2") or b30.get("one_bg") or sel
+    div_line = b30.get("one_bg2") or b30.get("line") or sel
+    if is_dark:
+        if relative_luminance(meter_bg) > 0.25:
+            meter_bg = sel
+        if relative_luminance(div_line) > 0.25:
+            div_line = blend_colors(bg, accent, 0.15)
+    else:
+        if relative_luminance(meter_bg) < 0.35:
+            meter_bg = sel
+        if relative_luminance(div_line) < 0.35:
+            div_line = blend_colors(bg, "#000000", 0.10)
     r["meter_bg"] = meter_bg
-    r["div_line"] = meter_bg
+    r["div_line"] = div_line
 
 
     # Distinct box outline colors:
-    r["btop_cpu_box"] = accent
-    r["btop_mem_box"] = safe_teal
-    r["btop_net_box"] = safe_orange
-    r["btop_proc_box"] = safe_purple
+    r["btop_cpu_box"]  = accent
+    r["btop_mem_box"]  = safe_cyan
+    r["btop_net_box"]  = safe_purple
+    r["btop_proc_box"] = safe_blue
 
     # Distinct graph tokens:
     r["btop_cpu_start"] = safe_blue
-    r["btop_cpu_mid"] = safe_yellow
-    r["btop_cpu_end"] = safe_red
+    r["btop_cpu_mid"]   = safe_yellow
+    r["btop_cpu_end"]   = safe_red
 
     r["btop_temp_start"] = safe_teal
-    r["btop_temp_mid"] = safe_orange
-    r["btop_temp_end"] = safe_red
+    r["btop_temp_mid"]   = safe_orange
+    r["btop_temp_end"]   = safe_red
 
     r["btop_used_start"] = safe_green
-    r["btop_used_mid"] = safe_orange
-    r["btop_used_end"] = safe_red
+    r["btop_used_mid"]   = safe_yellow
+    r["btop_used_end"]   = safe_red
 
-    r["btop_free_start"] = safe_teal
-    r["btop_free_mid"] = safe_cyan
-    r["btop_free_end"] = safe_blue
+    r["btop_free_start"] = safe_blue
+    r["btop_free_mid"]   = safe_teal
+    r["btop_free_end"]   = safe_green
 
     r["btop_cached_start"] = safe_purple
-    r["btop_cached_mid"] = safe_pink
-    r["btop_cached_end"] = safe_cyan
+    r["btop_cached_mid"]   = safe_pink
+    r["btop_cached_end"]   = safe_cyan
 
-    r["btop_avail_start"] = safe_green
-    r["btop_avail_mid"] = safe_yellow
-    r["btop_avail_end"] = safe_orange
+    r["btop_avail_start"] = safe_cyan
+    r["btop_avail_mid"]   = safe_teal
+    r["btop_avail_end"]   = safe_green
 
-    # Download graph: cool incoming tones (teal -> cyan -> blue)
-    r["btop_download_start"] = safe_teal
-    r["btop_download_mid"] = safe_cyan
-    r["btop_download_end"] = safe_blue
+    # Download graph: cool incoming tones (blue -> cyan -> teal)
+    r["btop_download_start"] = safe_blue
+    r["btop_download_mid"]   = safe_cyan
+    r["btop_download_end"]   = safe_teal
 
     # Upload graph: warm outgoing tones (pink -> purple -> orange)
     r["btop_upload_start"] = safe_pink
-    r["btop_upload_mid"] = safe_purple
-    r["btop_upload_end"] = safe_orange
+    r["btop_upload_mid"]   = safe_purple
+    r["btop_upload_end"]   = safe_orange
 
     # Process box usage gradient
-    r["btop_process_start"] = safe_teal
-    r["btop_process_mid"] = safe_orange
-    r["btop_process_end"] = safe_red
+    r["btop_process_start"] = safe_blue
+    r["btop_process_mid"]   = safe_yellow
+    r["btop_process_end"]   = safe_red
 
 
     # Add Cava visualizer tokens (solid prominent accent, gradient = 0)
@@ -386,6 +503,13 @@ def apply_theme(name, no_nvim=False):
                 staged_cava = os.path.join(next_dir, "current.cava")
                 write_atomic(staged_cava, rendered)
                 staged_files[staged_cava] = cava_theme_dest
+
+            if fname == "kitty-colors.conf":
+                kitty_dest = os.path.expanduser("~/.config/kitty/kitty-colors.conf")
+                os.makedirs(os.path.dirname(kitty_dest), exist_ok=True)
+                staged_kitty = os.path.join(next_dir, "kitty-colors.conf")
+                write_atomic(staged_kitty, rendered)
+                staged_files[staged_kitty] = kitty_dest
         except Exception as e:
             print(f"Error compiling template {fname}: {e}", file=sys.stderr)
             return 1
@@ -451,7 +575,7 @@ def apply_theme(name, no_nvim=False):
     # -------------------------------------------------------------
 
     # Single-pass /proc scan to discover all relevant processes at once
-    procs = scan_running_processes({"sway", "btop", "dunst", "mako", "waybar", "yazi", "cava"})
+    procs = scan_running_processes({"sway", "btop", "dunst", "mako", "waybar", "yazi", "cava", "kitty", "legendary-tui"})
 
     # Neovim RPC (system -> all live NvChad instances via their sockets)
     # NvChad spawns an --embed child that owns the socket; that child responds to RPC.
@@ -521,8 +645,30 @@ def apply_theme(name, no_nvim=False):
         except Exception:
             pass
 
+    # Alacritty terminal: touch alacritty.toml to guarantee instant inotify reload
+    alacritty_cfg = os.path.expanduser("~/.config/alacritty/alacritty.toml")
+    if os.path.exists(alacritty_cfg):
+        try:
+            os.utime(alacritty_cfg, None)
+        except Exception:
+            pass
+
+    # Kitty terminal: SIGUSR1 reloads configuration and color themes on the fly
+    for pid in procs["kitty"]:
+        try:
+            os.kill(pid, signal.SIGUSR1)
+        except Exception:
+            pass
+
     # btop: direct SIGUSR2 signal for instantaneous in-memory theme & config reload
     for pid in procs["btop"]:
+        try:
+            os.kill(pid, signal.SIGUSR2)
+        except Exception:
+            pass
+
+    # legendary-tui: direct SIGUSR2 signal for instantaneous in-memory theme reload
+    for pid in procs.get("legendary-tui", []):
         try:
             os.kill(pid, signal.SIGUSR2)
         except Exception:
@@ -595,18 +741,18 @@ def apply_theme(name, no_nvim=False):
             except Exception as e:
                 print(f"[WARN] Non-critical wallpaper error: {e}", file=sys.stderr)
 
-    # 9. Execute custom hooks in ~/.config/theme/hooks.d/ (Failure-Isolated)
+    # 9. Execute custom hooks in ~/.config/theme/hooks.d/ (Failure-Isolated & Non-blocking)
     if os.path.exists(HOOKS_DIR):
         for h in sorted(os.listdir(HOOKS_DIR)):
             hp = os.path.join(HOOKS_DIR, h)
             if os.path.isfile(hp) and os.access(hp, os.X_OK):
                 try:
-                    p = subprocess.run([hp, name, theme_type], capture_output=True, text=True, timeout=3.0)
-                    if p.returncode != 0:
-                        err = p.stderr.strip() or f"exit code {p.returncode}"
-                        print(f"[WARN] Hook '{h}' warning: {err}", file=sys.stderr)
-                except subprocess.TimeoutExpired:
-                    print(f"[WARN] Hook '{h}' timed out after 3.0s (skipped)", file=sys.stderr)
+                    subprocess.Popen(
+                        [hp, name, theme_type],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        start_new_session=True
+                    )
                 except Exception as e:
                     print(f"[WARN] Hook '{h}' execution error: {e}", file=sys.stderr)
 

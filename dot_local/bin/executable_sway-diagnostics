@@ -1,0 +1,481 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# sway-diagnostics: CachyOS Sway System Architecture & Diagnostics Auditor
+# Evaluates Core Compositor, Display/GPU, Resident Services, Optional Tools,
+# Gaming Infrastructure, and System Health without modifying configuration.
+# ==============================================================================
+set -u
+
+# --- Configuration & Flags ---
+COLOR=auto
+QUIET=0
+JSON_OUTPUT=0
+
+usage() {
+    cat <<'EOF'
+Usage: sway-diagnostics [OPTIONS]
+
+Non-invasive architecture and health auditor for CachyOS Sway.
+
+Options:
+  -q, --quiet        Exit immediately with return code (0 = all required OK, 1 = required failure)
+  --json             Output results formatted as JSON
+  --no-color         Disable ANSI color escapes
+  --color            Force ANSI color escapes
+  -h, --help         Show this help message
+
+Status Categories:
+  REQUIRED CORE     Sway compositor, Wayland IPC, xremap
+  DISPLAY & GPU     supergfxctl mode, NVIDIA driver, active output, vibrance backend
+  SERVICES          PipeWire, WirePlumber, XDG Portals, mako notifications, cliphist
+  OPTIONAL          Thunar, Alacritty, Cava, theme-set, active wallpaper
+  GAMING            Launchers, Proton, ananicy-cpp scheduler, MangoHud config
+  HEALTH            Failed system/user systemd units, Btrfs free space
+EOF
+}
+
+# Parse Arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -q|--quiet)
+            QUIET=1
+            shift
+            ;;
+        --json)
+            JSON_OUTPUT=1
+            shift
+            ;;
+        --no-color)
+            COLOR=never
+            shift
+            ;;
+        --color)
+            COLOR=always
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
+# --- Colors Setup ---
+if [[ "$COLOR" == "always" ]] || { [[ "$COLOR" == "auto" ]] && [[ -t 1 ]] && [[ "$JSON_OUTPUT" -eq 0 ]]; }; then
+    C_RESET="\033[0m"
+    C_BOLD="\033[1m"
+    C_GREEN="\033[1;32m"
+    C_YELLOW="\033[1;33m"
+    C_RED="\033[1;31m"
+    C_CYAN="\033[1;36m"
+    C_GRAY="\033[0;90m"
+else
+    C_RESET=""
+    C_BOLD=""
+    C_GREEN=""
+    C_YELLOW=""
+    C_RED=""
+    C_CYAN=""
+    C_GRAY=""
+fi
+
+# Track required failures
+REQUIRED_FAILURES=0
+
+# Helper arrays for JSON / formatted display
+declare -a REPORT_CATEGORIES=()
+declare -a REPORT_COMPONENTS=()
+declare -a REPORT_STATUSES=()
+declare -a REPORT_DETAILS=()
+declare -a REPORT_TYPES=() # "REQUIRED" or "OPTIONAL"
+
+add_check() {
+    local cat="$1"
+    local comp="$2"
+    local stat="$3"
+    local detail="$4"
+    local req_type="${5:-REQUIRED}"
+
+    REPORT_CATEGORIES+=("$cat")
+    REPORT_COMPONENTS+=("$comp")
+    REPORT_STATUSES+=("$stat")
+    REPORT_DETAILS+=("$detail")
+    REPORT_TYPES+=("$req_type")
+
+    if [[ "$req_type" == "REQUIRED" ]] && [[ "$stat" == "FAILED" ]]; then
+        ((REQUIRED_FAILURES++))
+    fi
+}
+
+# ==============================================================================
+# 1. CORE SESSION
+# ==============================================================================
+
+# Sway Compositor
+if command -v swaymsg >/dev/null 2>&1 && sway_ver=$(swaymsg -t get_version 2>/dev/null | jq -r .human_readable 2>/dev/null); then
+    if sway -C >/dev/null 2>&1; then
+        add_check "CORE" "Sway Compositor" "OK" "${sway_ver} (Syntax valid)" "REQUIRED"
+    else
+        add_check "CORE" "Sway Compositor" "DEGRADED" "${sway_ver} (Syntax warning/error in sway -C)" "REQUIRED"
+    fi
+else
+    add_check "CORE" "Sway Compositor" "FAILED" "swaymsg IPC unreachable or not running" "REQUIRED"
+fi
+
+# Wayland Socket
+wl_disp="${WAYLAND_DISPLAY:-}"
+if [[ -z "$wl_disp" ]]; then
+    wl_disp=$(systemctl --user show-environment 2>/dev/null | sed -n 's/^WAYLAND_DISPLAY=//p')
+fi
+sock_path="${XDG_RUNTIME_DIR:-/run/user/$UID}/${wl_disp:-wayland-0}"
+if [[ -n "$wl_disp" ]] && [[ -S "$sock_path" ]]; then
+    add_check "CORE" "Wayland Socket" "OK" "${wl_disp} (${sock_path})" "REQUIRED"
+else
+    add_check "CORE" "Wayland Socket" "FAILED" "WAYLAND_DISPLAY unset or socket missing" "REQUIRED"
+fi
+
+# xremap key remapper
+if systemctl --user is-active --quiet xremap.service 2>/dev/null; then
+    xremap_pid=$(systemctl --user show -p MainPID --value xremap.service 2>/dev/null)
+    add_check "CORE" "xremap (Keys)" "OK" "User service active (PID ${xremap_pid})" "REQUIRED"
+else
+    add_check "CORE" "xremap (Keys)" "FAILED" "User service inactive or dead" "REQUIRED"
+fi
+
+# ==============================================================================
+# 2. DISPLAY & GPU
+# ==============================================================================
+
+# GPU Mode via supergfxctl
+gpu_mode="Unknown"
+if command -v supergfxctl >/dev/null 2>&1; then
+    gpu_mode=$(supergfxctl -g 2>/dev/null || echo "Unknown")
+fi
+add_check "DISPLAY" "GPU Architecture" "OK" "${gpu_mode} (supergfxctl)" "REQUIRED"
+
+# NVIDIA Driver & State (if in AsusMuxDgpu or Hybrid)
+if [[ "$gpu_mode" == "AsusMuxDgpu" ]] || [[ "$gpu_mode" == "Hybrid" ]]; then
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        nv_info=$(nvidia-smi --query-gpu=name,driver_version,pstate,temperature.gpu,power.draw --format=csv,noheader,nounits 2>/dev/null | tr -d '\r')
+        if [[ -n "$nv_info" ]]; then
+            IFS=',' read -r nv_name nv_drv nv_pst nv_temp nv_pwr <<< "$nv_info"
+            nv_name=$(echo "$nv_name" | xargs)
+            nv_drv=$(echo "$nv_drv" | xargs)
+            nv_pst=$(echo "$nv_pst" | xargs)
+            nv_temp=$(echo "$nv_temp" | xargs)
+            nv_pwr=$(echo "$nv_pwr" | xargs)
+            add_check "DISPLAY" "NVIDIA GPU" "OK" "${nv_name} (Drv ${nv_drv}, ${nv_pst}, ${nv_temp}°C, ${nv_pwr}W)" "REQUIRED"
+        else
+            add_check "DISPLAY" "NVIDIA GPU" "DEGRADED" "nvidia-smi query failed (GPU suspended/unreachable)" "REQUIRED"
+        fi
+    else
+        add_check "DISPLAY" "NVIDIA GPU" "FAILED" "nvidia-smi binary missing" "REQUIRED"
+    fi
+else
+    add_check "DISPLAY" "NVIDIA GPU" "OK" "dGPU powered down (Integrated Mode)" "OPTIONAL"
+fi
+
+# Active Output (eDP-1)
+if command -v swaymsg >/dev/null 2>&1; then
+    output_info=$(swaymsg -t get_outputs 2>/dev/null | jq -r '.[] | select(.focused) | "\(.name)|\(.current_mode.width)x\(.current_mode.height)@\(.current_mode.refresh / 1000 | floor)Hz|tearing:\(.allow_tearing)|filter:\(.scale_filter)|vrr:\(.adaptive_sync_status)"' 2>/dev/null)
+    if [[ -n "$output_info" ]]; then
+        IFS='|' read -r out_name out_res out_tear out_filt out_vrr <<< "$output_info"
+        add_check "DISPLAY" "Active Output" "OK" "${out_name} ${out_res} · ${out_tear} · ${out_filt} · ${out_vrr}" "REQUIRED"
+    else
+        add_check "DISPLAY" "Active Output" "DEGRADED" "No focused output found via Sway IPC" "REQUIRED"
+    fi
+fi
+
+# Hardware Vibrance Backend
+if [[ "$gpu_mode" == "AsusMuxDgpu" ]]; then
+    if command -v nvibrant >/dev/null 2>&1; then
+        add_check "DISPLAY" "Hardware Vibrance" "OK" "nvibrant (NVKMS direct ioctl for MUX)" "OPTIONAL"
+    else
+        add_check "DISPLAY" "Hardware Vibrance" "DEGRADED" "nvibrant binary missing for AsusMuxDgpu" "OPTIONAL"
+    fi
+else
+    if command -v ctm-test >/dev/null 2>&1; then
+        add_check "DISPLAY" "Hardware Vibrance" "OK" "ctm-test (Intel CRTC CTM)" "OPTIONAL"
+    else
+        add_check "DISPLAY" "Hardware Vibrance" "DEGRADED" "ctm-test binary missing for Intel CTM" "OPTIONAL"
+    fi
+fi
+
+# ==============================================================================
+# 3. RESIDENT SERVICES
+# ==============================================================================
+
+# PipeWire
+if systemctl --user is-active --quiet pipewire.service 2>/dev/null; then
+    add_check "SERVICES" "PipeWire Audio" "OK" "User service active" "REQUIRED"
+else
+    add_check "SERVICES" "PipeWire Audio" "FAILED" "User service inactive" "REQUIRED"
+fi
+
+# WirePlumber
+if systemctl --user is-active --quiet wireplumber.service 2>/dev/null; then
+    add_check "SERVICES" "WirePlumber Session" "OK" "User service active" "REQUIRED"
+else
+    add_check "SERVICES" "WirePlumber Session" "FAILED" "User service inactive" "REQUIRED"
+fi
+
+# XDG Desktop Portals
+portal_main=$(systemctl --user is-active xdg-desktop-portal.service 2>/dev/null || echo "inactive")
+portal_wlr=$(systemctl --user is-active xdg-desktop-portal-wlr.service 2>/dev/null || echo "inactive")
+if [[ "$portal_main" == "active" ]] && [[ "$portal_wlr" == "active" ]]; then
+    add_check "SERVICES" "XDG Portals" "OK" "Portal + wlroots backend active" "REQUIRED"
+elif [[ "$portal_main" == "active" ]]; then
+    add_check "SERVICES" "XDG Portals" "DEGRADED" "Main active, wlroots backend: ${portal_wlr}" "REQUIRED"
+else
+    add_check "SERVICES" "XDG Portals" "FAILED" "Main portal service inactive" "REQUIRED"
+fi
+
+# Notifications (mako)
+if pgrep -x mako >/dev/null 2>&1; then
+    mako_pid=$(pgrep -x mako | head -n 1)
+    add_check "SERVICES" "Notifications" "OK" "mako daemon active (PID ${mako_pid})" "REQUIRED"
+else
+    add_check "SERVICES" "Notifications" "FAILED" "mako process not running" "REQUIRED"
+fi
+
+# Clipboard Pipeline (cliphist + wl-paste)
+if systemctl --user is-active --quiet cliphist.service 2>/dev/null; then
+    if pgrep -f "wl-paste --watch cliphist store" >/dev/null 2>&1; then
+        add_check "SERVICES" "Clipboard Pipeline" "OK" "cliphist.service active + wl-paste watcher attached" "REQUIRED"
+    else
+        add_check "SERVICES" "Clipboard Pipeline" "DEGRADED" "cliphist.service active but wl-paste watcher unattached" "REQUIRED"
+    fi
+else
+    add_check "SERVICES" "Clipboard Pipeline" "FAILED" "cliphist.service inactive" "REQUIRED"
+fi
+
+# ==============================================================================
+# 4. OPTIONAL DESKTOP LAYERS
+# ==============================================================================
+
+# Terminal
+if command -v alacritty >/dev/null 2>&1; then
+    alac_ver=$(alacritty --version 2>/dev/null | awk '{print $2}')
+    add_check "OPTIONAL" "Terminal" "OK" "Alacritty v${alac_ver}" "OPTIONAL"
+elif command -v kitty >/dev/null 2>&1; then
+    add_check "OPTIONAL" "Terminal" "OK" "Kitty (Fallback terminal)" "OPTIONAL"
+else
+    add_check "OPTIONAL" "Terminal" "DEGRADED" "Neither Alacritty nor Kitty found" "OPTIONAL"
+fi
+
+# File Manager
+if command -v thunar >/dev/null 2>&1; then
+    thunar_ver=$(thunar --version 2>/dev/null | head -n 1 | awk '{print $2}')
+    add_check "OPTIONAL" "File Manager" "OK" "Thunar v${thunar_ver}" "OPTIONAL"
+else
+    add_check "OPTIONAL" "File Manager" "MISSING" "Thunar not installed" "OPTIONAL"
+fi
+
+# Audio Visualizer
+if command -v cava >/dev/null 2>&1; then
+    add_check "OPTIONAL" "Audio Visualizer" "OK" "Cava installed" "OPTIONAL"
+else
+    add_check "OPTIONAL" "Audio Visualizer" "MISSING" "Cava not installed" "OPTIONAL"
+fi
+
+# Theme System
+if command -v theme-set >/dev/null 2>&1; then
+    add_check "OPTIONAL" "Theme Engine" "OK" "theme-set CLI available" "OPTIONAL"
+else
+    add_check "OPTIONAL" "Theme Engine" "MISSING" "theme-set CLI not found" "OPTIONAL"
+fi
+
+# Active Wallpaper
+wp_file="${HOME}/.config/current_wallpaper"
+if [[ -f "$wp_file" ]] && [[ -s "$wp_file" ]]; then
+    wp_path=$(cat "$wp_file")
+    if [[ -f "$wp_path" ]]; then
+        add_check "OPTIONAL" "Wallpaper" "OK" "$(basename "$wp_path")" "OPTIONAL"
+    else
+        add_check "OPTIONAL" "Wallpaper" "DEGRADED" "Config points to missing file (${wp_path})" "OPTIONAL"
+    fi
+else
+    add_check "OPTIONAL" "Wallpaper" "MISSING" "~/.config/current_wallpaper not set" "OPTIONAL"
+fi
+
+# ==============================================================================
+# 5. GAMING INFRASTRUCTURE
+# ==============================================================================
+
+# CS2 Launcher
+if command -v cs2-launch >/dev/null 2>&1; then
+    add_check "GAMING" "CS2 Launcher" "OK" "cs2-launch script present" "OPTIONAL"
+else
+    add_check "GAMING" "CS2 Launcher" "MISSING" "cs2-launch script missing" "OPTIONAL"
+fi
+
+# Legendary (Epic Games)
+if command -v legendary >/dev/null 2>&1; then
+    add_check "GAMING" "Epic Games Client" "OK" "Legendary CLI present" "OPTIONAL"
+else
+    add_check "GAMING" "Epic Games Client" "MISSING" "Legendary CLI missing" "OPTIONAL"
+fi
+
+# Proton Experimental
+proton_exp="${HOME}/.local/share/Steam/steamapps/common/Proton - Experimental"
+if [[ -d "$proton_exp" ]]; then
+    add_check "GAMING" "Proton Runtime" "OK" "Proton - Experimental installed" "OPTIONAL"
+else
+    add_check "GAMING" "Proton Runtime" "MISSING" "Proton - Experimental directory not found" "OPTIONAL"
+fi
+
+# Process Scheduler (ananicy-cpp vs gamemode check)
+ananicy_act=$(systemctl is-active ananicy-cpp 2>/dev/null || echo "inactive")
+gamemode_act=$(systemctl is-active gamemoded 2>/dev/null || echo "inactive")
+if [[ "$ananicy_act" == "active" ]] && [[ "$gamemode_act" == "active" ]]; then
+    add_check "GAMING" "Process Scheduler" "DEGRADED" "Both ananicy-cpp and gamemoded active (rule collision!)" "OPTIONAL"
+elif [[ "$ananicy_act" == "active" ]]; then
+    add_check "GAMING" "Process Scheduler" "OK" "ananicy-cpp active (gamemoded safely inactive)" "OPTIONAL"
+elif [[ "$gamemode_act" == "active" ]]; then
+    add_check "GAMING" "Process Scheduler" "OK" "gamemoded active (ananicy-cpp inactive)" "OPTIONAL"
+else
+    add_check "GAMING" "Process Scheduler" "DEGRADED" "Neither ananicy-cpp nor gamemoded active" "OPTIONAL"
+fi
+
+# MangoHud Protection
+mangohud_conf="${HOME}/.config/MangoHud/MangoHud.conf"
+if [[ -f "$mangohud_conf" ]]; then
+    if grep -q "pci_dev=0000:01:00.0" "$mangohud_conf" 2>/dev/null; then
+        add_check "GAMING" "MangoHud Config" "OK" "Protected chezmoi config (pci_dev=0000:01:00.0)" "OPTIONAL"
+    else
+        add_check "GAMING" "MangoHud Config" "DEGRADED" "Config missing required pci_dev=0000:01:00.0 entry" "OPTIONAL"
+    fi
+else
+    add_check "GAMING" "MangoHud Config" "MISSING" "~/.config/MangoHud/MangoHud.conf missing" "OPTIONAL"
+fi
+
+# ==============================================================================
+# 6. SYSTEM HEALTH & STORAGE
+# ==============================================================================
+
+# Failed System Units
+sys_failed=$(systemctl --failed --quiet --all --lines=0 2>/dev/null | grep -E 'loaded units listed' | awk '{print $1}' || echo "0")
+if [[ -z "$sys_failed" ]]; then
+    # Fallback parse
+    sys_failed=$(systemctl list-units --failed --no-legend 2>/dev/null | wc -l)
+fi
+if [[ "$sys_failed" -eq 0 ]]; then
+    add_check "HEALTH" "System Units" "OK" "0 failed system units" "REQUIRED"
+else
+    add_check "HEALTH" "System Units" "FAILED" "${sys_failed} failed system unit(s)" "REQUIRED"
+fi
+
+# Failed User Units
+usr_failed=$(systemctl --user --failed --quiet --all --lines=0 2>/dev/null | grep -E 'loaded units listed' | awk '{print $1}' || echo "0")
+if [[ -z "$usr_failed" ]]; then
+    usr_failed=$(systemctl --user list-units --failed --no-legend 2>/dev/null | wc -l)
+fi
+if [[ "$usr_failed" -eq 0 ]]; then
+    add_check "HEALTH" "User Units" "OK" "0 failed user units" "REQUIRED"
+else
+    add_check "HEALTH" "User Units" "FAILED" "${usr_failed} failed user unit(s)" "REQUIRED"
+fi
+
+# Btrfs Root Storage
+if command -v btrfs >/dev/null 2>&1; then
+    btrfs_free=$(btrfs filesystem df / 2>/dev/null | awk '/Data,/{print $1, $4, $5}')
+    df_free=$(df -h / 2>/dev/null | awk 'NR==2 {print $4 " free of " $2 " (" $5 " used)"}')
+    add_check "HEALTH" "Btrfs Root Storage" "OK" "${df_free}" "REQUIRED"
+else
+    add_check "HEALTH" "Btrfs Root Storage" "OK" "$(df -h / 2>/dev/null | awk 'NR==2 {print $4 " free"}')" "REQUIRED"
+fi
+
+# ==============================================================================
+# OUTPUT FORMATTING
+# ==============================================================================
+
+if [[ "$QUIET" -eq 1 ]]; then
+    if [[ "$REQUIRED_FAILURES" -eq 0 ]]; then
+        exit 0
+    else
+        exit 1
+    fi
+fi
+
+if [[ "$JSON_OUTPUT" -eq 1 ]]; then
+    # Construct JSON payload
+    jq -n \
+        --arg req_failures "$REQUIRED_FAILURES" \
+        --arg time "$(date -Iseconds)" \
+        '{"timestamp": $time, "required_failures": ($req_failures | tonumber), "checks": []}' >/tmp/sway_diag_$$.json
+
+    for i in "${!REPORT_CATEGORIES[@]}"; do
+        jq \
+            --arg cat "${REPORT_CATEGORIES[$i]}" \
+            --arg comp "${REPORT_COMPONENTS[$i]}" \
+            --arg stat "${REPORT_STATUSES[$i]}" \
+            --arg detail "${REPORT_DETAILS[$i]}" \
+            --arg type "${REPORT_TYPES[$i]}" \
+            '.checks += [{"category": $cat, "component": $comp, "status": $stat, "type": $type, "details": $detail}]' \
+            /tmp/sway_diag_$$.json > /tmp/sway_diag_$$.tmp && mv /tmp/sway_diag_$$.tmp /tmp/sway_diag_$$.json
+    done
+    cat /tmp/sway_diag_$$.json
+    rm -f /tmp/sway_diag_$$.json
+    exit 0
+fi
+
+# Table Format
+printf "${C_BOLD}%s${C_RESET}\n" "=========================================================================================="
+printf "${C_BOLD}  %-86s${C_RESET}\n" "SWAY ARCHITECTURAL & SYSTEM DIAGNOSTICS AUDITOR"
+printf "${C_BOLD}%s${C_RESET}\n" "=========================================================================================="
+printf "${C_GRAY}%-16s %-24s %-12s %-32s${C_RESET}\n" "CATEGORY" "COMPONENT" "STATUS" "DETAILS"
+printf "%s\n" "------------------------------------------------------------------------------------------"
+
+curr_cat=""
+for i in "${!REPORT_CATEGORIES[@]}"; do
+    cat="${REPORT_CATEGORIES[$i]}"
+    comp="${REPORT_COMPONENTS[$i]}"
+    stat="${REPORT_STATUSES[$i]}"
+    detail="${REPORT_DETAILS[$i]}"
+    req="${REPORT_TYPES[$i]}"
+
+    # Colorize status
+    case "$stat" in
+        OK)
+            stat_colored="${C_GREEN}OK${C_RESET}"
+            ;;
+        DEGRADED)
+            stat_colored="${C_YELLOW}DEGRADED${C_RESET}"
+            ;;
+        MISSING|INACTIVE)
+            stat_colored="${C_CYAN}${stat}${C_RESET}"
+            ;;
+        FAILED)
+            stat_colored="${C_RED}FAILED${C_RESET}"
+            ;;
+        *)
+            stat_colored="$stat"
+            ;;
+    esac
+
+    # Print Category header change
+    if [[ "$cat" != "$curr_cat" ]]; then
+        if [[ -n "$curr_cat" ]]; then
+            printf "${C_GRAY}%s${C_RESET}\n" "··························································································"
+        fi
+        curr_cat="$cat"
+        printf "${C_BOLD}[%-14s]${C_RESET} %-24s %-21b %-32s\n" "$cat" "$comp" "$stat_colored" "$detail"
+    else
+        printf "                 %-24s %-21b %-32s\n" "$comp" "$stat_colored" "$detail"
+    fi
+done
+
+printf "${C_BOLD}%s${C_RESET}\n" "=========================================================================================="
+if [[ "$REQUIRED_FAILURES" -eq 0 ]]; then
+    printf "${C_GREEN}${C_BOLD}  STATUS: HEALTHY · All required core infrastructure and services operational.${C_RESET}\n"
+else
+    printf "${C_RED}${C_BOLD}  STATUS: DEGRADED / UNHEALTHY · ${REQUIRED_FAILURES} required check(s) failed.${C_RESET}\n"
+fi
+printf "${C_BOLD}%s${C_RESET}\n" "=========================================================================================="
+
+exit "$(( REQUIRED_FAILURES > 0 ? 1 : 0 ))"

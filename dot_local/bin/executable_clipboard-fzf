@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# clipboard-fzf: Instant floating terminal clipboard picker via cliphist + fzf
+# Zero daemon overhead, native Wayland wl-copy, real-time multiline preview.
+# ==============================================================================
+# Check cliphist availability
+if ! command -v cliphist >/dev/null 2>&1; then
+    notify-send -a "Clipboard" -u critical "Error" "cliphist is not installed"
+    exit 1
+fi
+
+# Check if history is completely empty
+items=$(cliphist list 2>/dev/null)
+if [ -z "$items" ]; then
+    notify-send -a "Clipboard" -u low -i edit-paste "Clipboard Empty" "No items recorded in clipboard history yet"
+    exit 0
+fi
+
+selected=$(printf '%s\n' "$items" | fzf \
+    --prompt="📋 Clipboard > " \
+    --header="Enter: Copy | Esc: Cancel | Ctrl-D: Delete entry | Ctrl-X: Clear all" \
+    --layout=reverse \
+    --height=100% \
+    --border=none \
+    --info=inline \
+    --preview='echo {} | cliphist decode' \
+    --preview-window='down:55%:wrap' \
+    --bind='ctrl-d:execute-silent(echo {} | cliphist delete)+reload(cliphist list)' \
+    --bind='ctrl-x:execute-silent(~/.local/bin/clipboard-wipe)+reload(cliphist list)') || true
+
+if [ -n "$selected" ]; then
+    echo "$selected" | cliphist decode | wl-copy
+    notify-send -a "Clipboard" -u low -i edit-paste "Copied to Clipboard" "Ready to paste"
+fi

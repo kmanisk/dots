@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
-# Win+Shift+W: instantly rotate a cached MINECRAFT wallpaper. No downloads.
-# (Formerly a multi-genre fetcher — repurposed 2026-09-20 for Minecraft-only
-# setup. New downloads come from Alt+Shift+W / minecraft-wallpaper.)
+# Win+Shift+W: instantly rotate a cached wallpaper. No downloads.
+# Pool: Dark Souls 3 pack (ds3_*). Step through with Alt+Shift+W / ds3-wallpaper.
 set -u
 STORE="$HOME/.local/share/wallpapers"
 
-mapfile -t POOL < <(find "$STORE" -maxdepth 1 -type f -name "minecraft_*.jpg" 2>/dev/null)
-[[ ${#POOL[@]} -eq 0 ]] && { notify-send -t 2000 "Wallpaper" "No cached Minecraft wallpapers — press Alt+Shift+W first"; exit 1; }
+mapfile -t POOL < <(find "$STORE" -maxdepth 1 -type f -name "ds3_*" 2>/dev/null)
+[[ ${#POOL[@]} -eq 0 ]] && { notify-send -t 2000 "Wallpaper" "No cached wallpapers"; exit 1; }
 CHOSEN="${POOL[$RANDOM % ${#POOL[@]}]}"
 if [ -n "${SWAYSOCK:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
     swaymsg output "*" bg "$CHOSEN" fill 2>/dev/null
 fi
 echo "$CHOSEN" > "$HOME/.config/current_wallpaper"
-command -v notify-send >/dev/null && notify-send -i preferences-desktop-wallpaper -t 1500 "Wallpaper" "MinecraftWallpapers (cached)"
+command -v notify-send >/dev/null && notify-send -i preferences-desktop-wallpaper -t 1500 "Wallpaper" "Dark Souls 3 (cached)"
