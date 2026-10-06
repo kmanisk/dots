@@ -60,13 +60,23 @@
             "format": "{name} (6+4) @ {freq-max}"
         },
         {
-            "key": "│ {#34}󰉉 disk    {#keys}│",
+            "key": "│ {#35} memory  {#keys}│",
+            "type": "memory"
+        },
+        {
+            "key": "│ {#34}󰉉 linux   {#keys}│",
             "type": "disk",
             "folders": "/"
         },
         {
-            "key": "│ {#35} memory  {#keys}│",
-            "type": "memory"
+            "key": "│ {#32}󰉉 games   {#keys}│",
+            "type": "disk",
+            "folders": "/mnt/Games"
+        },
+        {
+            "key": "│ {#31}󰉉 windows {#keys}│",
+            "type": "disk",
+            "folders": "/mnt/windows"
         },
         {
             "key": "│ {#36}󰩟 network {#keys}│",
