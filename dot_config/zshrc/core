@@ -1,0 +1,231 @@
+#!/usr/bin/env zsh
+# =============================================================================
+# Dusky core() — CPU-affinity router for core_runner.py
+#
+# Target: Arch Linux (rolling, 2026+), zsh 5.9+, Python 3.14.6+
+# Install: source this file from ~/.zshrc  (it must be SOURCED, never executed)
+#          recommended location: ~/.config/zshrc/core
+#
+# Contract:
+#   core [flags...] [cores...] <command> [args...]
+#   core                          → runner TUI (foreground tty only)
+#   core -h | --help              → runner help; its exit status is honored
+#   core -- <command> [args...]   → escape hatch: next token is the command,
+#                                   even if it looks like a flag or CPU list
+#
+# Routing rules (left-to-right, stops at first command token or `--`):
+#   boolean flag   -h --help -s --status -i --interactive -d --detach
+#   valued flag    -t | --type {pcores|ecores|all}      (also --type=X)
+#                  -c | --custom <cpulist>              (also --custom=X)
+#   cpu spec       kernel cpulist grammar: N | N-N | N-N:S, comma-joined
+#                  e.g. 0-3   0,2,4-7   0-10:2
+#   otherwise      first unmatched token starts the command, forwarded verbatim
+#
+# Every affinity selector (bare specs and -c values alike) is UNIONED into
+# exactly one `-c <spec>`. Combining an explicit list with -t is a usage
+# error (exit 2). Unknown dash-tokens are rejected with exit 2 — use `--`
+# to launch commands that begin with '-'.
+#
+# Globbing: interactive zsh expands unquoted *, ?, [] BEFORE this function
+# receives argv (zshexpn). A function cannot undo that. The alias below
+# applies the `noglob` precommand modifier at the call site instead.
+#
+# The function body is err_return-safe: it declares `no_err_return`
+# locally so sourcing users running `setopt err_return` keep sane semantics.
+# =============================================================================
+
+unalias core 2>/dev/null || true
+
+core() {
+    emulate -L zsh
+    setopt localoptions no_err_return nounset
+
+    local runner=${CORE_RUNNER:-${CORE_RUNNER_PATH:-$HOME/user_scripts/performance/cpu/core_runner/core_runner.py}}
+
+    if ! command -v python3 >/dev/null 2>&1; then
+        print -u2 -r -- "core: python3 not found on PATH"
+        return 127
+    fi
+    if [[ ! -e $runner ]]; then
+        print -u2 -r -- "core: runner not found: $runner"
+        print -u2 -r -- "core: install core_runner.py or point CORE_RUNNER at it"
+        return 127
+    fi
+    if [[ ! -f $runner || ! -r $runner ]]; then
+        print -u2 -r -- "core: runner is not a readable regular file: $runner"
+        return 126
+    fi
+
+    if (( $# == 0 )); then
+        python3 -- $runner
+        return $?
+    fi
+
+    local -a flags specs cmd
+    local tok val
+    local flag_re='^--?(h|help|s|status|i|interactive|d|detach)$'
+    local type_re='^--?(t|type)$'
+    local custom_re='^--?(c|custom)$'
+    local spec_re='^[0-9]+(-[0-9]+(:[0-9]+)?)?(,[0-9]+(-[0-9]+(:[0-9]+)?)?)*$'
+    local lookalike_re='^[-0-9,:*]+$'
+    local -i type_seen=0
+    local type_val=""
+
+    while (( $# > 0 )); do
+        tok=$1
+
+        if [[ $tok == -- ]]; then
+            shift
+            cmd=("$@")
+            break
+        fi
+
+        if [[ $tok =~ $flag_re ]]; then
+            flags+=($tok)
+            shift
+            continue
+        fi
+
+        if [[ $tok =~ $type_re ]]; then
+            (( $# >= 2 )) || {
+                print -u2 -r -- "core: $tok requires pcores|ecores|all"
+                return 2
+            }
+            val=$2
+            case $val in
+                pcores|ecores|all) ;;
+                *)
+                    print -u2 -r -- "core: invalid --type '$val' (expected pcores|ecores|all)"
+                    return 2
+                    ;;
+            esac
+            if (( type_seen )) && [[ $val != $type_val ]]; then
+                print -u2 -r -- "core: conflicting --type values ('$type_val' vs '$val')"
+                return 2
+            fi
+            type_seen=1
+            type_val=$val
+            flags+=($tok $val)
+            shift 2
+            continue
+        fi
+
+        if [[ $tok == --type=* ]]; then
+            val=${tok#--type=}
+            case $val in
+                pcores|ecores|all) ;;
+                *)
+                    print -u2 -r -- "core: invalid --type '$val' (expected pcores|ecores|all)"
+                    return 2
+                    ;;
+            esac
+            if (( type_seen )) && [[ $val != $type_val ]]; then
+                print -u2 -r -- "core: conflicting --type values ('$type_val' vs '$val')"
+                return 2
+            fi
+            type_seen=1
+            type_val=$val
+            flags+=(--type $val)
+            shift
+            continue
+        fi
+
+        if [[ $tok =~ $custom_re ]]; then
+            (( $# >= 2 )) || {
+                print -u2 -r -- "core: $tok requires a CPU list (e.g. 0-3 or 0,2,4-7)"
+                return 2
+            }
+            val=$2
+            if [[ ! $val =~ $spec_re ]]; then
+                print -u2 -r -- "core: malformed CPU list '$val'"
+                return 2
+            fi
+            specs+=($val)
+            shift 2
+            continue
+        fi
+
+        if [[ $tok == --custom=* ]]; then
+            val=${tok#--custom=}
+            if [[ ! $val =~ $spec_re ]]; then
+                print -u2 -r -- "core: malformed CPU list '$val'"
+                return 2
+            fi
+            specs+=($val)
+            shift
+            continue
+        fi
+
+        if [[ $tok =~ $spec_re ]]; then
+            specs+=($tok)
+            shift
+            continue
+        fi
+
+        if [[ $tok == - ]]; then
+            cmd=("$@")
+            break
+        fi
+
+        if [[ $tok =~ $lookalike_re ]]; then
+            print -u2 -r -- "core: malformed CPU list '$tok' (examples: 0-3  0,2,4-7  0-10:2)"
+            return 2
+        fi
+
+        if [[ $tok == -* ]]; then
+            print -u2 -r -- "core: unknown option: $tok"
+            print -u2 -r -- "core: use 'core -- <command>' to run a command whose name starts with '-'"
+            return 2
+        fi
+
+        cmd=("$@")
+        break
+    done
+
+    if (( type_seen > 0 && ${#specs[@]} > 0 )); then
+        print -u2 -r -- "core: --type cannot be combined with an explicit CPU list"
+        return 2
+    fi
+
+    if (( ${#cmd[@]} == 0 )) && (( ${#flags[@]} == 0 )) && (( ${#specs[@]} == 0 )); then
+        print -u2 -r -- "core: nothing to do"
+        print -u2 -r -- "usage: core [flags...] [cores...] <command> [args...]"
+        print -u2 -r -- "       core -- <command> [args...]"
+        return 1
+    fi
+
+    if (( ${#specs[@]} > 0 )) && (( ${#cmd[@]} == 0 )); then
+        print -u2 -r -- "core: a CPU list requires a target command"
+        return 2
+    fi
+
+    local -a target
+    target=(python3 -- $runner)
+    (( ${#flags[@]} > 0 )) && target+=("${flags[@]}")
+
+    if (( ${#specs[@]} > 0 )); then
+        local merged
+        printf -v merged '%s,' "${specs[@]}"
+        target+=(-c "${merged%,}")
+    fi
+
+    # Explicit boundary: the runner strips exactly one leading `--`, making
+    # every remaining token opaque (numeric binaries, dash-prefixed args...).
+    if (( ${#cmd[@]} > 0 )); then
+        target+=(-- "${cmd[@]}")
+    fi
+
+    "${target[@]}"
+}
+
+# Filename generation happens at the call site before a function sees argv;
+# an alias is the only transparent way to suppress it.
+alias core='noglob core'
+
+# aria2c / Download Management
+alias a2="aria2c -x16 -s16 -k1M"
+alias a2c="aria2c --conf-path=$HOME/.config/aria2/aria2.conf"
+alias a2start="aria2-daemon start"
+alias a2stop="aria2-daemon stop"
+alias a2stat="aria2-daemon status"
+

@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# darksouls3-run: Dark Souls III Launcher with MangoHud, LSFG-VK (2x frame gen),
+# RTX 5050 Mobile dGPU offload, and automatic power & workspace orchestration.
+set -e
+
+# Steam AppID for Dark Souls III
+export SteamAppId="374320"
+export SteamGameId="374320"
+export STEAM_COMPAT_CLIENT_INSTALL_PATH="$HOME/.local/share/Steam"
+export STEAM_COMPAT_DATA_PATH="$HOME/.local/share/Steam/steamapps/compatdata/374320"
+mkdir -p "$STEAM_COMPAT_DATA_PATH"
+
+# Offload directly to RTX 5050 Mobile
+export __NV_PRIME_RENDER_OFFLOAD=1
+export __GLX_VENDOR_LIBRARY_NAME=nvidia
+export __VK_LAYER_NV_optimus=NVIDIA_only
+
+# DirectX 11 / DXVK optimizations for NVIDIA Blackwell
+export DXVK_ASYNC=1
+export DXVK_STATE_CACHE=1
+export PROTON_ENABLE_NVAPI=0
+
+# MangoHud overlay
+export MANGOHUD=1
+
+# LSFG-VK 2.0: Enable profile unless explicit DISABLE_LSFGVK is set
+if [ "${ENABLE_LSFG:-1}" = "1" ] && [ "${DISABLE_LSFGVK:-0}" != "1" ]; then
+    export LSFGVK_PROFILE="Dark Souls III"
+    unset DISABLE_LSFGVK
+else
+    export DISABLE_LSFGVK=1
+    unset LSFGVK_PROFILE
+fi
+
+# Focus Workspace 4 automatically (Sway or i3 IPC)
+if [ -n "$SWAYSOCK" ] || [ -n "$WAYLAND_DISPLAY" ]; then
+    swaymsg "workspace 4" >/dev/null 2>&1 || true
+else
+    i3-msg "workspace 4" >/dev/null 2>&1 || true
+fi
+
+# Auto power profile: Performance while playing on AC, Balanced on exit
+on_ac_power() {
+    for ps in /sys/class/power_supply/A*/online /sys/class/power_supply/ADP*/online; do
+        [[ -f "$ps" && $(cat "$ps" 2>/dev/null) == "1" ]] && return 0
+    done
+    return 1
+}
+
+set_governor() {
+    echo "$1" | sudo -n tee /sys/devices/system/cpu/cpufreq/policy*/scaling_governor >/dev/null 2>&1 || true
+}
+
+MAXFREQ_CAP=3800000
+ORIG_MAXFREQ=""
+cap_maxfreq() {
+    ORIG_MAXFREQ=$(cat /sys/devices/system/cpu/cpufreq/policy0/scaling_max_freq 2>/dev/null)
+    echo "$MAXFREQ_CAP" | sudo -n tee /sys/devices/system/cpu/cpufreq/policy*/scaling_max_freq >/dev/null 2>&1 || true
+}
+
+restore_power() {
+    [[ -n "$ORIG_MAXFREQ" ]] && echo "$ORIG_MAXFREQ" | sudo -n tee /sys/devices/system/cpu/cpufreq/policy*/scaling_max_freq >/dev/null 2>&1 || true
+    asusctl profile set Balanced >/dev/null 2>&1 || true
+    set_governor powersave
+}
+
+if on_ac_power; then
+    asusctl profile set Performance >/dev/null 2>&1 || true
+    set_governor performance
+    cap_maxfreq
+    trap restore_power EXIT INT TERM
+fi
+
+GAME_DIR="/mnt/Games/NonSteamGames/Dark Souls III"
+GAME_EXE="$GAME_DIR/DarkSoulsIII.exe"
+
+# Select Proton: Prefer GE-Proton or Proton-CachyOS or Proton Experimental
+if [ -f "$HOME/.local/share/Steam/compatibilitytools.d/proton-cachyos-slr/proton" ]; then
+    PROTON_BIN="$HOME/.local/share/Steam/compatibilitytools.d/proton-cachyos-slr/proton"
+elif [ -f "$HOME/.local/share/Steam/compatibilitytools.d/GE-Proton11-7-x86_64/proton" ]; then
+    PROTON_BIN="$HOME/.local/share/Steam/compatibilitytools.d/GE-Proton11-7-x86_64/proton"
+else
+    PROTON_BIN="$HOME/.local/share/Steam/steamapps/common/Proton - Experimental/proton"
+fi
+
+cd "$GAME_DIR"
+
+if [ -n "$SWAYSOCK" ] || [ -n "$WAYLAND_DISPLAY" ]; then
+    # Run nested under gamescope for 1920x1200 165Hz native session
+    gamescope -W 1920 -H 1200 -w 1920 -h 1200 -f -r 165 -- "$PROTON_BIN" run "$GAME_EXE" "$@"
+else
+    "$PROTON_BIN" run "$GAME_EXE" "$@"
+fi
+
+STATUS=$?
+exit "$STATUS"

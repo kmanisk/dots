@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=Dark Souls III
+GenericName=Action RPG
+Comment=Dark Souls III with MangoHud, LSFG-VK & RTX 5050 Mobile
+Exec=/home/manisk/.local/bin/darksouls3-run
+Icon=steam_icon_374320
+Terminal=false
+Categories=Game;
+StartupNotify=true
+Actions=NoLossless;
+
+[Desktop Action NoLossless]
+Name=Launch without Lossless Scaling
+Exec=env ENABLE_LSFG=0 /home/manisk/.local/bin/darksouls3-run

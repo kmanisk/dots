@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# aria2-daemon: Controls local user aria2 RPC server for browser integration
+CONF="$HOME/.config/aria2/aria2.conf"
+
+start() {
+    if pgrep -x aria2c >/dev/null; then
+        echo "aria2c is already running (PID: $(pgrep -x aria2c | tr '\n' ' '))"
+        return 0
+    fi
+    aria2c --conf-path="$CONF" --daemon=true
+    if pgrep -x aria2c >/dev/null; then
+        echo "aria2c RPC server started on 127.0.0.1:6800 (Downloads -> ~/Downloads)"
+    else
+        echo "Failed to start aria2c."
+        return 1
+    fi
+}
+
+stop() {
+    if pgrep -x aria2c >/dev/null; then
+        pkill -x aria2c
+        echo "aria2c stopped."
+    else
+        echo "aria2c is not running."
+    fi
+}
+
+status() {
+    if pgrep -x aria2c >/dev/null; then
+        echo "aria2c is running (PID: $(pgrep -x aria2c | tr '\n' ' ')) on port 6800"
+    else
+        echo "aria2c is not running."
+    fi
+}
+
+case "$1" in
+    start)  start ;;
+    stop)   stop ;;
+    restart) stop; sleep 1; start ;;
+    status) status ;;
+    *)
+        echo "Usage: aria2-daemon {start|stop|restart|status}"
+        exit 1
+        ;;
+esac

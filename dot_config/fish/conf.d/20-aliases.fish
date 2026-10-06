@@ -102,3 +102,11 @@ alias gms="gpu-mode status"
 alias gmd="gpu-mode switch dgpu"
 alias gmi="gpu-mode switch hybrid"
 alias gmr="gpu-mode reboot"
+
+# aria2c / Download Management
+alias a2="aria2c -x16 -s16 -k1M"
+alias a2c="aria2c --conf-path=$HOME/.config/aria2/aria2.conf"
+alias a2start="aria2-daemon start"
+alias a2stop="aria2-daemon stop"
+alias a2stat="aria2-daemon status"
+
