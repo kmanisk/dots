@@ -120,11 +120,10 @@ show_it() {
         swaymsg "[app_id=\"$instance\"] scratchpad show" >/dev/null 2>&1 || \
         swaymsg "[class=\"(?i)$instance\"] scratchpad show" >/dev/null 2>&1 || \
         swaymsg "[instance=\"$instance\"] scratchpad show" >/dev/null 2>&1
-        # for_window resize is unreliable at map time (Alacritty size hints
-        # win the race) — enforce geometry here, after the window is shown.
+        # Enforce border pixel 2 and geometry on show
         # shellcheck disable=SC2086
-        swaymsg "[app_id=\"$instance\"] resize set $geom, move position center" >/dev/null 2>&1 || \
-        swaymsg "[class=\"(?i)$instance\"] resize set $geom, move position center" >/dev/null 2>&1
+        swaymsg "[app_id=\"$instance\"] border pixel 2, resize set $geom, move position center" >/dev/null 2>&1 || \
+        swaymsg "[class=\"(?i)$instance\"] border pixel 2, resize set $geom, move position center" >/dev/null 2>&1
     else
         i3-msg "[instance=\"$instance\"] scratchpad show" >/dev/null 2>&1 || \
         i3-msg "[class=\"(?i)$instance\"] scratchpad show" >/dev/null 2>&1
