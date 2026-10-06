@@ -85,7 +85,7 @@ def find_window_workspace(tree, con_id):
         return None
     return search(tree, None)
 
-BROWSER_RE = re.compile(r"\b(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha)\b", re.I)
+BROWSER_RE = re.compile(r"\b(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha|qutebrowser)\b", re.I)
 VIDEO_RE = re.compile(r"\b(mpv|vlc)\b", re.I)
 PIP_RE = re.compile(r"picture[- ]in[- ]picture", re.I)
 GAME_RE = re.compile(r"steam_app_|gamescope|cs2|eldenring|dyinglight|farcry|gtaiv|hll|hellletloose|launcher\.exe|socialclubhelper\.exe|playgtaiv", re.I)
