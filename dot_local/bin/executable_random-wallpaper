@@ -1,14 +1,5 @@
 #!/usr/bin/env bash
-# Win+Shift+W: instantly rotate a cached wallpaper. No downloads.
-# Pool: Dark Souls 3 pack (ds3_*). Step through with Alt+Shift+W / ds3-wallpaper.
-set -u
-STORE="$HOME/.local/share/wallpapers"
-
-mapfile -t POOL < <(find "$STORE" -maxdepth 1 -type f -name "ds3_*" 2>/dev/null)
-[[ ${#POOL[@]} -eq 0 ]] && { notify-send -t 2000 "Wallpaper" "No cached wallpapers"; exit 1; }
-CHOSEN="${POOL[$RANDOM % ${#POOL[@]}]}"
-if [ -n "${SWAYSOCK:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
-    swaymsg output "*" bg "$CHOSEN" fill 2>/dev/null
-fi
-echo "$CHOSEN" > "$HOME/.config/current_wallpaper"
-command -v notify-send >/dev/null && notify-send -i preferences-desktop-wallpaper -t 1500 "Wallpaper" "Dark Souls 3 (cached)"
+# random-wallpaper: retired random-cache picker. Both wallpaper keys now step
+# sequentially through the DS3 pack via ds3-wallpaper (no repeats per cycle).
+# Kept as a passthrough so old callers (wallpaper-menu) keep working.
+exec ~/.local/bin/ds3-wallpaper "$@"

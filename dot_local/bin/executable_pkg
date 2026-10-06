@@ -8,9 +8,11 @@
 
 set -eo pipefail
 
-# Re-exec in floating Alacritty terminal if launched without a TTY (e.g. rofi/i3)
+# Re-exec in floating terminal if launched without a TTY (e.g. rofi/i3)
 if [[ ! -t 0 && ! -p /dev/stdin ]]; then
-  if command -v alacritty >/dev/null 2>&1; then
+  if command -v kitty >/dev/null 2>&1; then
+    exec kitty --class pkg-float -e "$0" "$@"
+  elif command -v alacritty >/dev/null 2>&1; then
     exec alacritty --class pkg-float,pkg-float -e "$0" "$@"
   fi
 fi

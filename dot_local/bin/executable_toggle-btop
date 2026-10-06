@@ -9,15 +9,19 @@ export PATH="$HOME/.local/bin:$PATH"
 IPC_CMD="i3-msg"
 [ -n "$SWAYSOCK" ] && IPC_CMD="swaymsg"
 
-if $IPC_CMD -t get_tree 2>/dev/null | grep -q '"class":"btop"'; then
+if $IPC_CMD -t get_tree 2>/dev/null | grep -E -q '"(class|app_id)":"btop"'; then
     # If focused, hide or close it; if not focused, focus it
-    FOCUSED_CLASS=$($IPC_CMD -t get_tree 2>/dev/null | jq -r '.. | objects | select(.focused? == true) | .window_properties.class // empty')
-    if [ "$FOCUSED_CLASS" = "btop" ]; then
-        $IPC_CMD '[class="^btop$"] kill' >/dev/null 2>&1
+    FOCUSED_ID=$($IPC_CMD -t get_tree 2>/dev/null | jq -r '.. | objects | select(.focused? == true) | (.app_id // .window_properties.class // empty)')
+    if [ "$FOCUSED_ID" = "btop" ]; then
+        $IPC_CMD '[app_id="(?i)^btop$"] kill, [class="(?i)^btop$"] kill' >/dev/null 2>&1
     else
-        $IPC_CMD '[class="^btop$"] focus' >/dev/null 2>&1
+        $IPC_CMD '[app_id="(?i)^btop$"] focus, [class="(?i)^btop$"] focus' >/dev/null 2>&1
     fi
 else
-    # Not running: spawn single instance in floating Alacritty
-    exec alacritty --class btop -e btop
+    # Not running: spawn single instance in floating Kitty (or fallback to Alacritty)
+    if command -v kitty >/dev/null 2>&1; then
+        exec kitty --class btop -e btop
+    else
+        exec alacritty --class btop -e btop
+    fi
 fi
