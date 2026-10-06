@@ -15,7 +15,7 @@ keymap:
   # --- General Universal Copy / Paste / Cut (All GUI Applications) ---
   - name: Universal Copy Paste
     application:
-      not: ["Alacritty", "scratch-term", "scratch-notes"]
+      not: ["Alacritty", "kitty", "scratch-term", "scratch-notes"]
     exact_match: true
     remap:
       Super-c: C-c # Win+C -> Ctrl+C (Universal Copy)
@@ -97,17 +97,19 @@ keymap:
       CapsLock-b: b
       CapsLock-c: c
       CapsLock-t: t
-      CapsLock-v: v
-      CapsLock-x: x
-      CapsLock-z: z
+      # Clipboard image viewer (clipboard image -> imv)
+      CapsLock-v:
+        launch: ["/home/manisk/.local/bin/clipboard-view"]
+      # NVIDIA vibrance down/up (±5%, themed OSD via nvibrant-ctl)
+      CapsLock-x:
+        launch: ["/home/manisk/.local/bin/nvibrant-ctl", "up"]
+      CapsLock-z:
+        launch: ["/home/manisk/.local/bin/nvibrant-ctl", "down"]
 
   # --- Katana Sub-legends on Right Alt (brightness) ---
-  # NOTE: `M-` means EITHER Alt, which is why Left Alt+Q/W was also
-  # firing brightness. RightAlt- restricts to Right Alt only.
-  - name: Katana sub-legends
-    remap:
-      RightAlt-q: BrightnessDown
-      RightAlt-w: BrightnessUp
+  # REMOVED 2026-10-02: RightAlt-q/w entries were dead — modmap converts
+  # RightAlt to RightMeta before keymap matching, so Sway eats them as
+  # Super+q (kill) / Super+w. Brightness lives on Caps+[ / Caps+'.
 
   # --- Misc ---
   - name: Misc

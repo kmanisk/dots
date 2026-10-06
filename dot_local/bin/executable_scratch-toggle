@@ -22,12 +22,12 @@ case "$mode" in
     # Order on show is always: resize set W H, then move position center.
     term)
         instance="scratch-term"
-        spawn="alacritty --class scratch-term 2>>/tmp/scratch-term-err.log"
+        spawn="kitty --class scratch-term 2>>/tmp/scratch-term-err.log"
         geom="1700 1050"
         ;;
     notes)
         instance="scratch-notes"
-        spawn="alacritty -o font.size=20.5 --class scratch-notes -e nvim $HOME/notes.md 2>>/tmp/scratch-notes-err.log"
+        spawn="kitty -o font_size=20.5 --class scratch-notes -e nvim $HOME/notes.md 2>>/tmp/scratch-notes-err.log"
         geom="1700 1050"
         ;;
     spotify)
