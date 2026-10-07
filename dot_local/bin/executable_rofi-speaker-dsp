@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# rofi-speaker-dsp — ASUS TUF F16 Speaker DSP Control Menu
+# Interactive Rofi interface for authenticated Windows DAX3 modes & Linux voicings
+# ==============================================================================
+set -euo pipefail
+export PATH="$HOME/.local/bin:$PATH"
+
+SPK_BIN="$HOME/.local/bin/spk"
+STATE_FILE="$HOME/.config/asus-speakers/state.conf"
+THEME="$HOME/.config/rofi/system-floating.rasi"
+
+if [[ ! -x "$SPK_BIN" ]]; then
+    echo "Error: spk utility not found or not executable at $SPK_BIN" >&2
+    exit 1
+fi
+
+# 1. Query Current DSP State (one-shot, zero daemons)
+ACTIVE_VOICING="dynamic"
+ENABLED="true"
+if [[ -f "$STATE_FILE" ]]; then
+    ACTIVE_VOICING=$(grep "^ACTIVE_VOICING=" "$STATE_FILE" 2>/dev/null | cut -d'=' -f2 || echo "dynamic")
+    ENABLED=$(grep "^ENABLED=" "$STATE_FILE" 2>/dev/null | cut -d'=' -f2 || echo "true")
+fi
+
+# 2. Query Physical Audio Route & External Device Status
+DEFAULT_SINK=$(pactl get-default-sink 2>/dev/null || echo "")
+SINK_DESC=$(pactl list sinks 2>/dev/null | grep -A 25 "Name: $DEFAULT_SINK" | grep -m 1 "Description:" | sed 's/^[ \t]*Description:[ \t]*//' || echo "$DEFAULT_SINK")
+
+NID=$(pw-dump Node 2>/dev/null | jq -r '.[] | select(.info.props["node.name"] == "effect_input.Dolby_Speaker") | .id' 2>/dev/null | head -n 1)
+META_DISABLED="false"
+if [[ -n "$NID" ]]; then
+    META_DISABLED=$(pw-metadata -n filters 2>/dev/null | grep -E "id:$NID key:'filter\.smart\.disabled'" | sed -n "s/.*value:'\([^']*\)'.*/\1/p" || echo "false")
+fi
+
+ROUTE_INFO=""
+if [[ "$DEFAULT_SINK" == "alsa_output.pci-0000_00_1f.3.analog-stereo" ]]; then
+    if [[ "$ENABLED" != "true" ]]; then
+        ROUTE_INFO="🔊 Output: Laptop Speakers (ALC256) • DSP Disabled (Bypassed)"
+    elif [[ "$META_DISABLED" == "true" ]]; then
+        ROUTE_INFO="🎧 Output: Wired 3.5mm Headphones • Speaker DSP auto-bypassed"
+    else
+        ROUTE_INFO="🔊 Output: Laptop Speakers (ALC256) • DSP Active ($ACTIVE_VOICING)"
+    fi
+elif [[ "$DEFAULT_SINK" == bluez_output* ]]; then
+    ROUTE_INFO="🎧 Output: ${SINK_DESC:-Bluetooth} • Speaker DSP auto-bypassed"
+elif [[ "$DEFAULT_SINK" == *hdmi* || "$DEFAULT_SINK" == *displayport* ]]; then
+    ROUTE_INFO="🖥️ Output: ${SINK_DESC:-HDMI/DP} • Speaker DSP auto-bypassed"
+elif [[ -n "$SINK_DESC" ]]; then
+    ROUTE_INFO="🔌 Output: $SINK_DESC • Speaker DSP auto-bypassed"
+else
+    ROUTE_INFO="Audio: $DEFAULT_SINK"
+fi
+
+# 3. Format Menu Options with Active Indicators
+mark_dyn="○"
+mark_mov="○"
+mark_mus="○"
+mark_gam="○"
+mark_voi="○"
+mark_cus="○"
+mark_bal="○"
+mark_det="○"
+mark_war="○"
+selected_row=0
+
+case "$ACTIVE_VOICING" in
+    dynamic)
+        mark_dyn="●"
+        selected_row=0
+        ;;
+    movie)
+        mark_mov="●"
+        selected_row=1
+        ;;
+    music)
+        mark_mus="●"
+        selected_row=2
+        ;;
+    game)
+        mark_gam="●"
+        selected_row=3
+        ;;
+    voice)
+        mark_voi="●"
+        selected_row=4
+        ;;
+    custom)
+        mark_cus="●"
+        selected_row=5
+        ;;
+    balanced)
+        mark_bal="●"
+        selected_row=6
+        ;;
+    detailed)
+        mark_det="●"
+        selected_row=7
+        ;;
+    warm)
+        mark_war="●"
+        selected_row=8
+        ;;
+esac
+
+on_indicator=" "
+off_indicator=" "
+if [[ "$ENABLED" == "true" ]]; then
+    on_indicator="✔"
+else
+    off_indicator="✔"
+fi
+
+options="${mark_dyn} Dynamic (DAX3 Default)
+${mark_mov} Movie (DAX3 Cinema)
+${mark_mus} Music (DAX3 Audiophile)
+${mark_gam} Game (DAX3 +6dB)
+${mark_voi} Voice (DAX3 Speech)
+${mark_cus} Custom 2 (Dolby Access)
+${mark_bal} Balanced (Linux)
+${mark_det} Detailed (Linux)
+${mark_war} Warm (Linux)
+${on_indicator} DSP On
+${off_indicator} DSP Off
+󰋼 Status
+󰓃 Cycle Output Device (Alt+Shift+O)"
+
+# 4. Launch Rofi (Synchronous, matching system-floating theme)
+chosen=$(echo -e "$options" | rofi \
+    -dmenu \
+    -i \
+    -p "ASUS Speaker DSP" \
+    -mesg "$ROUTE_INFO" \
+    -theme "$THEME" \
+    -selected-row "$selected_row")
+
+[[ -z "$chosen" ]] && exit 0
+
+# 5. Dispatch Action
+case "$chosen" in
+    *"Dynamic"*)
+        "$SPK_BIN" dynamic
+        ;;
+    *"Movie"*)
+        "$SPK_BIN" movie
+        ;;
+    *"Music"*)
+        "$SPK_BIN" music
+        ;;
+    *"Game"*)
+        "$SPK_BIN" game
+        ;;
+    *"Voice"*)
+        "$SPK_BIN" voice
+        ;;
+    *"Custom 2"*)
+        "$SPK_BIN" custom
+        ;;
+    *"Balanced"*)
+        "$SPK_BIN" balanced
+        ;;
+    *"Detailed"*)
+        "$SPK_BIN" detailed
+        ;;
+    *"Warm"*)
+        "$SPK_BIN" warm
+        ;;
+    *"DSP On"*)
+        "$SPK_BIN" on
+        ;;
+    *"DSP Off"*)
+        "$SPK_BIN" off
+        ;;
+    *"Status"*)
+        STATUS_REPORT=$("$SPK_BIN" status | sed -r 's/\x1B\[[0-9;]*[mK]//g')
+        notify-send -t 6000 -i audio-speakers "ASUS TUF Speaker DSP" "$STATUS_REPORT"
+        ;;
+    *"Cycle Output"*)
+        "$HOME/.local/bin/toggle-audio-sink"
+        ;;
+esac

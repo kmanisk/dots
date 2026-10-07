@@ -1,0 +1,279 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# spk — ASUS TUF F16 Speaker DSP Control Utility
+# Upstream DAX3-derived PipeWire DSP profile switcher & state manager
+# ==============================================================================
+set -euo pipefail
+
+CONF_BASE="$HOME/.config/pipewire/asus-tuf-dax"
+RUNTIME_CONF_DIR="$HOME/.config/pipewire/pipewire.conf.d"
+STATE_DIR="$HOME/.config/asus-speakers"
+STATE_FILE="$STATE_DIR/state.conf"
+
+mkdir -p "$STATE_DIR"
+if [[ ! -f "$STATE_FILE" ]]; then
+    echo "ACTIVE_VOICING=dynamic" > "$STATE_FILE"
+    echo "ENABLED=true" >> "$STATE_FILE"
+fi
+
+get_active_voicing() {
+    grep "^ACTIVE_VOICING=" "$STATE_FILE" 2>/dev/null | cut -d'=' -f2 || echo "dynamic"
+}
+
+is_user_enabled() {
+    local val
+    val=$(grep "^ENABLED=" "$STATE_FILE" 2>/dev/null | cut -d'=' -f2 || echo "true")
+    [[ "$val" == "true" ]]
+}
+
+check_hardware() {
+    local dmi_prod alc_match
+    dmi_prod=$(cat /sys/class/dmi/id/product_name 2>/dev/null || echo "")
+    alc_match=$(grep -i "10431084" /proc/asound/card*/codec#* 2>/dev/null || echo "")
+    if [[ ! "$dmi_prod" =~ FX608 ]] && [[ -z "$alc_match" ]]; then
+        echo -e "\033[1;33m[!] Warning: Non-ASUS TUF ALC256 hardware detected ($dmi_prod).\033[0m" >&2
+    fi
+}
+
+get_node_id() {
+    pw-dump Node 2>/dev/null | jq -r '.[] | select(.info.props["node.name"] == "effect_input.Dolby_Speaker") | .id' 2>/dev/null | head -n 1
+}
+
+apply_voicing() {
+    local voicing="$1"
+    local title=""
+    case "$voicing" in
+        dynamic|dyn)
+            voicing="dynamic"
+            title="Dynamic (DAX3)"
+            ;;
+        movie|m)
+            voicing="movie"
+            title="Movie (DAX3)"
+            ;;
+        music|mu)
+            voicing="music"
+            title="Music (DAX3)"
+            ;;
+        game|g)
+            voicing="game"
+            title="Game (DAX3)"
+            ;;
+        voice|v)
+            voicing="voice"
+            title="Voice (DAX3)"
+            ;;
+        custom|c)
+            voicing="custom"
+            title="Custom 2 (Windows)"
+            ;;
+        balanced|b)
+            voicing="balanced"
+            title="Balanced (Linux)"
+            ;;
+        detailed|d)
+            voicing="detailed"
+            title="Detailed (Linux)"
+            ;;
+        warm|w)
+            voicing="warm"
+            title="Warm (Linux)"
+            ;;
+        *)
+            echo "Error: Unknown profile '$voicing'." >&2
+            echo "Windows Modes: dynamic (dyn), movie (m), music (mu), game (g), voice (v), custom (c)" >&2
+            echo "Linux Voicings: balanced (b), detailed (d), warm (w)" >&2
+            exit 1
+            ;;
+    esac
+
+    local src_conf="$CONF_BASE/$voicing/Dolby_Speaker.conf"
+    local src_irs="$CONF_BASE/$voicing/Dolby_Speaker.irs"
+
+    if [[ ! -f "$src_conf" ]] || [[ ! -f "$src_irs" ]]; then
+        echo "Error: Profile assets missing in $CONF_BASE/$voicing/" >&2
+        exit 1
+    fi
+
+    # Deploy configuration and IRS
+    cp "$src_conf" "$RUNTIME_CONF_DIR/Dolby_Speaker.conf"
+    cp "$src_irs" "$RUNTIME_CONF_DIR/Dolby_Speaker.irs"
+
+    # Update state
+    sed -i '/^ACTIVE_VOICING=/d' "$STATE_FILE"
+    echo "ACTIVE_VOICING=$voicing" >> "$STATE_FILE"
+
+    # Restart PipeWire to reload DSP filter graph
+    systemctl --user restart pipewire
+    # Allow pipewire & wireplumber to sync
+    sleep 0.5
+
+    # Ensure filter state matches current enabled preference
+    local nid
+    nid=$(get_node_id)
+    if [[ -n "$nid" ]]; then
+        if is_user_enabled; then
+            pw-metadata -n filters "$nid" filter.smart.user_disabled false 2>/dev/null || true
+        else
+            pw-metadata -n filters "$nid" filter.smart.user_disabled true 2>/dev/null || true
+            pw-metadata -n filters "$nid" filter.smart.disabled true 2>/dev/null || true
+        fi
+    fi
+
+    echo -e "\033[1;32m[spk]\033[0m Switched to \033[1m$title\033[0m profile (transparent on internal speakers)."
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send -t 2000 -i audio-speakers "ASUS TUF Speaker DSP" "Profile: $title" 2>/dev/null || true
+    fi
+}
+
+dsp_off() {
+    local nid
+    nid=$(get_node_id)
+    if [[ -n "$nid" ]]; then
+        pw-metadata -n filters "$nid" filter.smart.user_disabled true 2>/dev/null || true
+        pw-metadata -n filters "$nid" filter.smart.disabled true 2>/dev/null || true
+    fi
+    sed -i '/^ENABLED=/d' "$STATE_FILE"
+    echo "ENABLED=false" >> "$STATE_FILE"
+
+    echo -e "\033[1;33m[spk]\033[0m Speaker DSP \033[1;31mDisabled\033[0m (bypassed to flat internal speakers)."
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send -t 2000 -i audio-volume-muted "ASUS TUF Speaker DSP" "Disabled (Bypassed)" 2>/dev/null || true
+    fi
+}
+
+dsp_on() {
+    local nid
+    nid=$(get_node_id)
+    if [[ -n "$nid" ]]; then
+        pw-metadata -n filters "$nid" filter.smart.user_disabled false 2>/dev/null || true
+    fi
+    sed -i '/^ENABLED=/d' "$STATE_FILE"
+    echo "ENABLED=true" >> "$STATE_FILE"
+
+    echo -e "\033[1;32m[spk]\033[0m Speaker DSP \033[1;32mEnabled\033[0m (transparent upstream DAX3 active)."
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send -t 2000 -i audio-speakers "ASUS TUF Speaker DSP" "Enabled" 2>/dev/null || true
+    fi
+}
+
+dsp_status() {
+    check_hardware
+    local active_v enabled_str
+    active_v=$(get_active_voicing)
+    if is_user_enabled; then
+        enabled_str="\033[1;32mEnabled (Active on internal speakers)\033[0m"
+    else
+        enabled_str="\033[1;31mDisabled (Bypassed)\033[0m"
+    fi
+
+    local nid
+    nid=$(get_node_id)
+    local meta_disabled="unknown"
+    local meta_user_disabled="unknown"
+    if [[ -n "$nid" ]]; then
+        meta_disabled=$(pw-metadata -n filters 2>/dev/null | grep -E "id:$nid key:'filter\.smart\.disabled'" | sed -n "s/.*value:'\([^']*\)'.*/\1/p" || echo "false")
+        meta_user_disabled=$(pw-metadata -n filters 2>/dev/null | grep -E "id:$nid key:'filter\.smart\.user_disabled'" | sed -n "s/.*value:'\([^']*\)'.*/\1/p" || echo "false")
+    fi
+
+    local current_sink
+    current_sink=$(pactl get-default-sink 2>/dev/null || echo "unknown")
+    local dmi_prod
+    dmi_prod=$(cat /sys/class/dmi/id/product_name 2>/dev/null || echo "Unknown")
+
+    echo "========================================================"
+    echo "       ASUS TUF F16 Upstream DAX3 Speaker DSP           "
+    echo "========================================================"
+    echo -e " Hardware:        $dmi_prod (ALC256 / 1043:1084)"
+    echo -e " State:           $enabled_str"
+    echo -e " Active Profile:  \033[1m$active_v\033[0m"
+    echo -e " Smart Node ID:   ${nid:-not found}"
+    echo -e " Filter Bypass:   filter.smart.disabled=${meta_disabled:-false}"
+    echo -e " User Disabled:   filter.smart.user_disabled=${meta_user_disabled:-false}"
+    echo -e " Physical Sink:   $current_sink"
+    echo -e " Gaming Audio:    sink.peace_gaming (Protected & Isolated)"
+    echo "--------------------------------------------------------"
+    echo " Active streams through DSP:"
+    pw-link -l 2>/dev/null | grep -E "ASUS TUF Speaker DSP|effect_input\.Dolby" || echo "  (None active)"
+    echo "========================================================"
+}
+
+show_help() {
+    local active_v
+    active_v=$(get_active_voicing)
+    echo "Usage: spk [command]"
+    echo ""
+    echo "Windows DAX3 Authentic Modes:"
+    echo "  dynamic, dyn   Switch to Dynamic mode (Windows DAX3 default, Leveler + Spatial)"
+    echo "  movie, m       Switch to Movie mode (DAX3 Cinema curve, warm bass, soft treble)"
+    echo "  music, mu      Switch to Music mode (DAX3 Audiophile, uncompressed dynamics)"
+    echo "  game, g        Switch to Game mode (DAX3 Gaming, +6dB loudness boost, Leveler)"
+    echo "  voice, v       Switch to Voice mode (DAX3 Speech, -15dB low-cut, +3dB dialog)"
+    echo "  custom, c      Switch to Custom 2 mode (Dolby Access user preset, +11.6dB presence)"
+    echo ""
+    echo "Linux Reference Voicings:"
+    echo "  balanced, b    Switch to Balanced voicing (reference DAX3 baseline)"
+    echo "  detailed, d    Switch to Detailed voicing (enhanced presence/clarity)"
+    echo "  warm, w        Switch to Warm voicing (rich low-end contour)"
+    echo ""
+    echo "Controls:"
+    echo "  status         Display detailed DSP telemetry, routing & filter state"
+    echo "  off            Bypass DSP immediately (zero interruption, flat sound)"
+    echo "  on             Re-enable DSP on internal speakers"
+    echo "  help, -h       Show this message"
+    echo ""
+    echo "Current Profile: $active_v"
+}
+
+# Subcommand dispatch
+case "${1:-}" in
+    dynamic|dyn)
+        apply_voicing "dynamic"
+        ;;
+    movie|m)
+        apply_voicing "movie"
+        ;;
+    music|mu)
+        apply_voicing "music"
+        ;;
+    game|g)
+        apply_voicing "game"
+        ;;
+    voice|v)
+        apply_voicing "voice"
+        ;;
+    custom|c)
+        apply_voicing "custom"
+        ;;
+    balanced|b)
+        apply_voicing "balanced"
+        ;;
+    detailed|d)
+        apply_voicing "detailed"
+        ;;
+    warm|w)
+        apply_voicing "warm"
+        ;;
+    off)
+        dsp_off
+        ;;
+    on)
+        dsp_on
+        ;;
+    status)
+        dsp_status
+        ;;
+    help|-h|--help)
+        show_help
+        ;;
+    "")
+        show_help
+        echo ""
+        dsp_status
+        ;;
+    *)
+        echo "Error: Unknown command '$1'"
+        show_help
+        exit 1
+        ;;
+esac

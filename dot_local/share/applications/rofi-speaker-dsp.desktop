@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=ASUS Speaker DSP
+Comment=ASUS TUF F16 Speaker DSP Voicing & Bypass Control
+Exec=rofi-speaker-dsp
+Icon=audio-speakers
+Terminal=false
+Type=Application
+Categories=AudioVideo;Audio;Settings;
+Keywords=audio;speaker;dsp;dolby;dax;equalizer;asus;tuf;

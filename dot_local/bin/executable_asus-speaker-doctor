@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# asus-speaker-doctor — Health & Diagnostic Verification Utility
+# Checks hardware compatibility, PipeWire/WirePlumber status, DSP assets,
+# smart filter routing, and strict Gaming Audio / Dusky isolation.
+# ==============================================================================
+set -euo pipefail
+
+PASS=0
+WARN=0
+FAIL=0
+
+header() {
+    echo -e "\n\033[1;34m:: $1\033[0m"
+}
+
+check_pass() {
+    echo -e "  \033[1;32m[✓ PASS]\033[0m $1"
+    PASS=$((PASS + 1))
+}
+
+check_warn() {
+    echo -e "  \033[1;33m[! WARN]\033[0m $1"
+    WARN=$((WARN + 1))
+}
+
+check_fail() {
+    echo -e "  \033[1;31m[✗ FAIL]\033[0m $1"
+    FAIL=$((FAIL + 1))
+}
+
+echo "========================================================"
+echo "    ASUS TUF F16 Speaker DSP & Audio Stack Doctor       "
+echo "========================================================"
+
+# 1. Hardware Verification
+header "1. Hardware & Audio Codec"
+DMI_PROD=$(cat /sys/class/dmi/id/product_name 2>/dev/null || echo "Unknown")
+DMI_VEND=$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null || echo "Unknown")
+ALC_CODEC=$(grep -i "Codec: Realtek ALC256" /proc/asound/card*/codec#* 2>/dev/null || true)
+ALC_SUBSYS=$(grep -i "Subsystem Id: 0x10431084" /proc/asound/card*/codec#* 2>/dev/null || true)
+
+if [[ "$DMI_VEND" =~ ASUSTeK ]] && [[ "$DMI_PROD" =~ FX608 ]]; then
+    check_pass "DMI Platform: $DMI_PROD ($DMI_VEND)"
+else
+    check_warn "DMI Platform: $DMI_PROD (Expected ASUS TUF Gaming F16 FX608)"
+fi
+
+if [[ -n "$ALC_CODEC" ]] && [[ -n "$ALC_SUBSYS" ]]; then
+    check_pass "Hardware Audio Codec: Realtek ALC256 (Subsystem 1043:1084)"
+else
+    check_fail "Realtek ALC256 (1043:1084) not detected in /proc/asound"
+fi
+
+# 2. Services & Daemons
+header "2. System Services"
+if systemctl --user is-active --quiet pipewire; then
+    PW_VER=$(pipewire --version | head -n 1)
+    check_pass "PipeWire service is active ($PW_VER)"
+else
+    check_fail "PipeWire user service is NOT active"
+fi
+
+if systemctl --user is-active --quiet wireplumber; then
+    WP_VER=$(wireplumber --version | head -n 1)
+    check_pass "WirePlumber service is active ($WP_VER)"
+else
+    check_fail "WirePlumber user service is NOT active"
+fi
+
+# 3. LV2 Plugins & Dependencies
+header "3. DSP Plugins & Convolver"
+export LV2_PATH="${LV2_PATH:-/usr/lib/lv2:/usr/local/lib/lv2:$HOME/.lv2}"
+if lv2ls 2>/dev/null | grep "http://lsp-plug.in/plugins/lv2/para_equalizer_x16_lr" >/dev/null; then
+    check_pass "LSP Parametric Equalizer x16 LV2 plugin present"
+else
+    check_fail "LSP LV2 equalizer missing (install lsp-plugins-lv2)"
+fi
+
+if lv2ls 2>/dev/null | grep "http://lsp-plug.in/plugins/lv2/limiter_stereo" >/dev/null; then
+    check_pass "LSP Limiter Stereo LV2 plugin present"
+else
+    check_fail "LSP LV2 limiter missing (install lsp-plugins-lv2)"
+fi
+
+if lv2ls 2>/dev/null | grep "http://lsp-plug.in/plugins/lv2/autogain_stereo" >/dev/null; then
+    check_pass "LSP Autogain Stereo LV2 plugin present"
+else
+    check_fail "LSP LV2 autogain missing (install lsp-plugins-lv2)"
+fi
+
+if lv2ls 2>/dev/null | grep "http://calf.sourceforge.net/plugins/StereoTools" >/dev/null; then
+    check_pass "Calf StereoTools LV2 plugin present"
+else
+    check_fail "Calf StereoTools missing (install calf)"
+fi
+
+# 4. Profile & FIR Asset Integrity
+header "4. Speaker DSP Profiles & FIR Assets"
+for v in dynamic movie music game voice custom balanced detailed warm; do
+    CONF="$HOME/.config/pipewire/asus-tuf-dax/$v/Dolby_Speaker.conf"
+    IRS="$HOME/.config/pipewire/asus-tuf-dax/$v/Dolby_Speaker.irs"
+    if [[ -f "$CONF" ]] && [[ -f "$IRS" ]] && [[ -s "$IRS" ]]; then
+        IRS_SIZE=$(stat -c%s "$IRS")
+        check_pass "DSP Profile '$v': conf & irs intact ($IRS_SIZE bytes)"
+    else
+        check_fail "DSP Profile '$v': files missing or empty in asus-tuf-dax/$v"
+    fi
+done
+
+ACTIVE_CONF="$HOME/.config/pipewire/pipewire.conf.d/Dolby_Speaker.conf"
+ACTIVE_IRS="$HOME/.config/pipewire/pipewire.conf.d/Dolby_Speaker.irs"
+if [[ -f "$ACTIVE_CONF" ]] && [[ -f "$ACTIVE_IRS" ]]; then
+    check_pass "Active runtime profile deployed in pipewire.conf.d/"
+else
+    check_fail "Active runtime profile missing in ~/.config/pipewire/pipewire.conf.d/"
+fi
+
+# 5. WirePlumber Smart Filter Routing
+header "5. WirePlumber Transparent Smart Routing"
+ROUTE_CONF="$HOME/.config/wireplumber/wireplumber.conf.d/40-dax-speaker-route.conf"
+ROUTE_LUA="$HOME/.local/share/wireplumber/scripts/dax-speaker-route.lua"
+if [[ -f "$ROUTE_CONF" ]] && [[ -f "$ROUTE_LUA" ]]; then
+    check_pass "Speaker route monitor config & Lua script installed"
+else
+    check_fail "WirePlumber route monitor scripts missing"
+fi
+
+SPK_NODE_ID=$(pw-dump Node 2>/dev/null | jq -r '.[] | select(.info.props["node.name"] == "effect_input.Dolby_Speaker") | .id' 2>/dev/null | head -n 1)
+if [[ -n "$SPK_NODE_ID" && "$SPK_NODE_ID" != "null" ]]; then
+    check_pass "Smart filter node active in PipeWire graph (Node ID: $SPK_NODE_ID)"
+else
+    check_fail "effect_input.Dolby_Speaker node NOT found in PipeWire graph"
+fi
+
+# 6. Invariant Verification: Gaming Audio & Dusky Mic
+header "6. Isolated Gaming Audio & Mic Invariants"
+if pw-dump Node 2>/dev/null | jq -r '.[] | select(.info.props["node.name"] == "sink.peace_gaming") | .id' 2>/dev/null | grep -q '^[0-9]\+'; then
+    check_pass "sink.peace_gaming active and isolated"
+else
+    check_fail "sink.peace_gaming missing or not loaded"
+fi
+
+if [[ -f "$HOME/.config/pipewire/pipewire.conf.d/30-peace-gaming.conf" ]]; then
+    check_pass "30-peace-gaming.conf intact"
+else
+    check_fail "30-peace-gaming.conf missing"
+fi
+
+if [[ -f "$HOME/.local/share/wireplumber/scripts/gaming-audio-route.lua" ]]; then
+    check_pass "gaming-audio-route.lua intact"
+else
+    check_fail "gaming-audio-route.lua missing"
+fi
+
+# 7. Summary
+echo "========================================================"
+echo -e " Results: \033[1;32m$PASS Passed\033[0m, \033[1;33m$WARN Warnings\033[0m, \033[1;31m$FAIL Failed\033[0m"
+if [[ $FAIL -eq 0 ]]; then
+    echo -e " \033[1;32mSystem Health: ALL SYSTEMS OPERATIONAL\033[0m"
+    exit 0
+else
+    echo -e " \033[1;31mSystem Health: ACTION REQUIRED\033[0m"
+    exit 1
+fi
