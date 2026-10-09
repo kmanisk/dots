@@ -1,0 +1,125 @@
+diff --git a/user_scripts/audio/dusky_audio_studio/audio-helper/main.c b/user_scripts/audio/dusky_audio_studio/audio-helper/main.c
+index f27e0d2..5027162 100644
+--- a/user_scripts/audio/dusky_audio_studio/audio-helper/main.c
++++ b/user_scripts/audio/dusky_audio_studio/audio-helper/main.c
+@@ -74,7 +74,7 @@ static struct
+     _Atomic int vocoder_shift_semis; /* -24..+24 transpose applied when follow=1 */
+ 
+     /* Master output gain applied at the virtual source stream (NOT the
+-     * monitor) so apps recording from "Dusky Mic" hear it
++     * monitor) so apps recording from "Dusky Voice FX" hear it
+      * at the user-chosen level. Per-mille: 0=mute, 1000=unity, 2000=+6 dB.
+      * Boosts above unity may exceed digital full scale. */
+     _Atomic int master_vol_mille;
+@@ -2426,7 +2426,7 @@ static int create_capture_stream(struct app *app, const char *target)
+         PW_KEY_MEDIA_TYPE, "Audio",
+         PW_KEY_MEDIA_CATEGORY, "Capture",
+         PW_KEY_MEDIA_ROLE, "Communication",
+-        PW_KEY_NODE_NAME, "ghelper-audio-capture",
++        PW_KEY_NODE_NAME, "ghelper-fx-capture",
+         PW_KEY_NODE_DESCRIPTION, "G-Helper Audio capture",
+         PW_KEY_NODE_AUTOCONNECT, "true",
+         PW_KEY_NODE_DONT_RECONNECT, has_target ? "true" : "false",
+@@ -2437,7 +2437,7 @@ static int create_capture_stream(struct app *app, const char *target)
+ 
+     app->in_stream = pw_stream_new_simple(
+         pw_main_loop_get_loop(app->loop),
+-        "ghelper-audio-capture",
++        "ghelper-fx-capture",
+         props,
+         &in_stream_events,
+         &g_in_ctx);
+@@ -2499,11 +2499,11 @@ static int create_monitor_stream(struct app *app, const char *target)
+         PW_KEY_MEDIA_TYPE, "Audio",
+         PW_KEY_MEDIA_CATEGORY, "Playback",
+         PW_KEY_MEDIA_ROLE, "Communication",
+-        PW_KEY_NODE_NAME, "ghelper-audio-monitor",
++        PW_KEY_NODE_NAME, "ghelper-fx-monitor",
+         PW_KEY_NODE_DESCRIPTION, "Dusky Audio monitor",
+         PW_KEY_NODE_AUTOCONNECT, "true",
+         PW_KEY_NODE_DONT_RECONNECT, has_target ? "true" : "false",
+-        "node.link-group", "ghelper-sink-group",
++        "node.link-group", "ghelper-fx-group",
+         NULL);
+ 
+     if (has_target)
+@@ -2511,7 +2511,7 @@ static int create_monitor_stream(struct app *app, const char *target)
+ 
+     app->mon_stream = pw_stream_new_simple(
+         pw_main_loop_get_loop(app->loop),
+-        "ghelper-audio-monitor",
++        "ghelper-fx-monitor",
+         props,
+         &mon_stream_events,
+         &g_mon_ctx);
+@@ -2588,13 +2588,13 @@ static int create_sink_out_stream(struct app *app, const char *target)
+         PW_KEY_MEDIA_TYPE, "Audio",
+         PW_KEY_MEDIA_CATEGORY, "Playback",
+         PW_KEY_MEDIA_ROLE, "Communication",
+-        PW_KEY_NODE_NAME, "ghelper-audio-sink-out",
++        PW_KEY_NODE_NAME, "ghelper-fx-sink-out",
+         PW_KEY_NODE_DESCRIPTION, "Dusky Audio playback",
+         PW_KEY_NODE_AUTOCONNECT, "true",
+         PW_KEY_NODE_DONT_RECONNECT, has_target ? "true" : "false",
+         /* Must share link-group with sink_in so WirePlumber routes
+          * to real hardware, not back into our own virtual sink. */
+-        "node.link-group", "ghelper-sink-group",
++        "node.link-group", "ghelper-fx-group",
+         NULL);
+ 
+     if (has_target)
+@@ -2602,7 +2602,7 @@ static int create_sink_out_stream(struct app *app, const char *target)
+ 
+     app->sink_out_stream = pw_stream_new_simple(
+         pw_main_loop_get_loop(app->loop),
+-        "ghelper-audio-sink-out",
++        "ghelper-fx-sink-out",
+         props,
+         &sink_out_stream_events,
+         &g_sink_out_ctx);
+@@ -3406,9 +3406,9 @@ int main(int argc, char *argv[])
+         PW_KEY_MEDIA_TYPE, "Audio",
+         PW_KEY_MEDIA_CATEGORY, "Playback",
+         PW_KEY_MEDIA_ROLE, "Communication",
+-        PW_KEY_NODE_NAME, "ghelper-audio",
+-        PW_KEY_NODE_NICK, "Dusky Mic",
+-        PW_KEY_NODE_DESCRIPTION, "Dusky Mic",
++        PW_KEY_NODE_NAME, "ghelper-fx",
++        PW_KEY_NODE_NICK, "Dusky Voice FX",
++        PW_KEY_NODE_DESCRIPTION, "Dusky Voice FX",
+         PW_KEY_MEDIA_CLASS, "Audio/Source",
+         PW_KEY_NODE_VIRTUAL, "true",
+         "audio.channels", "1",
+@@ -3418,7 +3418,7 @@ int main(int argc, char *argv[])
+ 
+     app->out_stream = pw_stream_new_simple(
+         pw_main_loop_get_loop(app->loop),
+-        "ghelper-audio",
++        "ghelper-fx",
+         out_props,
+         &out_stream_events,
+         &g_out_ctx);
+@@ -3467,7 +3467,7 @@ int main(int argc, char *argv[])
+         PW_KEY_MEDIA_TYPE, "Audio",
+         PW_KEY_MEDIA_CATEGORY, "Capture",
+         PW_KEY_MEDIA_ROLE, "Communication",
+-        PW_KEY_NODE_NAME, "ghelper-audio-sink",
++        PW_KEY_NODE_NAME, "ghelper-fx-sink",
+         PW_KEY_NODE_NICK, "Dusky Audio",
+         PW_KEY_NODE_DESCRIPTION, "Dusky Audio",
+         PW_KEY_MEDIA_CLASS, "Audio/Sink",
+@@ -3479,12 +3479,12 @@ int main(int argc, char *argv[])
+          * partner (sink_out_stream) form a pair: WP must not route the
+          * playback stream back into this sink (feedback loop). This is
+          * the standard PipeWire pattern for virtual sink + loopback. */
+-        "node.link-group", "ghelper-sink-group",
++        "node.link-group", "ghelper-fx-group",
+         NULL);
+ 
+     app->sink_in_stream = pw_stream_new_simple(
+         pw_main_loop_get_loop(app->loop),
+-        "ghelper-audio-sink",
++        "ghelper-fx-sink",
+         sink_in_props,
+         &sink_in_stream_events,
+         &g_sink_in_ctx);

@@ -1,0 +1,25 @@
+#!/usr/bin/env python3
+"""One-shot mouse wheel emitter (used by xremap launch actions).
+
+xremap cannot emit REL_WHEEL natively (upstream XUPSCROLL/XDOWNSCROLL
+are match-only), so Alt+Ctrl+j/k delegate here. One-shot by design:
+no daemon, no polling. Holding the combo repeats via key repeat.
+
+Usage: xscroll [up|down] [ticks]
+"""
+import sys
+import time
+
+from evdev import UInput
+from evdev import ecodes as e
+
+direction = sys.argv[1].lower() if len(sys.argv) > 1 else "up"
+ticks = int(sys.argv[2]) if len(sys.argv) > 2 else 2
+value = 1 if direction.startswith("up") else -1
+
+with UInput({e.EV_REL: [e.REL_WHEEL]}, name="xscroll", version=0x1) as ui:
+    time.sleep(0.1)  # let the compositor attach to the transient device
+    for _ in range(ticks):
+        ui.write(e.EV_REL, e.REL_WHEEL, value)
+        ui.syn()
+    time.sleep(0.05)

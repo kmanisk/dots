@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# sysmem: Audit true system baseline memory footprint (idle with nothing open).
+# Excludes visible interactive user apps (browsers, editors, games, agent processes).
+# Accurately includes:
+#   - Linux Kernel & Drivers (Slab, KMS)
+#   - Root System Daemons
+#   - Sway Compositor & Xwayland
+#   - All User Background Services (PipeWire, xremap, etc.)
+#   - Hidden Scratchpad Windows (Kitty terminal, Neovim scratchpad & subprocesses)
+# ==============================================================================
+set -euo pipefail
+
+format_gb() {
+    local kb=$1
+    awk -v k="$kb" 'BEGIN { printf "%.2f GB\n", k / 1024 / 1024 }'
+}
+
+# 1. Total Physical RAM from /proc/meminfo
+total_kb=$(awk '/MemTotal:/ {print $2}' /proc/meminfo)
+
+# 2. Kernel & Hardware Driver structures (Slab, PageTables, KernelStack)
+kernel_kb=$(awk '/^(Slab|PageTables|KernelStack):/ {sum += $2} END {print sum}' /proc/meminfo)
+
+# 3. System-level Root Daemons (systemd, dbus, udev, network, etc.)
+root_daemons_kb=$(ps -u root -o rss= | awk '{sum += $1} END {print sum}')
+
+# 4. Sway Compositor + Xwayland
+sway_rss=0
+xwayland_rss=0
+while read -r rss comm; do
+    case "$comm" in
+        sway) sway_rss=$(( sway_rss + rss )) ;;
+        Xwayland) xwayland_rss=$(( xwayland_rss + rss )) ;;
+    esac
+done < <(ps -u "$UID" -o rss=,comm= | grep -E "\b(sway|Xwayland)\b" || true)
+
+compositor_kb=$(( sway_rss + xwayland_rss ))
+
+# 5. Hidden Scratchpad Memory (Kitty scratch-term, scratch-notes, embedded Nvim)
+scratchpad_kb=$(python3 -c '
+import json, subprocess, sys
+try:
+    tree = json.loads(subprocess.check_output(["swaymsg", "-t", "get_tree"], stderr=subprocess.DEVNULL))
+except Exception:
+    sys.exit(0)
+
+scratch_pids = set()
+def find_pids(n, in_scratch=False):
+    name = n.get("name") or ""
+    if name in ("__i3", "__i3_scratch") or (n.get("type") == "workspace" and name == "__i3_scratch"):
+        in_scratch = True
+    if in_scratch and n.get("pid"):
+        scratch_pids.add(n["pid"])
+    for c in n.get("nodes", []) + n.get("floating_nodes", []):
+        find_pids(c, in_scratch)
+find_pids(tree)
+
+all_pids = set(scratch_pids)
+for p in list(scratch_pids):
+    try:
+        out = subprocess.check_output(["pgrep", "-P", str(p)], stderr=subprocess.DEVNULL).decode().split()
+        for sub in out:
+            all_pids.add(int(sub))
+            out2 = subprocess.check_output(["pgrep", "-P", sub], stderr=subprocess.DEVNULL).decode().split()
+            for sub2 in out2:
+                all_pids.add(int(sub2))
+    except Exception:
+        pass
+
+total_kb = 0
+for p in all_pids:
+    try:
+        with open(f"/proc/{p}/statm") as f:
+            rss_pages = int(f.read().split()[1])
+            total_kb += rss_pages * 4
+    except Exception:
+        pass
+print(total_kb)
+' 2>/dev/null || echo 0)
+
+# 6. ALL User Background Services & Audio Daemons
+# Exclude visible interactive user apps, as well as scratchpad processes already counted
+user_services_kb=$(ps -u "$UID" -o pid=,rss=,comm=,args= | \
+    grep -vE "\b(brave|firefox|chromium|zen-alpha|kitty|alacritty|wezterm|foot|xterm|nvim|vim|code|zed|opencode|steam|game|agy|mcp|node|npm|uv|kitten|fish|bash -c|top|ps|grep)\b" | \
+    awk '$3 !~ /^(sway|Xwayland)$/ {sum += $2} END {print sum+0}')
+
+# 7. Total True Idle RAM (Including hidden scratchpads)
+total_baseline_kb=$(( kernel_kb + root_daemons_kb + compositor_kb + user_services_kb + scratchpad_kb ))
+
+# 8. Formatted Summary Output
+echo "=============================================================="
+echo "          TRUE SYSTEM IDLE BASELINE MEMORY FOOTPRINT          "
+echo "=============================================================="
+printf "  1. Linux Kernel & Hardware Drivers (Slab, KMS)    :  %s\n" "$(format_gb "$kernel_kb")"
+printf "  2. System-wide Root Daemons (systemd, Network)    :  %s\n" "$(format_gb "$root_daemons_kb")"
+printf "  3. Display Compositor (Sway + Xwayland)           :  %s\n" "$(format_gb "$compositor_kb")"
+printf "  4. All User Background Services & Audio Daemons   :  %s\n" "$(format_gb "$user_services_kb")"
+printf "  5. Hidden Scratchpads (Kitty terminal, Neovim)   :  %s\n" "$(format_gb "$scratchpad_kb")"
+echo "--------------------------------------------------------------"
+printf "  TOTAL PURE IDLE RAM USAGE (NOTHING OPEN)          :  %s\n" "$(format_gb "$total_baseline_kb")"
+printf "  TOTAL PHYSICAL RAM INSTALLED                      :  %s\n" "$(format_gb "$total_kb")"
+echo "=============================================================="

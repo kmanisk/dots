@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""rofi-pkill: app-level process killer for Sway.
+"""rofi-pkill: App & Process Killer for Sway/i3.
 
-Groups processes by APPLICATION (not raw comm), so Steam + steamwebhelper +
-game helpers show as one entry. Window-backed apps resolve via Sway IPC
-(app_id/class); windowless stragglers attach through an alias map.
-
-Enter: graceful SIGTERM to the whole group.  Alt+d / Shift+Del: SIGKILL.
-Protected system processes are never listed.
+Features:
+- Clear separation between Foreground Applications (active windows) and Background Services.
+- Strictly shields all critical system services (Dusky mic DSP, WirePlumber, PipeWire,
+  xremap, cliphist, Sway components, polkit, dbus, agents/MCP servers, etc.).
+- Groups child/helper processes into their parent application.
+- Supports graceful SIGTERM (Enter) and force SIGKILL (Alt+d / Shift+Delete).
 """
+import glob
+import html
 import json
 import os
 import re
@@ -17,34 +19,131 @@ import sys
 
 THEME = os.path.expanduser("~/.config/rofi/clipboard-floating.rasi")
 
-# Never list or kill these (regex, matched against comm).
-PROTECTED = re.compile(
-    r"^(systemd|sd-pam|dbus-broker.*|dbus-daemon|pipewire.*|wireplumber"
-    r"|sway(bg|idle|lock|bar|msg|nag)?|Xwayland|xremap|mako|waybar|foot"
-    r"|bash|fish|zsh|sh|dash|ps|grep|rofi|agy|opencode|node-mainthread"
-    r"|python3(\.\d+)?|uwsm|seatd|polkit.*|at-spi.*|xdg-.*|dconf.*"
-    r"|gvfs.*|tumbler.*)$"
+# Strict regex matching protected process comm names (case-insensitive)
+PROTECTED_COMM = re.compile(
+    r"^("
+    # Core system, init, bus & session daemons
+    r"systemd.*|sd-pam|\(sd-pam\)|dbus.*|seatd|udevd?|"
+    # Compositor, window manager & bar
+    r"sway(bg|idle|lock|bar|msg|nag|nc.*)?|waybar|mako|dunst|foot|Xwayland|"
+    # Key remapping
+    r"xremap.*|"
+    # Audio stack & headless mic suppression
+    r"pipewire.*|wireplumber|dusky.*|rnnoise.*|"
+    # Clipboard & screen color
+    r"wl-paste|cliphist.*|clipnotify|wl-gammarelay.*|wl-copy|"
+    # Security, auth, portals & virtual filesystem
+    r"polkit.*|gnome-keyring.*|at-spi.*|xdg-.*|dconf.*|gvfs.*|tumbler.*|"
+    # Power & hardware switching
+    r"power-profiles.*|supergfx.*|ananicy.*|gamemode.*|rtkit.*|"
+    # Networking & Bluetooth
+    r"bluetooth.*|wpa_supplicant|iwd|NetworkManager|"
+    # Interactive shells & tool runners
+    r"fish|bash|zsh|sh|dash|ps|grep|rofi|awk|sed|sleep|cat|"
+    # AI Coding Agents, IDE tooling & MCP servers
+    r"agy|opencode|gemini|antigravity|"
+    r"node-MainThread|node-mainthread"
+    r")$",
+    re.IGNORECASE,
 )
 
-# Windowless helpers fold into their parent app (regex on comm/args).
+# Argument patterns that identify protected system daemons, agents, and MCP servers
+PROTECTED_ARGS = [
+    re.compile(p, re.IGNORECASE) for p in [
+        r"\bdusky",
+        r"\bcliphist",
+        r"\bxremap\b",
+        r"\bpipewire\b",
+        r"\bwireplumber\b",
+        r"\bmcp\b",
+        r"mcp-server",
+        r"@modelcontextprotocol",
+        r"@praeses/steam-mcp",
+        r"\bagy\b",
+        r"\bopencode\b",
+        r"\bantigravity\b",
+        r"polkit",
+        r"xdg-desktop-portal",
+        r"sway-idle-guard",
+        r"swaybar-status",
+        r"game-workspace-daemon",
+        r"bt-auto-trust",
+        r"wl-gammarelay",
+        r"gnome-keyring",
+        r"color-scheme-mcp",
+        r"snapper-mcp",
+        r"arch-ops-server",
+        r"lutris-mcp",
+        r"bash-mcp",
+    ]
+]
+
+# Systemd unit keywords that must never be exposed or killed
+PROTECTED_UNITS = [
+    "dusky-audio-dsp",
+    "cliphist",
+    "xremap",
+    "pipewire",
+    "wireplumber",
+    "wl-gammarelay",
+    "bt-auto-trust",
+    "dconf",
+    "gvfs-daemon",
+    "gnome-keyring",
+    "gamemoded",
+]
+
+# Alias map: folds child helpers, runners, and renderers into the parent app group
 ALIASES = [
-    (re.compile(r"^steamwebhelper"), "steam"),
-    (re.compile(r"^steam$"), "steam"),
-    (re.compile(r"pressure-vessel|bwrap|steam-runtime|reaper"), "steam"),
-    (re.compile(r"^brave$|^brave-origin$|chrome.*zygote"), "brave"),
-    (re.compile(r"^firefox$|Isolated Web Co"), "firefox"),
-    (re.compile(r"^chrome_crashpad"), "browser"),
-    (re.compile(r"wineserver|wine.*preloader|.*\.exe$"), "wine-game"),
-    (re.compile(r"gamescope.*|gamescopereaper"), "gamescope"),
-    (re.compile(r"MangoHud|mangohud"), "mangohud"),
+    (re.compile(r"^steamwebhelper|^steam$|pressure-vessel|bwrap|steam-runtime|reaper|srt-.*|pv-.*", re.I), "steam"),
+    (re.compile(r"^brave.*|^chrome.*zygote|^chrome_crashpad", re.I), "brave"),
+    (re.compile(r"^firefox.*|Isolated Web Co", re.I), "firefox"),
+    (re.compile(r"^cs2(\.sh)?$", re.I), "cs2"),
+    (re.compile(r"^kitten$", re.I), "kitty"),
+    (re.compile(r"^vesktop$", re.I), "vesktop"),
+    (re.compile(r"^zed$", re.I), "zed"),
+    (re.compile(r"^alacritty$", re.I), "alacritty"),
+    (re.compile(r"^thunar$", re.I), "thunar"),
+    (re.compile(r"gamescope.*|gamescopereaper", re.I), "gamescope"),
+    (re.compile(r"MangoHud|mangohud", re.I), "mangohud"),
+    (re.compile(r"wineserver|wine.*preloader|.*\.exe$", re.I), "steam"),
 ]
 
 
+def ensure_env():
+    """Ensure SWAYSOCK, WAYLAND_DISPLAY, and DISPLAY are populated even when spawned from xremap."""
+    needed = [k for k in ("SWAYSOCK", "WAYLAND_DISPLAY", "DISPLAY") if not os.environ.get(k)]
+    if needed:
+        try:
+            out = subprocess.check_output(
+                ["systemctl", "--user", "show-environment"],
+                stderr=subprocess.DEVNULL, timeout=2
+            ).decode(errors="replace")
+            for line in out.splitlines():
+                if "=" in line:
+                    k, v = line.split("=", 1)
+                    if k in needed and v:
+                        os.environ[k] = v
+        except Exception:
+            pass
+    uid = os.getuid()
+    if not os.environ.get("SWAYSOCK"):
+        socks = glob.glob(f"/run/user/{uid}/sway-ipc.*.sock") + glob.glob("/tmp/sway-ipc.*.sock")
+        if socks:
+            os.environ["SWAYSOCK"] = sorted(socks, key=os.path.getmtime)[-1]
+    if not os.environ.get("WAYLAND_DISPLAY"):
+        os.environ["WAYLAND_DISPLAY"] = "wayland-1"
+    if not os.environ.get("DISPLAY"):
+        os.environ["DISPLAY"] = ":0"
+
+
 def sway_tree():
+    ensure_env()
     for cmd in ("swaymsg", "i3-msg"):
         try:
             out = subprocess.check_output(
-                [cmd, "-t", "get_tree"], stderr=subprocess.DEVNULL, timeout=5)
+                [cmd, "-t", "get_tree"], stderr=subprocess.DEVNULL, timeout=4
+            )
             return json.loads(out)
         except Exception:
             continue
@@ -55,7 +154,8 @@ def ps_table():
     try:
         out = subprocess.check_output(
             ["ps", "-u", str(os.getuid()), "-o", "pid=,%cpu=,%mem=,comm=,args="],
-            stderr=subprocess.DEVNULL, timeout=5).decode(errors="replace")
+            stderr=subprocess.DEVNULL, timeout=4
+        ).decode(errors="replace")
     except Exception:
         return {}
     table = {}
@@ -63,193 +163,233 @@ def ps_table():
         parts = line.split(None, 4)
         if len(parts) == 5:
             try:
-                pid = int(parts[0])
-                table[pid] = (float(parts[1]), float(parts[2]),
-                              parts[3], parts[4])
+                table[int(parts[0])] = (float(parts[1]), float(parts[2]), parts[3], parts[4])
             except ValueError:
-                continue
+                pass
     return table
 
 
+def is_protected(pid, comm, args):
+    if pid == os.getpid() or comm in ("rofi-pkill", "rofi") or "rofi-pkill" in args:
+        return True
+    if PROTECTED_COMM.match(comm):
+        return True
+    for pat in PROTECTED_ARGS:
+        if pat.search(args):
+            return True
+    try:
+        with open(f"/proc/{pid}/cgroup", errors="ignore") as f:
+            cg = f.read()
+            if any(u in cg for u in PROTECTED_UNITS):
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def collect():
-    """Returns {group: {'pids': {pid: (cpu,mem)}, 'wins': int, 'titles': []}}."""
-    tree, pst = sway_tree(), ps_table()
-    groups = {}
+    tree = sway_tree()
+    pst = ps_table()
 
-    def grp(name):
-        return groups.setdefault(
-            name, {"pids": {}, "wins": 0, "titles": []})
+    fg_groups = {}
+    bg_groups = {}
+    fg_pids = set()
 
-    def walk(node, cur_ws=None):
+    def walk(node):
         if isinstance(node, dict):
-            if node.get("type") == "workspace":
-                cur_ws = node.get("name")
             props = node.get("window_properties") or {}
-            app = (node.get("app_id")
-                   or props.get("class")
-                   or props.get("instance") or "")
+            app = node.get("app_id") or props.get("class") or props.get("instance") or ""
             pid = node.get("pid")
             if app and (pid or node.get("window")):
-                g = grp(display_name(str(app)))
+                raw = str(app).lower()
+                name = "brave" if "brave" in raw else re.sub(r"[-_.]?(bin|x86_64|appimage)$", "", raw)
+                g = fg_groups.setdefault(name, {"pids": {}, "wins": 0, "titles": []})
                 g["wins"] += 1
-                title = str(props.get("title") or node.get("name") or "")
-                if title and len(g["titles"]) < 2:
-                    g["titles"].append(title[:48])
+                t = str(props.get("title") or node.get("name") or "")
+                if t and len(g["titles"]) < 2:
+                    g["titles"].append(t[:48])
                 if pid and pid in pst:
                     g["pids"][pid] = pst[pid][:2]
+                    fg_pids.add(pid)
             for c in node.get("nodes", []) + node.get("floating_nodes", []):
-                walk(c, cur_ws)
+                walk(c)
+
     walk(tree)
 
+    # Fold related child processes into foreground apps
     for pid, (cpu, mem, comm, args) in pst.items():
-        if PROTECTED.match(comm):
+        if pid in fg_pids:
             continue
         blob = f"{comm} {args}".lower()
-        target = next(
-            (n for rx, n in ALIASES
-             if rx.search(comm.lower()) or rx.search(blob)), None)
-        if target is None:
-            if any(pid in g["pids"] for g in groups.values()):
-                continue  # already counted via its window
-            target = display_name(comm)
-        g = grp(target)
-        if pid not in g["pids"]:
-            g["pids"][pid] = (cpu, mem)
-    return groups
+        for rx, target in ALIASES:
+            if rx.search(comm) or rx.search(blob):
+                if target in fg_groups:
+                    fg_groups[target]["pids"][pid] = (cpu, mem)
+                    fg_pids.add(pid)
+                    break
 
-
-def display_name(raw):
-    s = re.sub(r"[-_.]?(bin|x86_64|appimage)$", "", raw.strip().lower())
-    return {"brave-origin": "brave"}.get(s, s) or raw
-
-
-def theme_colors():
-    """Pull live theme colors so markup matches the active theme-set theme."""
-    defaults = {"foreground": "#d3c6aa", "foreground-alt": "#7c6f64",
-                "accent": "#7fbbb3", "accent-bright": "#dbbc7f"}
-    try:
-        with open(os.path.expanduser("~/.local/state/theme/rofi.rasi")) as f:
-            content = f.read()
-    except OSError:
-        return defaults
-    raw = dict(re.findall(r"([a-zA-Z0-9_-]+)\s*:\s*([^;]+);", content))
-
-    def resolve(v, depth=0):
-        v = v.strip().strip('"')
-        if v.startswith("@") and depth < 5:
-            return resolve(raw.get(v[1:], v), depth + 1)
-        return v
-
-    out = {}
-    for key, fallback in defaults.items():
-        val = resolve(raw.get(key, fallback))
-        out[key] = val if re.fullmatch(r"#[0-9a-fA-F]{6}", val) else fallback
-    return out
-
-
-def rows(groups):
-    import html
-    out = []  # list of (name, markup-text)
-    agg = []
-    for name, g in groups.items():
-        if not g["pids"]:
+    # Non-windowed user processes (Background Services)
+    for pid, (cpu, mem, comm, args) in pst.items():
+        if pid in fg_pids:
             continue
-        cpu = sum(c for c, _ in g["pids"].values())
-        mem = sum(m for _, m in g["pids"].values())
-        agg.append((mem, cpu, name, g))
-    for mem, cpu, name, g in sorted(agg, reverse=True):
-        n = len(g["pids"])
-        det = f"{n} procs" + (f", {g['wins']} wins" if g["wins"] else "")
-        titles = (" — " + " / ".join(g["titles"])) if g["titles"] else ""
-        rest = html.escape(f"({det}) │ CPU {cpu:4.1f}% │ RAM {mem:4.1f}%{titles}")
-        if g["wins"]:
-            # Foreground app: bold bright name, full-bright details.
-            # (Bold only, no fixed color: a hardcoded color would turn
-            # invisible against the accent fill of the selected row.)
-            text = f"<b>{html.escape(name)}</b>\t{rest}"
-        else:
-            # Background service/daemon: whole row dimmed via alpha.
-            # (Never hardcode foreground color: it overrides selected text-color
-            # and turns invisible against the accent fill of the selected row.)
-            text = f"<span alpha=\"65%\">{html.escape(name)}\t{rest}</span>"
-        out.append((name, text))
-    return out
+        if is_protected(pid, comm, args):
+            continue
+        # Fold into known background apps (like steam without open windows)
+        blob = f"{comm} {args}".lower()
+        matched_target = None
+        for rx, target in ALIASES:
+            if rx.search(comm) or rx.search(blob):
+                matched_target = target
+                break
+        name = matched_target if matched_target else comm.lower()
+        g = bg_groups.setdefault(name, {"pids": {}, "wins": 0, "titles": []})
+        g["pids"][pid] = (cpu, mem)
+        if args and not g["titles"]:
+            g["titles"].append(args[:48])
+
+    return fg_groups, bg_groups
+
+
+def build_rows(fg, bg):
+    # Returns list of (is_header, group_name, group_data, markup)
+    entries = []
+
+    # 1. FOREGROUND APPLICATIONS
+    if fg:
+        entries.append((True, "", None, '<span alpha="45%" weight="bold">─── FOREGROUND APPLICATIONS ──────────────────────────</span>'))
+        fg_list = []
+        for name, g in fg.items():
+            if not g["pids"]:
+                continue
+            cpu = sum(c for c, _ in g["pids"].values())
+            mem = sum(m for _, m in g["pids"].values())
+            fg_list.append((mem, cpu, name, g))
+        for mem, cpu, name, g in sorted(fg_list, reverse=True):
+            n = len(g["pids"])
+            det = f"{n} procs" + (f", {g['wins']} wins" if g["wins"] else "")
+            titles = (" — " + " / ".join(g["titles"])) if g["titles"] else ""
+            rest = html.escape(f"({det}) │ CPU {cpu:4.1f}% │ RAM {mem:4.1f}%{titles}")
+            markup = f"<b>[APP]  {html.escape(name)}</b>\t{rest}"
+            entries.append((False, name, g, markup))
+
+    # 2. BACKGROUND SERVICES
+    if bg:
+        entries.append((True, "", None, '<span alpha="45%" weight="bold">─── BACKGROUND SERVICES ──────────────────────────────</span>'))
+        bg_list = []
+        for name, g in bg.items():
+            if not g["pids"]:
+                continue
+            cpu = sum(c for c, _ in g["pids"].values())
+            mem = sum(m for _, m in g["pids"].values())
+            bg_list.append((mem, cpu, name, g))
+        for mem, cpu, name, g in sorted(bg_list, reverse=True):
+            n = len(g["pids"])
+            titles = (" — " + " / ".join(g["titles"])) if g["titles"] else ""
+            rest = html.escape(f"({n} procs) │ CPU {cpu:4.1f}% │ RAM {mem:4.1f}%{titles}")
+            markup = f'<span alpha="75%">[BG]   {html.escape(name)}\t{rest}</span>'
+            entries.append((False, name, g, markup))
+
+    return entries
 
 
 def notify(title, body):
     try:
-        subprocess.call(["notify-send", "-a", "Process Killer", "-u", "low",
-                         "-i", "process-stop",
-                         "-h", "string:x-canonical-private-synchronous:pkill",
-                         title, body],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL, timeout=5)
+        subprocess.call(
+            [
+                "notify-send", "-a", "Process Killer", "-u", "low",
+                "-i", "process-stop",
+                "-h", "string:x-canonical-private-synchronous:pkill",
+                title, body,
+            ],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5
+        )
     except Exception:
         pass
 
 
-def kill_group(name, groups, force):
-    g = groups.get(name)
-    if not g:
+def kill_group(name, group_data, force):
+    if not group_data:
         return
     sig = signal.SIGKILL if force else signal.SIGTERM
     done, protected = 0, 0
-    for pid in list(g["pids"]):
+    for pid in list(group_data["pids"]):
         try:
-            if PROTECTED.match(proc_comm(pid)):
+            comm = ""
+            try:
+                with open(f"/proc/{pid}/comm") as f:
+                    comm = f.read().strip()
+            except OSError:
+                pass
+            if PROTECTED_COMM.match(comm):
                 protected += 1
                 continue
             os.kill(pid, sig)
             done += 1
         except (ProcessLookupError, PermissionError):
             continue
-    what = "SIGKILL (-9)" if force else "SIGTERM"
-    notify("Force Killed" if force else "Terminated",
-           f"{what} → {done} procs of {name}"
-           + (f" ({protected} protected skipped)" if protected else ""))
-
-
-def proc_comm(pid):
-    try:
-        with open(f"/proc/{pid}/comm") as f:
-            return f.read().strip()
-    except OSError:
-        return ""
+    what = "Force Killed (SIGKILL -9)" if force else "Terminated (SIGTERM)"
+    notify(
+        "Process Killer",
+        f"{what} → {done} procs of {name}"
+        + (f" ({protected} protected skipped)" if protected else ""),
+    )
 
 
 def main():
+    ensure_env()
     if os.environ.get("ROFI_PKILL_TEST") == "1":
-        print("\n".join(t for _, t in rows(collect())[:15]))
+        fg, bg = collect()
+        for is_hdr, key, _, markup in build_rows(fg, bg)[:20]:
+            print(f"{'HDR' if is_hdr else 'ITEM'}\t{key}\t{markup}")
         return 0
+
     while True:
-        groups = collect()
-        entries = rows(groups)
+        fg, bg = collect()
+        entries = build_rows(fg, bg)
         if not entries:
-            notify("Process Killer", "No killable processes")
+            notify("Process Killer", "No killable processes found")
             return 0
+
+        menu_text = "\n".join(markup for _, _, _, markup in entries)
         try:
             p = subprocess.run(
-                ["rofi", "-dmenu", "-i", "-markup-rows", "-format", "i",
-                 "-sort", "-sorting-method", "fzf", "-matching", "fuzzy",
-                 "-p", "Kill App",
-                 "-kb-delete-entry", "", "-kb-custom-1", "Alt+d,Shift+Delete",
-                 "-theme", THEME],
-                input="\n".join(t for _, t in entries).encode(), stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL, timeout=300)
+                [
+                    "rofi", "-dmenu", "-i", "-markup-rows", "-format", "i",
+                    "-sort", "-sorting-method", "fzf", "-matching", "fuzzy",
+                    "-p", "Kill App",
+                    "-kb-delete-entry", "", "-kb-custom-1", "Alt+d,Shift+Delete",
+                    "-theme", THEME,
+                ],
+                input=menu_text.encode(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                timeout=300,
+            )
         except Exception:
             return 0
+
+        # Non-zero returncode and not custom-1 (exit code 10)
         if p.returncode not in (0, 10) or not p.stdout.strip():
             return 0
+
         try:
-            name = entries[int(p.stdout.decode(errors="replace").strip())][0]
+            idx = int(p.stdout.decode(errors="replace").strip())
+            is_header, name, group_data, _ = entries[idx]
         except (ValueError, IndexError):
             return 0
-        if not name:
-            return 0
-        kill_group(name, groups, force=(p.returncode == 10))
+
+        # If user selected a section divider, safely ignore and re-show
+        if is_header or not name or not group_data:
+            continue
+
+        kill_group(name, group_data, force=(p.returncode == 10))
         return 0
+
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(0)

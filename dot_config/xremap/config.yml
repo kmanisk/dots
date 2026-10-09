@@ -106,6 +106,15 @@ keymap:
       CapsLock-z:
         launch: ["/home/manisk/.local/bin/nvibrant-ctl", "down"]
 
+  # --- Mouse scroll (Alt+Ctrl layer, vim-style: j=down, k=up) ---
+  # xremap can't emit wheel natively (upstream XUPSCROLL match-only),
+  # so delegate to one-shot uinput emitter. Hold repeats via key repeat.
+  - name: Scroll emulation
+    exact_match: true
+    remap:
+      Alt-Ctrl-j: { launch: ["/home/manisk/.local/bin/xscroll", "down"] }
+      Alt-Ctrl-k: { launch: ["/home/manisk/.local/bin/xscroll", "up"] }
+
   # --- Katana Sub-legends on Right Alt (brightness) ---
   # REMOVED 2026-10-02: RightAlt-q/w entries were dead — modmap converts
   # RightAlt to RightMeta before keymap matching, so Sway eats them as

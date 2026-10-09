@@ -1,0 +1,28 @@
+# concord config — TUI has no font setting; text size comes from the
+# terminal. This machine launches it via Win+Alt+C (see
+# sway config.d/40-keybindings.conf) with kitty -o font_size=13.0.
+# Tweak that number to resize concord only; global kitty stays 19.5.
+
+[credentials]
+# auto = keychain when available, else plaintext under ~/.local/state/concord
+# "keychain" = never fall back to plaintext. Never share that file.
+store = "auto"
+
+[presence]
+# Serve discord-ipc so games/apps show Rich Presence. Off if Vesktop
+# already holds the socket (only the first socket answer wins).
+share_rich_presence = true
+
+# External video/audio (incl. streams) via mpv. Off by default upstream.
+# [display]
+# external_media = false
+
+# Message translation (uppercase T on a message, Ctrl-T in composer).
+# [translation]
+# provider = "libretranslate"   # or "deepl" (+ api_key)
+# message_target_language = "EN"
+# composer_target_language = "EN"
+
+# GIF picker needs a KLIPY key with ads disabled (partner.klipy.com).
+# [klipy]
+# api_key = "your-klipy-key"

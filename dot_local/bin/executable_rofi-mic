@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# rofi-mic — Rofi menu wrapper for the native PipeWire mic control script
+# ==============================================================================
+set -euo pipefail
+
+options=(
+    "🎙️ Clean Native Mic (RNNoise + Studio EQ + Leveler)"
+    "🦇 Deep Pitch FX (Static -5 semitones)"
+    "🤖 Voice FX: Daft Punk"
+    "⚔️ Voice FX: Darth Vader"
+    "🐿️ Voice FX: Chipmunk"
+    "🦾 Voice FX: Cylon Robot"
+    "📻 Voice FX: Kraftwerk"
+    "🕶️ Voice FX: Matrix Agent"
+    "☎️ Voice FX: Robot Phone"
+    "👽 Voice FX: Sci-Fi Alien"
+    "🎵 Voice FX: T-Pain Autotune"
+    "🪐 Voice FX: Stephen Hawking"
+    "💥 Voice FX: Megatron"
+    "⏹️ Turn Voice FX Off (Restore Clean)"
+)
+
+choice=$(printf '%s\n' "${options[@]}" | rofi -dmenu -i -p "Microphone Mode")
+
+case "$choice" in
+    *"Clean Native Mic"*) mic clean ;;
+    *"Deep Pitch FX"*) mic fx ;;
+    *"Daft Punk"*) mic voice "Daft Punk" ;;
+    *"Darth Vader"*) mic voice "Darth Vader" ;;
+    *"Chipmunk"*) mic voice "Chipmunk" ;;
+    *"Cylon Robot"*) mic voice "Cylon Robot" ;;
+    *"Kraftwerk"*) mic voice "Kraftwerk" ;;
+    *"Matrix Agent"*) mic voice "Matrix Agent" ;;
+    *"Robot Phone"*) mic voice "Robot Phone" ;;
+    *"Sci-Fi Alien"*) mic voice "Sci-Fi Alien" ;;
+    *"T-Pain"*) mic voice "T-Pain" ;;
+    *"Stephen Hawking"*) mic voice "Stephen Hawking" ;;
+    *"Megatron"*) mic voice "Megatron" ;;
+    *"Turn Voice FX Off"*) mic voice off ;;
+esac

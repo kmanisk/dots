@@ -1,0 +1,339 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# mic — One-Shot PipeWire Microphone Control & Voice Preset Manager
+# Minimal, zero background daemons. Manages native clean mic vs on-demand voice FX.
+# ==============================================================================
+set -euo pipefail
+
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+FX_FIFO="$RUNTIME_DIR/dusky-fx.fifo"
+FX_PID_FILE="$RUNTIME_DIR/dusky-fx.pid"
+FX_HOLDER_PID_FILE="$RUNTIME_DIR/dusky-fx-holder.pid"
+FX_STATE_FILE="$RUNTIME_DIR/dusky-fx-preset.state"
+FX_BIN="$HOME/.local/bin/dusky-fx"
+RAW_MIC="alsa_input.pci-0000_00_1f.3.analog-stereo"
+
+get_node_id() {
+    local target_name="$1"
+    pw-dump Node 2>/dev/null | jq -r --arg n "$target_name" '.[] | select(.info.props["node.name"] == $n) | .id' | head -n 1
+}
+
+is_fx_running() {
+    if [[ -f "$FX_PID_FILE" ]]; then
+        local pid
+        pid=$(cat "$FX_PID_FILE" 2>/dev/null || echo "")
+        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+stop_fx_engine() {
+    if [[ -f "$FX_PID_FILE" ]]; then
+        local pid
+        pid=$(cat "$FX_PID_FILE" 2>/dev/null || echo "")
+        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null || true
+            sleep 0.1
+            kill -9 "$pid" 2>/dev/null || true
+        fi
+        rm -f "$FX_PID_FILE"
+    fi
+    pkill -x dusky-fx 2>/dev/null || true
+
+    if [[ -f "$FX_HOLDER_PID_FILE" ]]; then
+        local hpid
+        hpid=$(cat "$FX_HOLDER_PID_FILE" 2>/dev/null || echo "")
+        if [[ -n "$hpid" ]]; then
+            kill "$hpid" 2>/dev/null || true
+        fi
+        rm -f "$FX_HOLDER_PID_FILE"
+    fi
+    rm -f "$FX_FIFO" "$FX_STATE_FILE"
+}
+
+start_fx_engine() {
+    if is_fx_running; then
+        return 0
+    fi
+    stop_fx_engine
+
+    if [[ ! -x "$FX_BIN" ]]; then
+        echo "Error: Engine binary $FX_BIN not found or not executable." >&2
+        return 1
+    fi
+
+    mkfifo "$FX_FIFO"
+    # Keep write descriptor open with background sleep holder so engine never sees premature EOF
+    sleep infinity > "$FX_FIFO" &
+    echo "$!" > "$FX_HOLDER_PID_FILE"
+
+    # Launch engine
+    "$FX_BIN" < "$FX_FIFO" >/dev/null 2>&1 &
+    echo "$!" > "$FX_PID_FILE"
+
+    # Direct capture stream to raw ALC256 mic
+    sleep 0.15
+    echo "SRC $RAW_MIC" > "$FX_FIFO"
+
+    # Wait up to 1 second for ghelper-fx node to register in PipeWire
+    for _ in {1..20}; do
+        if get_node_id "ghelper-fx" &>/dev/null && [[ -n "$(get_node_id "ghelper-fx")" ]]; then
+            break
+        fi
+        sleep 0.05
+    done
+}
+
+send_fx_cmd() {
+    if [[ -p "$FX_FIFO" ]]; then
+        echo "$1" > "$FX_FIFO"
+    fi
+}
+
+apply_preset() {
+    local preset="$1"
+    start_fx_engine
+    case "${preset,,}" in
+        "daft punk"|"daftpunk"|"daft")
+            send_fx_cmd "RNN 1"
+            send_fx_cmd "VOC 1"
+            send_fx_cmd "VOP 900 110 2 12 50 1 0"
+            send_fx_cmd "MTX 150"
+            send_fx_cmd "PSH 0"
+            send_fx_cmd "ATN 0"
+            send_fx_cmd "BCR 0 1"
+            send_fx_cmd "BPF 0 0"
+            send_fx_cmd "STT 0 500"
+            ;;
+        "darth vader"|"vader")
+            send_fx_cmd "RNN 1"
+            send_fx_cmd "VOC 1"
+            send_fx_cmd "VOP 0 110 5 30 0 0 0"
+            send_fx_cmd "PSH -500"
+            send_fx_cmd "BPF 80 2500"
+            send_fx_cmd "ATN 0"
+            send_fx_cmd "BCR 0 1"
+            send_fx_cmd "STT 0 500"
+            send_fx_cmd "MTX 0"
+            ;;
+        "chipmunk")
+            send_fx_cmd "RNN 1"
+            send_fx_cmd "VOC 1"
+            send_fx_cmd "VOP 0 110 2 15 0 0 0"
+            send_fx_cmd "PSH 1200"
+            send_fx_cmd "BPF 150 0"
+            send_fx_cmd "ATN 0"
+            send_fx_cmd "BCR 0 1"
+            send_fx_cmd "STT 0 500"
+            send_fx_cmd "MTX 0"
+            ;;
+        "cylon"|"cylon robot")
+            send_fx_cmd "RNN 1"
+            send_fx_cmd "VOC 1"
+            send_fx_cmd "VOP 900 90 10 70 160 0 0"
+            send_fx_cmd "STT 6 500"
+            send_fx_cmd "MTX 450"
+            send_fx_cmd "PSH 0"
+            send_fx_cmd "ATN 0"
+            send_fx_cmd "BCR 0 1"
+            send_fx_cmd "BPF 0 0"
+            ;;
+        "kraftwerk")
+            send_fx_cmd "RNN 1"
+            send_fx_cmd "VOC 1"
+            send_fx_cmd "VOP 950 140 3 15 10 0 0"
+            send_fx_cmd "MTX 0"
+            send_fx_cmd "PSH 0"
+            send_fx_cmd "ATN 0"
+            send_fx_cmd "BCR 0 1"
+            send_fx_cmd "BPF 0 0"
+            send_fx_cmd "STT 0 500"
+            ;;
+        "matrix agent"|"matrix")
+            send_fx_cmd "RNN 1"
+            send_fx_cmd "VOC 1"
+            send_fx_cmd "VOP 900 70 10 55 90 0 0"
+            send_fx_cmd "PSH -200"
+            send_fx_cmd "BPF 300 3400"
+            send_fx_cmd "MTX 1000"
+            send_fx_cmd "ATN 0"
+            send_fx_cmd "BCR 0 1"
+            send_fx_cmd "STT 0 500"
+            ;;
+        "robot phone"|"phone")
+            send_fx_cmd "RNN 1"
+            send_fx_cmd "VOC 1"
+            send_fx_cmd "VOP 0 110 5 25 0 0 0"
+            send_fx_cmd "BCR 8 2"
+            send_fx_cmd "BPF 300 3400"
+            send_fx_cmd "PSH 0"
+            send_fx_cmd "ATN 0"
+            send_fx_cmd "STT 0 500"
+            send_fx_cmd "MTX 0"
+            ;;
+        "sci-fi alien"|"alien")
+            send_fx_cmd "RNN 1"
+            send_fx_cmd "VOC 1"
+            send_fx_cmd "VOP 500 110 2 10 130 0 0"
+            send_fx_cmd "PSH 700"
+            send_fx_cmd "BPF 700 3200"
+            send_fx_cmd "MTX 700"
+            send_fx_cmd "ATN 0"
+            send_fx_cmd "BCR 0 1"
+            send_fx_cmd "STT 0 500"
+            ;;
+        "t-pain"|"autotune")
+            send_fx_cmd "RNN 1"
+            send_fx_cmd "VOC 1"
+            send_fx_cmd "VOP 0 110 5 30 0 0 0"
+            send_fx_cmd "ATN 1"
+            send_fx_cmd "ATT 0"
+            send_fx_cmd "PSH 0"
+            send_fx_cmd "BCR 0 1"
+            send_fx_cmd "BPF 0 0"
+            send_fx_cmd "STT 0 500"
+            send_fx_cmd "MTX 0"
+            ;;
+        "stephen hawking"|"hawking")
+            send_fx_cmd "RNN 1"
+            send_fx_cmd "VOC 1"
+            send_fx_cmd "VOP 0 110 5 30 0 0 0"
+            send_fx_cmd "ATN 1"
+            send_fx_cmd "ATT 120"
+            send_fx_cmd "PSH 0"
+            send_fx_cmd "BCR 0 1"
+            send_fx_cmd "BPF 0 0"
+            send_fx_cmd "STT 0 500"
+            send_fx_cmd "MTX 0"
+            ;;
+        "megatron")
+            send_fx_cmd "RNN 1"
+            send_fx_cmd "VOC 1"
+            send_fx_cmd "VOP 650 80 4 40 80 0 0"
+            send_fx_cmd "PSH -700"
+            send_fx_cmd "BPF 90 4000"
+            send_fx_cmd "MTX 650"
+            send_fx_cmd "ATN 0"
+            send_fx_cmd "BCR 0 1"
+            send_fx_cmd "STT 0 500"
+            ;;
+        *)
+            echo "Unknown preset '$preset'. Available: 'Daft Punk', 'Darth Vader', 'Chipmunk', 'Cylon Robot', 'Kraftwerk', 'Matrix Agent', 'Robot Phone', 'Sci-Fi Alien', 'T-Pain', 'Stephen Hawking', 'Megatron'" >&2
+            return 1
+            ;;
+    esac
+
+    echo "$preset" > "$FX_STATE_FILE"
+    local nid
+    nid=$(get_node_id "ghelper-fx")
+    if [[ -n "$nid" ]]; then
+        wpctl set-default "$nid"
+        echo "Active Source: Dusky Voice FX ($preset) [Node ID: $nid]"
+    fi
+}
+
+show_status() {
+    echo "=== Microphone Stack Status ==="
+    local def_source
+    local def_id def_name def_desc
+    def_id=$(wpctl inspect @DEFAULT_AUDIO_SOURCE@ 2>/dev/null | grep -E '^id ' | awk '{print $2}' | tr -d ',')
+    def_name=$(wpctl inspect @DEFAULT_AUDIO_SOURCE@ 2>/dev/null | grep 'node.name =' | cut -d'"' -f2)
+    def_desc=$(wpctl inspect @DEFAULT_AUDIO_SOURCE@ 2>/dev/null | grep 'node.description =' | cut -d'"' -f2)
+    echo "Default PipeWire Source : ${def_desc:-Unknown} (${def_name:-Unknown}) [Node ID: ${def_id:-?}]"
+
+    local clean_id fx_static_id dusky_fx_id
+    clean_id=$(get_node_id "ghelper-audio")
+    fx_static_id=$(get_node_id "ghelper-audio-fx")
+    dusky_fx_id=$(get_node_id "ghelper-fx")
+
+    echo "Native Clean Mic Node   : ${clean_id:-Not Found (Check 40-mic.conf)} (ghelper-audio)"
+    echo "Static Pitch FX Node    : ${fx_static_id:-Not Found (Check 41-mic-fx.conf)} (ghelper-audio-fx)"
+
+    if is_fx_running; then
+        local pr
+        pr=$(cat "$FX_STATE_FILE" 2>/dev/null || echo "Custom")
+        local pid
+        pid=$(cat "$FX_PID_FILE" 2>/dev/null || echo "?")
+        echo "On-Demand FX Engine     : RUNNING (PID: $pid, Preset: '$pr', Node ID: ${dusky_fx_id:-?})"
+    else
+        echo "On-Demand FX Engine     : STOPPED (Zero idle CPU)"
+    fi
+}
+
+cmd="${1:-status}"
+shift || true
+
+case "$cmd" in
+    clean)
+        stop_fx_engine
+        nid=$(get_node_id "ghelper-audio")
+        if [[ -n "$nid" ]]; then
+            wpctl set-default "$nid"
+            echo "Default Source: Native Clean Mic (ghelper-audio) [Node ID: $nid]"
+        else
+            echo "Error: ghelper-audio node not found in PipeWire graph." >&2
+            exit 1
+        fi
+        ;;
+    fx)
+        stop_fx_engine
+        nid=$(get_node_id "ghelper-audio-fx")
+        if [[ -n "$nid" ]]; then
+            wpctl set-default "$nid"
+            echo "Default Source: Static Pitch FX (ghelper-audio-fx) [Node ID: $nid]"
+        else
+            echo "Error: ghelper-audio-fx node not found in PipeWire graph." >&2
+            exit 1
+        fi
+        ;;
+    voice)
+        sub="${1:-}"
+        if [[ -z "$sub" ]]; then
+            echo "Usage: mic voice <preset|off>" >&2
+            echo "Presets: 'Daft Punk', 'Darth Vader', 'Chipmunk', 'Cylon Robot', 'Kraftwerk', 'Matrix Agent', 'Robot Phone', 'Sci-Fi Alien', 'T-Pain', 'Stephen Hawking', 'Megatron'" >&2
+            exit 1
+        fi
+        if [[ "$sub" == "off" ]]; then
+            stop_fx_engine
+            nid=$(get_node_id "ghelper-audio")
+            if [[ -n "$nid" ]]; then
+                wpctl set-default "$nid"
+                echo "Voice FX stopped. Default Source restored to Native Clean Mic (ghelper-audio) [Node ID: $nid]"
+            fi
+        else
+            apply_preset "$sub"
+        fi
+        ;;
+    gate)
+        val="${1:-}"
+        if [[ -z "$val" ]]; then
+            echo "Usage: mic gate <0-100>" >&2
+            exit 1
+        fi
+        if is_fx_running; then
+            send_fx_cmd "AGG $((val * 10))"
+            echo "Updated on-demand engine gate aggressiveness to ${val}%"
+        fi
+        local conf="$HOME/.config/pipewire/pipewire.conf.d/40-mic.conf"
+        if [[ -f "$conf" ]]; then
+            sed -i -E "s/(\"VAD Threshold \(%\)\"[[:space:]]*=[[:space:]]*)[0-9.]+/\\1${val}.0/" "$conf"
+            systemctl --user restart pipewire pipewire-pulse wireplumber
+            sleep 1
+            local nid
+            nid=$(get_node_id "ghelper-audio")
+            if [[ -n "$nid" ]]; then
+                wpctl set-default "$nid"
+            fi
+            echo "Updated clean mic (ghelper-audio) VAD Threshold to ${val}% in 40-mic.conf and reloaded PipeWire."
+        fi
+        ;;
+    status)
+        show_status
+        ;;
+    *)
+        echo "Usage: mic {clean | fx | voice <preset> | voice off | gate <0-100> | status}" >&2
+        exit 1
+        ;;
+esac

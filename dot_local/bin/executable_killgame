@@ -1,34 +1,61 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Emergency Game / Compositor Termination Script (killgame / kg)
+# Smart Mode:
+#   - If games / Steam / Proton ARE running -> Force terminate cleanly & notify
+#   - If NOTHING is running already -> Smart action: launch game launcher (rofi-games)
 # ==============================================================================
-echo "==> Terminating hung game processes and compositors..."
+set -euo pipefail
 
-# 1. Kill Games, Launchers, Wine/Proton processes, and Steam
-killall -9 -v cs2 gamescope gamescopereaper steam steamwebhelper eldenring.exe GTAIV.exe PlayGTAIV.exe LaunchGTAIV.exe wineserver 2>/dev/null || true
-pkill -9 -e -f "gamescope|cs2|steam|eldenring|gtaiv|wineserver|pressure-vessel" 2>/dev/null || true
+GAME_PATTERNS="cs2|gamescope|gamescopereaper|steam|steamwebhelper|eldenring|gtaiv|darksouls|farcry|wineserver|pressure-vessel|Discovery\.exe|HuntGame\.exe|TslGame\.exe|r5apex\.exe|d3ddriverquery"
 
-# Session sidecars: ensure restore will never resurrect killed Steam
-mkdir -p "$HOME/.config/sway/session" 2>/dev/null || true
-touch "$HOME/.config/sway/session/steam_was_killed" 2>/dev/null || true
-touch /tmp/steam_killed_by_user 2>/dev/null || true
+# Find running game/Steam PIDs (excluding bash/killgame/grep themselves)
+FOUND_PIDS=()
+while read -r pid; do
+    [ -z "$pid" ] && continue
+    comm=$(cat "/proc/$pid/comm" 2>/dev/null || true)
+    if [[ "$comm" != "killgame" && "$comm" != "bash" && "$comm" != "grep" ]]; then
+        FOUND_PIDS+=("$pid")
+    fi
+done < <(pgrep -u "$UID" -f "$GAME_PATTERNS" 2>/dev/null || true)
 
-# Desktop notification if GUI is alive
-notify-send -t 2000 -i application-exit "Steam & Games Terminated" "All Steam and game processes force killed" 2>/dev/null || true
+if [ "${#FOUND_PIDS[@]}" -gt 0 ]; then
+    echo "==> Terminating active game and Steam processes (${#FOUND_PIDS[@]} found)..."
 
-# 2. Restore display / bar (X11 only bits are gated; Wayland needs none)
-if [ -n "$SWAYSOCK" ] || [ -n "$WAYLAND_DISPLAY" ]; then
-    swaymsg reload 2>/dev/null || true
+    # 1. Kill Games, Launchers, Wine/Proton processes, and Steam
+    killall -9 -v cs2 gamescope gamescopereaper steam steamwebhelper eldenring.exe GTAIV.exe PlayGTAIV.exe LaunchGTAIV.exe wineserver 2>/dev/null || true
+    pkill -9 -u "$UID" -f "$GAME_PATTERNS" 2>/dev/null || true
+
+    # Session sidecars: ensure restore will never resurrect killed Steam
+    mkdir -p "$HOME/.config/sway/session" 2>/dev/null || true
+    touch "$HOME/.config/sway/session/steam_was_killed" 2>/dev/null || true
+    touch /tmp/steam_killed_by_user 2>/dev/null || true
+
+    # Desktop notification
+    notify-send -a "Game Terminator" -t 2000 -i application-exit \
+        "Steam & Games Terminated" "Force-killed all running game and Proton processes" 2>/dev/null || true
+
+    # Clean compositor / display refresh only when games were actually killed
+    if [ -n "${SWAYSOCK:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
+        swaymsg reload 2>/dev/null || true
+    else
+        export DISPLAY="${DISPLAY:-:0}"
+        xrandr --output eDP-1 --set "scaling mode" "Full aspect" 2>/dev/null || true
+        xrandr --output eDP-1 --mode 1920x1200 --rate 165.00 2>/dev/null || xrandr --output eDP-1 --auto 2>/dev/null || true
+        [ -f "$HOME/.fehbg" ] && sh "$HOME/.fehbg" 2>/dev/null || true
+        command -v i3-msg >/dev/null 2>&1 && i3-msg restart 2>/dev/null || true
+    fi
+
+    echo "==> Done. Gaming session terminated."
 else
-    export DISPLAY="${DISPLAY:-:0}"
-    xrandr --output eDP-1 --set "scaling mode" "Full aspect" 2>/dev/null || true
-    xrandr --output eDP-1 --mode 1920x1200 --rate 165.00 2>/dev/null || xrandr --output eDP-1 --auto 2>/dev/null || true
-    sh "$HOME/.fehbg" 2>/dev/null || true
-    i3-msg restart 2>/dev/null || true
-    "$HOME/.local/bin/bar-apply" 2>/dev/null || true
+    # NOTHING is running! Make it smart: launch rofi-games menu
+    echo "==> No active game or Steam processes found."
+    if [ -n "${SWAYSOCK:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ] || [ -n "${DISPLAY:-}" ]; then
+        if [ -x "$HOME/.local/bin/rofi-games" ]; then
+            exec "$HOME/.local/bin/rofi-games"
+        else
+            notify-send -a "Game Launcher" -u low -i input-gaming \
+                "No Games Running" "No active games or Steam processes detected" 2>/dev/null || true
+        fi
+    fi
 fi
-
-# 3. Guidance message
-echo ""
-echo "==> Done! Return to your desktop by pressing: Ctrl + Alt + F2 (or Ctrl + Alt + Fn + F2)"
-echo "==> If the screen is still black, run: sudo systemctl restart ly@tty2"

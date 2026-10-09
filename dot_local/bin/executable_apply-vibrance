@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# apply-vibrance: Canonical one-shot display vibrance applicator.
+# Idempotent, zero-daemon, mode-aware display vibrance enforcement.
+# Modes supported:
+#   - AsusMuxDgpu : NVIDIA RTX 5050 drives eDP-1 -> nvibrant (NVKMS direct ioctl)
+#   - Hybrid      : Intel iGPU drives eDP-1      -> ctm-test (CRTC CTM hardware matrix)
+# ==============================================================================
+set -euo pipefail
+
+DEBUG="${VIBRANCE_DEBUG:-0}"
+
+log_debug() {
+    if [ "$DEBUG" = "1" ]; then
+        echo "[apply-vibrance] $*" >&2
+    fi
+}
+
+# 1. Determine GPU mode via supergfxctl (fallback to cached mode or Hybrid)
+GPU_MODE="Hybrid"
+if command -v supergfxctl >/dev/null 2>&1; then
+    GPU_MODE="$(supergfxctl -g 2>/dev/null || echo 'Hybrid')"
+elif [ -f "${XDG_RUNTIME_DIR:-/run/user/$UID}/gpu_mode" ]; then
+    GPU_MODE="$(cat "${XDG_RUNTIME_DIR:-/run/user/$UID}/gpu_mode" 2>/dev/null || echo 'Hybrid')"
+fi
+
+log_debug "Detected GPU mode: $GPU_MODE"
+
+case "$GPU_MODE" in
+    AsusMuxDgpu)
+        # Authoritative config: ~/.config/nvibrant
+        CONFIG_FILE="$HOME/.config/nvibrant"
+        if [ ! -f "$CONFIG_FILE" ]; then
+            log_debug "Config file $CONFIG_FILE not found; doing nothing."
+            exit 0
+        fi
+
+        NVIB_VAL="$(tr -d '[:space:]' < "$CONFIG_FILE" 2>/dev/null || true)"
+        # Validate integer (allowing optional leading minus)
+        case "$NVIB_VAL" in
+            ''|*[!0-9-]*)
+                log_debug "Invalid vibrance value in $CONFIG_FILE: '$NVIB_VAL'; doing nothing."
+                exit 0
+                ;;
+        esac
+
+        if ! command -v nvibrant >/dev/null 2>&1; then
+            log_debug "nvibrant command not found; doing nothing."
+            exit 0
+        fi
+
+        log_debug "Applying nvibrant 0 0 $NVIB_VAL"
+        # Connector index 2 (argv[3]) corresponds to internal panel on RTX 5050 MUX
+        nvibrant 0 0 "$NVIB_VAL" >/dev/null 2>&1 || {
+            log_debug "nvibrant ioctl failed non-fatally."
+            exit 0
+        }
+        ;;
+
+    Hybrid|Integrated)
+        # Authoritative config: ~/.config/vibrance
+        CONFIG_FILE="$HOME/.config/vibrance"
+        CTM_BIN="$HOME/.local/bin/ctm-test"
+
+        if [ ! -x "$CTM_BIN" ]; then
+            log_debug "ctm-test binary not found or not executable at $CTM_BIN; doing nothing."
+            exit 0
+        fi
+
+        VIB_VAL="1.3"
+        if [ -f "$CONFIG_FILE" ]; then
+            RAW_VAL="$(tr -d '[:space:]' < "$CONFIG_FILE" 2>/dev/null || true)"
+            [ -n "$RAW_VAL" ] && VIB_VAL="$RAW_VAL"
+        fi
+
+        log_debug "Applying Intel CTM value: $VIB_VAL"
+        if [ "$VIB_VAL" = "1.0" ] || [ "$VIB_VAL" = "1" ] || [ "$VIB_VAL" = "off" ]; then
+            "$CTM_BIN" --identity >/dev/null 2>&1 || {
+                log_debug "ctm-test --identity failed non-fatally."
+                exit 0
+            }
+        else
+            "$CTM_BIN" --set "$VIB_VAL" >/dev/null 2>&1 || {
+                log_debug "ctm-test --set failed non-fatally."
+                exit 0
+            }
+        fi
+        ;;
+
+    *)
+        log_debug "Unknown GPU mode: '$GPU_MODE'; doing nothing safely."
+        exit 0
+        ;;
+esac
+
+log_debug "Vibrance applied successfully."
+exit 0
