@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# btrfs-stats: Btrfs ZSTD compression ratio inspector for / and /home
+# Read-only wrapper around compsize. Does not prune snapshots or balance.
+# ==============================================================================
+set -euo pipefail
+
+if ! command -v compsize >/dev/null 2>&1; then
+    echo "compsize is required. Installing via pacman..."
+    sudo pacman -S --needed --noconfirm compsize
+fi
+
+echo "=========================================================="
+echo "    Btrfs Compression Statistics (compsize)              "
+echo "=========================================================="
+
+analyze_mount() {
+    local target="$1"
+    if ! findmnt -t btrfs "$target" >/dev/null 2>&1; then
+        echo "[-] Skipping $target: not a mounted btrfs filesystem."
+        return 0
+    fi
+
+    echo -e "\n--- Mount: $target ---"
+    sudo compsize -x "$target"
+}
+
+analyze_mount "/"
+analyze_mount "/home"
+
+echo -e "\n=========================================================="
+echo "Analysis complete. (Read-only execution)"

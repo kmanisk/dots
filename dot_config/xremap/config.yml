@@ -8,7 +8,6 @@ modmap:
         held: CapsLock
         alone: Esc
         alone_timeout_millis: 200
-      RightCtrl: RightMeta
       RightAlt: RightMeta
 
 keymap:

@@ -17,18 +17,28 @@ esac
 VOL=$(pamixer --get-volume 2>/dev/null || echo "0")
 MUTE=$(pamixer --get-mute 2>/dev/null || echo "false")
 
+# Fast dismiss: 800ms regular, 500ms in fullscreen
+TIMEOUT=800
+if command -v swaymsg >/dev/null 2>&1 && [ -n "${SWAYSOCK:-}" ]; then
+    IS_FS=$(swaymsg -t get_tree 2>/dev/null | jq -r '.. | select(.focused? == true) | .fullscreen_mode' 2>/dev/null || echo 0)
+    [ "$IS_FS" = "1" ] && TIMEOUT=500
+elif command -v i3-msg >/dev/null 2>&1 && [ -n "${I3SOCK:-}" ]; then
+    IS_FS=$(i3-msg -t get_tree 2>/dev/null | jq -r '.. | select(.focused? == true) | .fullscreen_mode' 2>/dev/null || echo 0)
+    [ "$IS_FS" = "1" ] && TIMEOUT=500
+fi
+
 if [ "$MUTE" = "true" ]; then
-    notify-send -a "Volume" -u low -i audio-volume-muted \
+    notify-send -a "Volume" -t "$TIMEOUT" -u low -i audio-volume-muted \
         -h string:x-canonical-private-synchronous:volume \
         -h string:x-dunst-stack-tag:volume "Volume: Muted" 2>/dev/null || \
-    dunstify -a "Volume" -u low -i audio-volume-muted \
+    dunstify -a "Volume" -t "$TIMEOUT" -u low -i audio-volume-muted \
         -h string:x-dunst-stack-tag:volume "Volume: Muted" 2>/dev/null
 else
-    notify-send -a "Volume" -u low -i audio-volume-high \
+    notify-send -a "Volume" -t "$TIMEOUT" -u low -i audio-volume-high \
         -h string:x-canonical-private-synchronous:volume \
         -h string:x-dunst-stack-tag:volume \
         -h int:value:"$VOL" "Volume: ${VOL}%" 2>/dev/null || \
-    dunstify -a "Volume" -u low -i audio-volume-high \
+    dunstify -a "Volume" -t "$TIMEOUT" -u low -i audio-volume-high \
         -h string:x-dunst-stack-tag:volume \
         -h int:value:"$VOL" "Volume: ${VOL}%" 2>/dev/null
 fi

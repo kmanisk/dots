@@ -75,9 +75,9 @@ synchronized_sync = 1
 
 
 [color]
-# Theme: bearded-arc (bearded-arc)
+# Theme: Void Theme for (void)
 background = 'default'
-foreground = '#69c3ff'
+foreground = '#bb9af7'
 
 gradient = 0
 

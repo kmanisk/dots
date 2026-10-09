@@ -632,6 +632,13 @@ def apply_theme(name, no_nvim=False):
             f"bar bar-0 colors inactive_workspace {r['bg2']} {r['bg']} {r['muted']}; "
             f"bar bar-0 colors urgent_workspace {r['red']} {r['bg']} {r['red']}"
         )
+        # Optional per-theme cursor integration (zero reload, single batched IPC)
+        cursor_data = theme_data.get("cursor")
+        if isinstance(cursor_data, dict) and cursor_data.get("theme"):
+            c_theme = str(cursor_data.get("theme"))
+            c_size = int(cursor_data.get("size", 40))
+            sway_cmd += f"; seat seat0 xcursor_theme {c_theme} {c_size}"
+
         try:
             subprocess.Popen(["swaymsg", sway_cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:

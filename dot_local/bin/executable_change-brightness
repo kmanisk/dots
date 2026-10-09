@@ -3,6 +3,7 @@
 # Adjust Brightness: Hardware Backlight (0% - 100%) + Sub-Zero Software Dimming
 # Allows dimming below 0% for dark room usage without screen flashing or lag.
 # Software dimming uses wl-gammarelay-rs (Wayland wlr-gamma-control via D-Bus).
+# Works uniformly in both Hybrid (intel_backlight) and AsusMuxDgpu (nvidia_wmi_ec_backlight).
 # ==============================================================================
 export PATH="$HOME/.gemini/antigravity-cli/bin:$HOME/.local/bin:/usr/bin:$PATH"
 
@@ -43,29 +44,33 @@ ICON="display-brightness"
 
 if [[ "$DIRECTION" == "down" ]]; then
     if (( HW_PERCENT > 0 )); then
-        # 1. Hardware Backlight Dimming
-        brightnessctl set "${STEP}%-" >/dev/null 2>&1
-        HW_PERCENT=$(brightnessctl -m 2>/dev/null | cut -d, -f4 | tr -d '%')
-        [[ -z "$HW_PERCENT" ]] && HW_PERCENT=0
-
-        # Ensure software brightness is full (1.0) while above 0%
+        # 1. Hardware Backlight Dimming (100% down to 0%)
+        # Ensure software brightness is maxed (1.0) while hardware backlight is above 0%
         if (( SW_PCT < 100 )); then
             busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Brightness d 1.0 2>/dev/null || true
             SW_PCT=100
         fi
 
+        brightnessctl set "${STEP}%-" >/dev/null 2>&1
+        HW_PERCENT=$(brightnessctl -m 2>/dev/null | cut -d, -f4 | tr -d '%')
+        [[ -z "$HW_PERCENT" ]] && HW_PERCENT=0
+
         OSD_LABEL="Brightness: ${HW_PERCENT}%"
         OSD_VAL="$HW_PERCENT"
-        ICON="display-brightness"
+        if (( HW_PERCENT <= 15 )); then
+            ICON="display-brightness-low"
+        else
+            ICON="display-brightness"
+        fi
     else
-        # 2. Sub-Zero Software Dimming (Hardware is at 0%)
+        # 2. Sub-Zero Software Dimming (Hardware backlight is at 0%)
         NEW_SW=$(( SW_PCT - STEP ))
         # Minimum safe software floor: 15% (avoids complete blackout)
         if (( NEW_SW < 15 )); then
             NEW_SW=15
         fi
 
-        FLOAT_VAL=$(python3 -c "print(round($NEW_SW / 100.0, 2))")
+        FLOAT_VAL=$(awk -v val="$NEW_SW" 'BEGIN { printf "%.2f", val / 100 }')
         busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Brightness d "$FLOAT_VAL" 2>/dev/null || true
 
         SUB_PERCENT=$(( 100 - NEW_SW ))
@@ -76,7 +81,7 @@ if [[ "$DIRECTION" == "down" ]]; then
 else
     # DIRECTION == "up"
     if (( SW_PCT < 100 )); then
-        # 1. Recovering from Sub-Zero Software Dimming
+        # 1. Recovering from Sub-Zero Software Dimming up to 0% (SW 1.0)
         NEW_SW=$(( SW_PCT + STEP ))
         if (( NEW_SW >= 100 )); then
             NEW_SW=100
@@ -85,7 +90,7 @@ else
             OSD_VAL=0
             ICON="display-brightness-low"
         else
-            FLOAT_VAL=$(python3 -c "print(round($NEW_SW / 100.0, 2))")
+            FLOAT_VAL=$(awk -v val="$NEW_SW" 'BEGIN { printf "%.2f", val / 100 }')
             busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Brightness d "$FLOAT_VAL" 2>/dev/null || true
             SUB_PERCENT=$(( 100 - NEW_SW ))
             OSD_LABEL="🌙 Sub-Zero: -${SUB_PERCENT}%"
@@ -93,8 +98,8 @@ else
             ICON="weather-clear-night"
         fi
     else
-        # 2. Hardware Backlight Increasing
-        # Ensure software brightness is 1.0
+        # 2. Hardware Backlight Increasing (0% up to 100% full panel nits)
+        # Ensure software brightness is strictly 1.0 (no dimming/gamma bottleneck)
         busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Brightness d 1.0 2>/dev/null || true
 
         brightnessctl set "+${STEP}%" >/dev/null 2>&1
@@ -107,13 +112,23 @@ else
     fi
 fi
 
+# Fast dismiss: 800ms regular, 500ms in fullscreen
+TIMEOUT=800
+if command -v swaymsg >/dev/null 2>&1 && [ -n "${SWAYSOCK:-}" ]; then
+    IS_FS=$(swaymsg -t get_tree 2>/dev/null | jq -r '.. | select(.focused? == true) | .fullscreen_mode' 2>/dev/null || echo 0)
+    [ "$IS_FS" = "1" ] && TIMEOUT=500
+elif command -v i3-msg >/dev/null 2>&1 && [ -n "${I3SOCK:-}" ]; then
+    IS_FS=$(i3-msg -t get_tree 2>/dev/null | jq -r '.. | select(.focused? == true) | .fullscreen_mode' 2>/dev/null || echo 0)
+    [ "$IS_FS" = "1" ] && TIMEOUT=500
+fi
+
 # Send synchronized OSD notification (Mako / Dunst)
-notify-send -a "Brightness" -u low -i "$ICON" \
+notify-send -a "Brightness" -t "$TIMEOUT" -u low -i "$ICON" \
     -h string:x-canonical-private-synchronous:brightness \
     -h string:x-dunst-stack-tag:brightness \
     -h int:value:"$OSD_VAL" \
     "$OSD_LABEL" 2>/dev/null || \
-dunstify -a "Brightness" -u low -i "$ICON" \
+dunstify -a "Brightness" -t "$TIMEOUT" -u low -i "$ICON" \
     -h string:x-dunst-stack-tag:brightness \
     -h int:value:"$OSD_VAL" \
     "$OSD_LABEL" 2>/dev/null

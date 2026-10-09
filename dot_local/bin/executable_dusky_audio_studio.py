@@ -1390,15 +1390,9 @@ def set_dusky_devices_as_default() -> None:
                 elif media_class == "Audio/Sink" and ("ghelper-audio-sink" in node_name or "dusky audio" in node_desc):
                     sink_id = obj.get("id")
 
-            if mic_id is not None and sink_id is not None:
+            if mic_id is not None:
                 subprocess.run(["wpctl", "set-default", str(mic_id)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=COMMAND_ENV)
-                subprocess.run(["wpctl", "set-default", str(sink_id)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=COMMAND_ENV)
                 break
-            elif mic_id is not None or sink_id is not None:
-                if mic_id is not None:
-                    subprocess.run(["wpctl", "set-default", str(mic_id)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=COMMAND_ENV)
-                if sink_id is not None:
-                    subprocess.run(["wpctl", "set-default", str(sink_id)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=COMMAND_ENV)
         except Exception:
             pass
         time.sleep(0.04)

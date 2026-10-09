@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# mono: On-demand system-wide mono downmix for PipeWire
+# Creates a 1ch mono downmix sink + loopback when enabled, tears down cleanly.
+# Leaves no background processes, timers, or daemons when off.
+# ==============================================================================
+set -euo pipefail
+
+STATE_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+STATE_FILE="$STATE_DIR/mono_audio.state"
+
+is_active() {
+    pactl list short modules 2>/dev/null | grep -q "mono_downmix"
+}
+
+get_default_sink() {
+    pactl get-default-sink 2>/dev/null || echo ""
+}
+
+mono_on() {
+    if is_active; then
+        echo "[mono] Mono downmix is already enabled."
+        return 0
+    fi
+
+    local prev_sink
+    prev_sink=$(get_default_sink)
+    if [[ "$prev_sink" == "mono_downmix" ]]; then
+        prev_sink=""
+    fi
+
+    echo "[*] Initializing mono downmix sink..."
+    local sink_mod
+    sink_mod=$(pactl load-module module-null-sink sink_name=mono_downmix channels=1 channel_map=mono sink_properties=device.description="Mono_Downmix")
+
+    echo "[*] Connecting loopback to previous sink ($prev_sink)..."
+    local loop_mod
+    if [[ -n "$prev_sink" ]]; then
+        loop_mod=$(pactl load-module module-loopback source=mono_downmix.monitor sink="$prev_sink")
+    else
+        loop_mod=$(pactl load-module module-loopback source=mono_downmix.monitor)
+    fi
+
+    # Set as default sink
+    pactl set-default-sink mono_downmix
+
+    # Move active regular app playback streams to mono_downmix (preserve protected routes)
+    pactl list short sink-inputs 2>/dev/null | while read -r input_id _ _ app_sink _; do
+        if [[ "$app_sink" != "mono_downmix" && "$app_sink" != *"peace_gaming"* && "$app_sink" != *"effect_"* ]]; then
+            pactl move-sink-input "$input_id" mono_downmix 2>/dev/null || true
+        fi
+    done
+
+    # Save state
+    cat << EOF > "$STATE_FILE"
+SINK_MOD=$sink_mod
+LOOP_MOD=$loop_mod
+PREV_SINK=$prev_sink
+EOF
+
+    echo "[✓] Mono downmix active. Audio routed through 1ch mono sink."
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send -t 1500 -i audio-speakers "Audio Routing" "Mono Downmix: Enabled" 2>/dev/null &
+    fi
+}
+
+mono_off() {
+    if ! is_active && [[ ! -f "$STATE_FILE" ]]; then
+        echo "[mono] Mono downmix is already disabled."
+        return 0
+    fi
+
+    local prev_sink=""
+    if [[ -f "$STATE_FILE" ]]; then
+        # shellcheck disable=SC1090
+        source "$STATE_FILE" 2>/dev/null || true
+    fi
+
+    # Restore previous default sink if valid and not mono_downmix
+    if [[ -n "$prev_sink" && "$prev_sink" != "mono_downmix" ]]; then
+        if pactl list short sinks 2>/dev/null | grep -q "$prev_sink"; then
+            echo "[*] Restoring previous default sink: $prev_sink..."
+            pactl set-default-sink "$prev_sink" 2>/dev/null || true
+            # Move app streams back
+            pactl list short sink-inputs 2>/dev/null | while read -r input_id _ _ app_sink _; do
+                if [[ "$app_sink" == "mono_downmix" ]]; then
+                    pactl move-sink-input "$input_id" "$prev_sink" 2>/dev/null || true
+                fi
+            done
+        fi
+    else
+        # If no previous sink recorded, find a fallback physical sink
+        local fallback
+        fallback=$(pactl list short sinks 2>/dev/null | awk '{print $2}' | grep -E 'alsa_output|bluez_output' | head -n 1 || true)
+        if [[ -n "$fallback" ]]; then
+            pactl set-default-sink "$fallback" 2>/dev/null || true
+        fi
+    fi
+
+    # Unload specific recorded modules
+    if [[ -n "${LOOP_MOD:-}" ]]; then
+        pactl unload-module "$LOOP_MOD" 2>/dev/null || true
+    fi
+    if [[ -n "${SINK_MOD:-}" ]]; then
+        pactl unload-module "$SINK_MOD" 2>/dev/null || true
+    fi
+
+    # Sweep any orphan mono_downmix modules
+    pactl list short modules 2>/dev/null | grep "mono_downmix" | awk '{print $1}' | while read -r mid; do
+        pactl unload-module "$mid" 2>/dev/null || true
+    done || true
+
+    # Remove state file
+    rm -f "$STATE_FILE"
+
+    echo "[✓] Mono downmix disabled. Normal stereo routing restored."
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send -t 1500 -i audio-speakers "Audio Routing" "Mono Downmix: Disabled" 2>/dev/null &
+    fi
+}
+
+mono_status() {
+    if is_active; then
+        echo "State: ACTIVE (Mono downmix enabled)"
+        pactl list short modules 2>/dev/null | grep "mono_downmix" || true
+    else
+        echo "State: INACTIVE (Normal stereo routing)"
+    fi
+}
+
+case "${1:-status}" in
+    on)
+        mono_on
+        ;;
+    off)
+        mono_off
+        ;;
+    toggle)
+        if is_active; then
+            mono_off
+        else
+            mono_on
+        fi
+        ;;
+    status)
+        mono_status
+        ;;
+    *)
+        echo "Usage: mono {on|off|toggle|status}" >&2
+        exit 1
+        ;;
+esac

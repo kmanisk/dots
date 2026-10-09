@@ -178,12 +178,13 @@
         "enabled": false
     },
     "tabs": {
-        "git_status": true
+        "git_status": true,
+        // "file_icons": true,
     },
     "tab_bar": {
         "show_nav_history_buttons": false,
         "show_tab_bar_buttons": false,
-        "show": true // add to hide or remove tabs
+        "show": false
     },
     "toolbar": {
         "breadcrumbs": false,
@@ -208,7 +209,9 @@
         "show_branch_name": false,
         "show_user_menu": false,
         "show_worktree_name": false,
-        "show_branch_status_icon": false
+        "show_branch_status_icon": false,
+        "show_onboarding_banner": false,
+        "show_menus": false
     },
     // ─────────────────────────────────────────────────────────────────────────────
     // 9. GIT (VERSION CONTROL)

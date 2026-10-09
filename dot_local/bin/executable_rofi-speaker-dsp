@@ -52,54 +52,33 @@ else
     ROUTE_INFO="Audio: $DEFAULT_SINK"
 fi
 
-# 3. Format Menu Options with Active Indicators
-mark_dyn="○"
-mark_mov="○"
-mark_mus="○"
-mark_gam="○"
-mark_voi="○"
+# 3. Format Menu Options with Active Indicators (Pruned to 4 Core Profiles)
 mark_cus="○"
+mark_dyn="○"
+mark_mus="○"
 mark_bal="○"
-mark_det="○"
-mark_war="○"
 selected_row=0
 
 case "$ACTIVE_VOICING" in
-    dynamic)
-        mark_dyn="●"
+    custom)
+        mark_cus="●"
         selected_row=0
         ;;
-    movie)
-        mark_mov="●"
+    dynamic)
+        mark_dyn="●"
         selected_row=1
         ;;
     music)
         mark_mus="●"
         selected_row=2
         ;;
-    game)
-        mark_gam="●"
-        selected_row=3
-        ;;
-    voice)
-        mark_voi="●"
-        selected_row=4
-        ;;
-    custom)
-        mark_cus="●"
-        selected_row=5
-        ;;
     balanced)
         mark_bal="●"
-        selected_row=6
+        selected_row=3
         ;;
-    detailed)
-        mark_det="●"
-        selected_row=7
-        ;;
-    warm)
-        mark_war="●"
-        selected_row=8
+    *)
+        mark_cus="●"
+        selected_row=0
         ;;
 esac
 
@@ -111,15 +90,10 @@ else
     off_indicator="✔"
 fi
 
-options="${mark_dyn} Dynamic (DAX3 Default)
-${mark_mov} Movie (DAX3 Cinema)
+options="${mark_cus} Custom 2 (Dolby Access)
+${mark_dyn} Dynamic (DAX3 Default)
 ${mark_mus} Music (DAX3 Audiophile)
-${mark_gam} Game (DAX3 +6dB)
-${mark_voi} Voice (DAX3 Speech)
-${mark_cus} Custom 2 (Dolby Access)
 ${mark_bal} Balanced (Linux)
-${mark_det} Detailed (Linux)
-${mark_war} Warm (Linux)
 ${on_indicator} DSP On
 ${off_indicator} DSP Off
 󰋼 Status
@@ -138,32 +112,17 @@ chosen=$(echo -e "$options" | rofi \
 
 # 5. Dispatch Action
 case "$chosen" in
+    *"Custom 2"*)
+        "$SPK_BIN" custom
+        ;;
     *"Dynamic"*)
         "$SPK_BIN" dynamic
-        ;;
-    *"Movie"*)
-        "$SPK_BIN" movie
         ;;
     *"Music"*)
         "$SPK_BIN" music
         ;;
-    *"Game"*)
-        "$SPK_BIN" game
-        ;;
-    *"Voice"*)
-        "$SPK_BIN" voice
-        ;;
-    *"Custom 2"*)
-        "$SPK_BIN" custom
-        ;;
     *"Balanced"*)
         "$SPK_BIN" balanced
-        ;;
-    *"Detailed"*)
-        "$SPK_BIN" detailed
-        ;;
-    *"Warm"*)
-        "$SPK_BIN" warm
         ;;
     *"DSP On"*)
         "$SPK_BIN" on
@@ -173,7 +132,7 @@ case "$chosen" in
         ;;
     *"Status"*)
         STATUS_REPORT=$("$SPK_BIN" status | sed -r 's/\x1B\[[0-9;]*[mK]//g')
-        notify-send -t 6000 -i audio-speakers "ASUS TUF Speaker DSP" "$STATUS_REPORT"
+        notify-send -t 6000 -i audio-speakers "ASUS TUF Speaker DSP" "$STATUS_REPORT" 2>/dev/null &
         ;;
     *"Cycle Output"*)
         "$HOME/.local/bin/toggle-audio-sink"

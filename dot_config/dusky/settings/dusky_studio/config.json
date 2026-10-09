@@ -39,19 +39,6 @@
   "eq_on": true,
   "eq_post_gain": 0,
   "eq_gains": [
-    -600,
-    -200,
-    -100,
-    -200,
-    100,
-    300,
-    400,
-    500,
-    300
-  ],
-  "out_eq_on": true,
-  "out_eq_post_gain": 0,
-  "out_eq_gains": [
     0,
     0,
     0,
@@ -61,6 +48,19 @@
     0,
     0,
     0
+  ],
+  "out_eq_on": true,
+  "out_eq_post_gain": 0,
+  "out_eq_gains": [
+    -400,
+    -200,
+    100,
+    200,
+    300,
+    600,
+    500,
+    200,
+    -100
   ],
   "out_vocoder_on": false,
   "out_vocoder_mix": 70,

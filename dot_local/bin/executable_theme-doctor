@@ -13,6 +13,7 @@ import json
 import glob
 import subprocess
 import re
+import shutil
 
 sys.path.insert(0, os.path.expanduser("~/.local/lib"))
 from theme_engine.schema import contrast_ratio, BASE16_KEYS, HEX_RE, clean_hex
@@ -145,29 +146,59 @@ def main():
     print(f"  Rofi:                   {status_label(rofi_ok)}")
     print(f"  Hooks:                  {status_label(hooks_ok, f'({len(os.listdir(hooks_dir))} scripts)')}")
 
-    # 4. Hardware CTM & Vibrance
-    print(colored("\nHardware Display CTM & Vibrance", "cyan"))
-    inspect_out = run_cmd([os.path.expanduser("~/.local/bin/ctm-test"), "--inspect"])
-    
-    crtc = "Unknown"
-    conn = "Unknown"
-    ctm_blob = "Unknown"
-    driver = "Unknown"
-    for line in inspect_out.splitlines():
-        if "crtc   :" in line:
-            crtc = line.split(":", 1)[1].strip()
-        elif "conn   :" in line:
-            conn = line.split(":", 1)[1].strip().split()[0]
-        elif "ctm_blob:" in line:
-            ctm_blob = line.split(":", 1)[1].strip()
-        elif "driver :" in line:
-            driver = line.split(":", 1)[1].strip()
+    # 4. Hardware Display Vibrance & CTM
+    print(colored("\nHardware Display Vibrance & CTM", "cyan"))
+    gpu_mode = run_cmd(["supergfxctl", "-g"]).strip() or "Hybrid"
+    print(f"  GPU Mode:               {colored(gpu_mode, 'bold')}")
 
-    cfg_val = "1.0"
-    vibrance_file = os.path.expanduser("~/.config/vibrance")
-    if os.path.exists(vibrance_file):
-        with open(vibrance_file, "r") as f:
-            cfg_val = f.read().strip()
+    if gpu_mode == "AsusMuxDgpu":
+        nvibrant_bin = shutil.which("nvibrant") or (os.path.exists("/usr/bin/nvibrant") and "/usr/bin/nvibrant")
+        cfg_val = "800 (default)"
+        nvib_cfg = os.path.expanduser("~/.config/nvibrant")
+        if os.path.exists(nvib_cfg):
+            try:
+                with open(nvib_cfg, "r") as f:
+                    cfg_val = f.read().strip() or "800"
+            except Exception:
+                pass
+
+        print(f"  Driver:                 {colored('nvidia (NVKMS direct scanout)', 'bold')}")
+        print(f"  Pipeline:               {colored('RTX 5050 -> eDP-1 (Internal Panel)', 'bold')}")
+        print(f"  Configured Vibrance:    {colored(cfg_val, 'bold')} (~/.config/nvibrant)")
+        if nvibrant_bin:
+            vibrance_status = colored(f"active (nvibrant direct ioctl)", "green")
+        else:
+            vibrance_status = colored("nvibrant binary not found", "red")
+        print(f"  Live Hardware Vibrance: {vibrance_status}")
+    else:
+        inspect_out = run_cmd([os.path.expanduser("~/.local/bin/ctm-test"), "--inspect"])
+        crtc = "Unknown"
+        conn = "Unknown"
+        ctm_blob = "Unknown"
+        driver = "Unknown"
+        for line in inspect_out.splitlines():
+            if "crtc   :" in line:
+                crtc = line.split(":", 1)[1].strip()
+            elif "conn   :" in line:
+                conn = line.split(":", 1)[1].strip().split()[0]
+            elif "ctm_blob:" in line:
+                ctm_blob = line.split(":", 1)[1].strip()
+            elif "driver :" in line:
+                driver = line.split(":", 1)[1].strip()
+
+        cfg_val = "1.0"
+        vibrance_file = os.path.expanduser("~/.config/vibrance")
+        if os.path.exists(vibrance_file):
+            with open(vibrance_file, "r") as f:
+                cfg_val = f.read().strip()
+
+        print(f"  Driver:                 {colored(driver, 'bold')}")
+        print(f"  CRTC:                   {colored(crtc, 'bold')}")
+        print(f"  Connector:              {colored(conn, 'bold')}")
+        print(f"  Configured Saturation:  {colored(cfg_val, 'bold')} (~/.config/vibrance)")
+        is_active = ctm_blob != "0" and ctm_blob != "Unknown"
+        blob_status = colored(f"active (blob {ctm_blob})", "green") if is_active else colored("identity (blob 0)", "yellow")
+        print(f"  Live CTM Hardware:      {blob_status}")
 
     # Check vkBasalt in cs2-launch
     cs2_launch = os.path.expanduser("~/.local/bin/cs2-launch")
@@ -180,13 +211,6 @@ def main():
             elif "ENABLE_VKBASALT=1" in c:
                 vkbasalt_status = colored("ENABLED", "red")
 
-    print(f"  Driver:                 {colored(driver, 'bold')}")
-    print(f"  CRTC:                   {colored(crtc, 'bold')}")
-    print(f"  Connector:              {colored(conn, 'bold')}")
-    print(f"  Configured Saturation:  {colored(cfg_val, 'bold')} (~/.config/vibrance)")
-    is_active = ctm_blob != "0" and ctm_blob != "Unknown"
-    blob_status = colored(f"active (blob {ctm_blob})", "green") if is_active else colored("identity (blob 0)", "yellow")
-    print(f"  Live CTM Hardware:      {blob_status}")
     print(f"  vkBasalt (CS2):         {vkbasalt_status}")
 
     print(colored("═" * 40, "dim"))

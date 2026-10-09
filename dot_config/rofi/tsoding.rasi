@@ -22,7 +22,7 @@ window {
     anchor:           south;
     location:         south;
     width:            100%;
-    padding:          4px 8px;
+    padding:          8px 14px;
     border:           2px 0px 0px 0px;
     border-color:     @border-focus;
     border-radius:    0px;
@@ -36,24 +36,24 @@ horibox {
 
 listview {
     layout:      horizontal;
-    spacing:     8px;
+    spacing:     12px;
     lines:       100;
 }
 
 prompt {
-    padding:          0px 8px 0px 0px;
+    padding:          2px 12px 2px 0px;
     text-color:       @accent-bright;
     font:             @modal-font-bold;
 }
 
 entry {
     expand:           false;
-    width:            14em;
+    width:            18em;
     text-color:       @foreground;
 }
 
 element {
-    padding:          2px 8px;
+    padding:          6px 12px;
     border-radius:    0px;
 }
 

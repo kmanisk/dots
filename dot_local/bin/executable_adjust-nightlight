@@ -47,13 +47,23 @@ else
     MSG="Night Light: ${NEW_TEMP}K"
 fi
 
+# Fast dismiss: 800ms regular, 500ms in fullscreen
+TIMEOUT=800
+if command -v swaymsg >/dev/null 2>&1 && [ -n "${SWAYSOCK:-}" ]; then
+    IS_FS=$(swaymsg -t get_tree 2>/dev/null | jq -r '.. | select(.focused? == true) | .fullscreen_mode' 2>/dev/null || echo 0)
+    [ "$IS_FS" = "1" ] && TIMEOUT=500
+elif command -v i3-msg >/dev/null 2>&1 && [ -n "${I3SOCK:-}" ]; then
+    IS_FS=$(i3-msg -t get_tree 2>/dev/null | jq -r '.. | select(.focused? == true) | .fullscreen_mode' 2>/dev/null || echo 0)
+    [ "$IS_FS" = "1" ] && TIMEOUT=500
+fi
+
 # Send synchronized OSD notification (supported by Mako and Dunst)
-notify-send -a "Night Light" -u low -i preferences-desktop-display \
+notify-send -a "Night Light" -t "$TIMEOUT" -u low -i preferences-desktop-display \
     -h string:x-canonical-private-synchronous:nightlight \
     -h string:x-dunst-stack-tag:nightlight \
     -h int:value:"$PERCENT" \
     "$MSG" 2>/dev/null || \
-dunstify -a "Night Light" -u low -i preferences-desktop-display \
+dunstify -a "Night Light" -t "$TIMEOUT" -u low -i preferences-desktop-display \
     -h string:x-dunst-stack-tag:nightlight \
     -h int:value:"$PERCENT" \
     "$MSG" 2>/dev/null

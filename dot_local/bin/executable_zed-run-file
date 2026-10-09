@@ -127,7 +127,7 @@ case "$EXT" in
         elif [ -f "build.gradle" ]; then
             exec gradle run
         else
-            exec java --enable-preview "$FILE_ABS"
+            exec java "$FILE_ABS"
         fi
         ;;
 

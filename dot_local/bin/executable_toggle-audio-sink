@@ -166,4 +166,4 @@ except Exception:
     pass
 " "$NEXT_SINK" 2>/dev/null || true
 
-notify-send -t 2000 -i "$NEXT_ICON" "Audio Output Switched" "${NEXT_PREFIX}${NEXT_DESC}"
+notify-send -t 2000 -i "$NEXT_ICON" "Audio Output Switched" "${NEXT_PREFIX}${NEXT_DESC}" 2>/dev/null &

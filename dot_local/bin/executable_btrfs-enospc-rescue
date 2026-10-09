@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# btrfs-enospc-rescue: Emergency metadata rescue for out-of-space Btrfs pools
+# Adds a temporary loop device to allow metadata balancing, then removes it.
+# Never runs automatically. Requires explicit user confirmation.
+# ==============================================================================
+set -euo pipefail
+
+# Ensure root privileges
+if [[ $EUID -ne 0 ]]; then
+    echo "Root privileges required for btrfs-enospc-rescue. Re-running with sudo..."
+    exec sudo "$0" "$@"
+fi
+
+TARGET_MOUNT="${1:-/}"
+IMAGE_SIZE_GB=2
+RESCUE_IMG=""
+LOOP_DEV=""
+BTRFS_ATTACHED=0
+
+cleanup() {
+    local exit_code=$?
+    echo -e "\n--- Cleanup Routine ---"
+    if [[ "$BTRFS_ATTACHED" -eq 1 ]]; then
+        echo "[!] Warning: Rescue device is still attached to $TARGET_MOUNT."
+        echo "    Attempting emergency device removal..."
+        if btrfs device remove "$LOOP_DEV" "$TARGET_MOUNT" 2>/dev/null; then
+            BTRFS_ATTACHED=0
+            echo "[✓] Device successfully removed from Btrfs pool."
+        else
+            echo "[✗] Removal failed. DO NOT REBOOT. Manually free space, then run:"
+            echo "    btrfs device remove $LOOP_DEV $TARGET_MOUNT"
+        fi
+    fi
+
+    if [[ -n "$LOOP_DEV" ]] && losetup "$LOOP_DEV" >/dev/null 2>&1; then
+        losetup -d "$LOOP_DEV" 2>/dev/null || true
+        echo "[✓] Loop device $LOOP_DEV detached."
+    fi
+
+    if [[ -n "$RESCUE_IMG" && -f "$RESCUE_IMG" ]]; then
+        rm -f "$RESCUE_IMG"
+        echo "[✓] Temporary rescue image deleted."
+    fi
+
+    if [[ "$BTRFS_ATTACHED" -eq 0 ]]; then
+        echo "[✓] Cleanup State: CLEAN (No leftover devices or files)"
+    else
+        echo "[!] Cleanup State: DIRTY (Manual removal required)"
+    fi
+    exit "$exit_code"
+}
+trap cleanup EXIT INT TERM
+
+echo "=========================================================="
+echo "    Btrfs ENOSPC Emergency Metadata Rescue Tool           "
+echo "=========================================================="
+
+# 1. Validation
+if ! findmnt -t btrfs "$TARGET_MOUNT" >/dev/null 2>&1; then
+    echo "Error: '$TARGET_MOUNT' is not a mounted Btrfs filesystem." >&2
+    exit 1
+fi
+
+if findmnt -no OPTIONS "$TARGET_MOUNT" | grep -qE '(^|,)ro(,|$)'; then
+    echo "Error: '$TARGET_MOUNT' is mounted read-only. Remount read-write first." >&2
+    exit 1
+fi
+
+echo "Target filesystem: $TARGET_MOUNT"
+btrfs filesystem usage "$TARGET_MOUNT" 2>/dev/null | grep -E 'Data|Metadata|System|Free' || true
+
+echo -e "\n[!] WARNING: This is an emergency recovery operation."
+echo "    It attaches a temporary ${IMAGE_SIZE_GB}GB loop device to provide headroom"
+echo "    for metadata consolidation, then removes it."
+read -r -p "Proceed with emergency rescue on $TARGET_MOUNT? [y/N]: " confirm
+if [[ ! "$confirm" =~ ^[yY]([eE][sS])?$ ]]; then
+    echo "Aborted by user."
+    exit 0
+fi
+
+# 2. Allocate rescue file in /tmp or root if available
+WORKSPACE="/tmp"
+if ! [[ -d "$WORKSPACE" && -w "$WORKSPACE" ]]; then
+    WORKSPACE="/var/tmp"
+fi
+
+RESCUE_IMG=$(mktemp "${WORKSPACE}/btrfs-rescue-XXXXXX.img")
+echo "[*] Creating ${IMAGE_SIZE_GB}GB temporary rescue image at $RESCUE_IMG..."
+if ! fallocate -l "${IMAGE_SIZE_GB}G" "$RESCUE_IMG" 2>/dev/null; then
+    dd if=/dev/zero of="$RESCUE_IMG" bs=1M count=$((IMAGE_SIZE_GB * 1024)) status=progress
+fi
+
+# 3. Setup loop device
+LOOP_DEV=$(losetup -f --show "$RESCUE_IMG")
+echo "[*] Loop device mapped: $LOOP_DEV"
+
+# 4. Attach to Btrfs
+echo "[*] Adding $LOOP_DEV to Btrfs pool at $TARGET_MOUNT..."
+btrfs device add -f "$LOOP_DEV" "$TARGET_MOUNT"
+BTRFS_ATTACHED=1
+
+# 5. Metadata balance pass
+echo "[*] Running metadata balance (musage=50)..."
+if btrfs balance start -musage=50 "$TARGET_MOUNT"; then
+    echo "[✓] Metadata balance pass completed."
+else
+    echo "[!] Balance returned non-zero (may be normal if chunks were already compact)."
+fi
+
+# 6. Evacuate & Remove device
+echo "[*] Evacuating data and removing $LOOP_DEV from $TARGET_MOUNT..."
+btrfs device remove "$LOOP_DEV" "$TARGET_MOUNT"
+BTRFS_ATTACHED=0
+echo "[✓] Rescue device successfully evacuated and removed."
+
+echo -e "\nPost-rescue filesystem status:"
+btrfs filesystem usage "$TARGET_MOUNT" 2>/dev/null | grep -E 'Data|Metadata|System|Free' || true

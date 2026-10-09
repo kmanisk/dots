@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# ntfs-fix: Safe NTFS dirty-bit cleaner and fstab configuration auditor
+# Runs ntfsfix -d on unmounted partitions only. Never touches fstab.
+# ==============================================================================
+set -euo pipefail
+
+echo "=========================================================="
+echo "    NTFS Partition Repair & Driver Auditor                "
+echo "=========================================================="
+
+# 1. Enumerate NTFS partitions
+mapfile -t NTFS_DEVS < <(lsblk -ln -o PATH,SIZE,FSTYPE,LABEL,MOUNTPOINT | awk '$3 == "ntfs" {print $1}')
+mapfile -t NTFS_LABELS < <(lsblk -ln -o PATH,SIZE,FSTYPE,LABEL,MOUNTPOINT | awk '$3 == "ntfs" {print ($4 ? $4 : "None")}')
+mapfile -t NTFS_SIZES < <(lsblk -ln -o PATH,SIZE,FSTYPE,LABEL,MOUNTPOINT | awk '$3 == "ntfs" {print $2}')
+mapfile -t NTFS_MOUNTS < <(lsblk -ln -o PATH,SIZE,FSTYPE,LABEL,MOUNTPOINT | awk '$3 == "ntfs" {print ($5 ? $5 : "Unmounted")}')
+
+if [[ ${#NTFS_DEVS[@]} -eq 0 ]]; then
+    echo "No NTFS partitions detected on this system."
+    exit 0
+fi
+
+echo -e "\nDetected NTFS Partitions:"
+for i in "${!NTFS_DEVS[@]}"; do
+    printf "  [%d] %-15s (Size: %-6s, Label: %-10s, Mount: %s)\n" \
+        "$((i + 1))" "${NTFS_DEVS[$i]}" "${NTFS_SIZES[$i]}" "${NTFS_LABELS[$i]}" "${NTFS_MOUNTS[$i]}"
+done
+
+# 2. Select partition
+SELECTED_DEV=""
+if [[ -n "${1:-}" ]]; then
+    SELECTED_DEV="$1"
+else
+    echo ""
+    read -r -p "Select a partition number to repair [1-${#NTFS_DEVS[@]}]: " choice
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#NTFS_DEVS[@]} )); then
+        echo "Invalid selection." >&2
+        exit 1
+    fi
+    SELECTED_DEV="${NTFS_DEVS[$((choice - 1))]}"
+fi
+
+# 3. Check mount state
+MOUNT_POINT=$(lsblk -no MOUNTPOINT "$SELECTED_DEV" 2>/dev/null || true)
+if [[ -n "$MOUNT_POINT" ]]; then
+    echo -e "\n[!] Target '$SELECTED_DEV' is currently mounted at '$MOUNT_POINT'."
+    echo "    ntfsfix cannot safely execute on a mounted volume."
+    read -r -p "Unmount '$MOUNT_POINT' now? [y/N]: " unmount_confirm
+    if [[ "$unmount_confirm" =~ ^[yY]([eE][sS])?$ ]]; then
+        echo "[*] Unmounting $MOUNT_POINT..."
+        sudo umount "$SELECTED_DEV"
+        echo "[✓] Successfully unmounted."
+    else
+        echo "Refusing to run on mounted device. Aborting."
+        exit 1
+    fi
+fi
+
+# 4. Run ntfsfix -d
+echo -e "\n[*] Executing ntfsfix -d on $SELECTED_DEV..."
+sudo ntfsfix -d "$SELECTED_DEV"
+echo "[✓] ntfsfix completed on $SELECTED_DEV."
+
+# 5. Print current fstab entries and driver analysis
+echo -e "\n=========================================================="
+echo "    Current /etc/fstab NTFS Mount Entries                 "
+echo "=========================================================="
+if grep -E 'ntfs|ntfs3' /etc/fstab >/dev/null 2>&1; then
+    grep -E 'ntfs|ntfs3' /etc/fstab | while read -r line; do
+        echo "  $line"
+        if echo "$line" | grep -q "ntfs3"; then
+            echo "    -> Driver: In-kernel ntfs3 (High performance, Recommended)"
+        elif echo "$line" | grep -q "ntfs-3g"; then
+            echo "    -> Driver: Userspace FUSE ntfs-3g (Higher CPU overhead)"
+        fi
+    done
+else
+    echo "  (No NTFS entries configured in /etc/fstab)"
+fi
+
+echo -e "\n----------------------------------------------------------"
+echo " Recommended In-Kernel ntfs3 Mount Options (Informational):"
+echo "   nofail,noatime,windows_names,prealloc,uid=1000,gid=1000"
+echo ""
+echo " Note: Never use 'big_writes' with ntfs3 (it is ntfs-3g FUSE only)."
+echo " Note: To permanently stop dirty volumes recurring from Windows,"
+echo "       disable Fast Startup and Hibernation in Windows:"
+echo "       powercfg /h off"
+echo "=========================================================="

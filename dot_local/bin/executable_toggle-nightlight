@@ -44,12 +44,23 @@ notify_osd() {
     local text="$1"
     local pct="$2"
     if (( SILENT == 0 )); then
-        notify-send -a "Night Light" -u low -i preferences-desktop-display \
+        local TIMEOUT=800
+        if command -v swaymsg >/dev/null 2>&1 && [ -n "${SWAYSOCK:-}" ]; then
+            local IS_FS
+            IS_FS=$(swaymsg -t get_tree 2>/dev/null | jq -r '.. | select(.focused? == true) | .fullscreen_mode' 2>/dev/null || echo 0)
+            [ "$IS_FS" = "1" ] && TIMEOUT=500
+        elif command -v i3-msg >/dev/null 2>&1 && [ -n "${I3SOCK:-}" ]; then
+            local IS_FS
+            IS_FS=$(i3-msg -t get_tree 2>/dev/null | jq -r '.. | select(.focused? == true) | .fullscreen_mode' 2>/dev/null || echo 0)
+            [ "$IS_FS" = "1" ] && TIMEOUT=500
+        fi
+
+        notify-send -a "Night Light" -t "$TIMEOUT" -u low -i preferences-desktop-display \
             -h string:x-canonical-private-synchronous:nightlight \
             -h string:x-dunst-stack-tag:nightlight \
             -h int:value:"$pct" \
             "$text" 2>/dev/null || \
-        dunstify -a "Night Light" -u low -i preferences-desktop-display \
+        dunstify -a "Night Light" -t "$TIMEOUT" -u low -i preferences-desktop-display \
             -h string:x-dunst-stack-tag:nightlight \
             -h int:value:"$pct" \
             "$text" 2>/dev/null

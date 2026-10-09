@@ -131,3 +131,26 @@ rm -f ~/.config/pipewire/pipewire.conf.d/41-mic-fx.conf
 systemctl --user restart pipewire pipewire-pulse wireplumber
 systemctl --user enable --now dusky-audio-dsp.service
 ```
+
+---
+
+## 6. Speaker DSP Profiles & Archive Restores
+
+The active speaker DSP menu and CLI expose 4 core profiles:
+1. **Custom 2 (Dolby Access)** (`custom`): Authentic Windows Dolby Access custom profile (+11.6 dB presence).
+2. **Dynamic (DAX3 Default)** (`dynamic`): Windows DAX3 default mode with dynamic leveler and spatial expansion.
+3. **Music (DAX3 Audiophile)** (`music`): Linear dynamics and uncompressed acoustic voicing.
+4. **Balanced (Linux)** (`balanced`): Clean reference DAX3 baseline.
+
+### Restoring an Archived Profile
+Archived profiles (`movie`, `game`, `voice`, `detailed`, `warm`) are preserved in `~/.config/pipewire/asus-tuf-dax/archive/`.
+To restore an archived profile back into the active list:
+```bash
+# Move from archive back to active folder:
+mv ~/.config/pipewire/asus-tuf-dax/archive/<profile> ~/.config/pipewire/asus-tuf-dax/
+
+# To apply directly:
+cp ~/.config/pipewire/asus-tuf-dax/<profile>/Dolby_Speaker.conf ~/.config/pipewire/pipewire.conf.d/
+cp ~/.config/pipewire/asus-tuf-dax/<profile>/Dolby_Speaker.irs ~/.config/pipewire/pipewire.conf.d/
+```
+

@@ -465,6 +465,30 @@ For technical topics that can change with software releases:
 
 ---
 
+## Browser Native Messaging & Download Managers (Brave Origin / Chromium Forks)
+
+* **Root Cause for Failed Browser Integration (FDM, Aria2, etc.):**
+  Downloader installers and browser extensions place Native Messaging Host JSON manifests only in standard Chrome or standard Brave paths:
+  * `~/.config/google-chrome/NativeMessagingHosts/`
+  * `~/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts/`
+* **Chromium Forks Directory Mismatch:**
+  When using custom or nightly builds (such as `brave-origin-bin`), Chromium strictly reads from its isolated profile directory:
+  * `~/.config/BraveSoftware/Brave-Origin/NativeMessagingHosts/`
+* **Resolution Rule:**
+  If browser integration / auto-capture fails despite the extension being installed:
+  1. Check the active browser profile's `NativeMessagingHosts` directory:
+     ```bash
+     mkdir -p ~/.config/BraveSoftware/Brave-Origin/NativeMessagingHosts
+     ```
+  2. Copy or symlink the JSON manifest from the standard path (e.g. `org.freedownloadmanager.fdm5.cnh.json`):
+     ```bash
+     cp ~/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts/*.json \
+        ~/.config/BraveSoftware/Brave-Origin/NativeMessagingHosts/
+     ```
+  3. Reload or toggle the extension in `brave://extensions` so it re-initializes `stdio` IPC to the native helper (`wenativehost`).
+
+---
+
 ## Decision Rule
 
 When choosing between two implementations with equivalent functionality:
@@ -486,3 +510,4 @@ measured benefit > theoretical benefit
 ```
 
 The preferred solution is the one that provides the required functionality with the fewest resident processes, lowest wakeup rate, lowest RAM usage, lowest CPU usage, and least complexity while preserving reliability.
+

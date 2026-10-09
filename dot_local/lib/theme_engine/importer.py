@@ -28,6 +28,8 @@ from theme_engine.schema import (
     HEX_RE,
     BASE16_KEYS,
     contrast_ratio,
+    blend_colors,
+    relative_luminance,
 )
 
 CATALOG_URLS = [
@@ -127,7 +129,18 @@ def colors_dict_to_base16(c):
 
     bg = clean_hex(c.get("background") or c.get("bg") or c.get("color0", "#181818"))
     darker_bg = clean_hex(c.get("dark_background") or c.get("darker_background") or c.get("dark_bg") or c.get("color0") or bg)
-    selection = clean_hex(c.get("selection") or c.get("selection_background") or c.get("selected_bg") or c.get("color8", "#383838"))
+    raw_sel = clean_hex(c.get("selection") or c.get("selection_background") or c.get("selected_bg") or c.get("color8", "#383838"))
+    accent = clean_hex(c.get("accent") or c.get("color4") or "#58a6ff")
+    if relative_luminance(bg) < 0.35:
+        if relative_luminance(raw_sel) > 0.25:
+            selection = blend_colors(bg, accent, 0.14)
+        else:
+            selection = raw_sel
+    else:
+        if relative_luminance(raw_sel) < 0.40:
+            selection = blend_colors(bg, "#000000", 0.10)
+        else:
+            selection = raw_sel
     muted = clean_hex(c.get("muted") or c.get("readable_muted") or c.get("color8", "#585858"))
     dark_fg = clean_hex(c.get("dark_foreground") or c.get("dark_fg") or c.get("color7") or muted)
     fg = clean_hex(c.get("foreground") or c.get("fg") or c.get("color7", "#e0e0e0"))

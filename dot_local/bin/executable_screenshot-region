@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Interactive Region Screenshot -> Clipboard (X11 & Wayland)
-# Keybind: Win+S (Sway & i3)
+# Keybind: Win+S (clipboard only) / Win+Ctrl+S --save (file + clipboard)
 # ==============================================================================
 export LD_LIBRARY_PATH="$HOME/.local/lib:${LD_LIBRARY_PATH:-}"
 export PATH="$HOME/.gemini/antigravity-cli/bin:$HOME/.local/bin:$PATH"
@@ -9,7 +9,15 @@ export DISPLAY="${DISPLAY:-:0}"
 
 [ -f "$HOME/.local/state/theme/colors.sh" ] && source "$HOME/.local/state/theme/colors.sh"
 
-FILE="/tmp/screenshot_$(date +%s).png"
+SAVE=0
+[ "${1:-}" = "--save" ] && SAVE=1
+
+if [ "$SAVE" = 1 ]; then
+    mkdir -p "$HOME/Pictures/Screenshots"
+    FILE="$HOME/Pictures/Screenshots/snip-$(date +%Y-%m-%d_%H-%M-%S)_$$.png"
+else
+    FILE="/tmp/screenshot_$(date +%s).png"
+fi
 
 # Select region and capture
 if [ -n "${WAYLAND_DISPLAY:-}" ] || [ -n "${SWAYSOCK:-}" ]; then
@@ -20,15 +28,23 @@ if [ -n "${WAYLAND_DISPLAY:-}" ] || [ -n "${SWAYSOCK:-}" ]; then
     [ -z "$GEOM" ] && exit 0
     if grim -g "$GEOM" "$FILE" 2>/dev/null && [ -s "$FILE" ]; then
         wl-copy -t image/png < "$FILE"
-        notify-send -a "Screenshot" -t 1500 -i camera-photo "Screenshot" "Region copied to clipboard"
-        rm -f "$FILE"
+        if [ "$SAVE" = 1 ]; then
+            notify-send -a "Screenshot" -t 1500 -i camera-photo "Screenshot" "Region saved to Screenshots + clipboard"
+        else
+            notify-send -a "Screenshot" -t 1500 -i camera-photo "Screenshot" "Region copied to clipboard"
+            rm -f "$FILE"
+        fi
     fi
 else
     if maim -s "$FILE" 2>/dev/null; then
         if [ -s "$FILE" ]; then
             xclip -selection clipboard -t image/png -i "$FILE"
-            notify-send -t 1500 -i camera-photo "Screenshot" "Region copied to clipboard"
+            if [ "$SAVE" = 1 ]; then
+                notify-send -t 1500 -i camera-photo "Screenshot" "Region saved to Screenshots + clipboard"
+            else
+                notify-send -t 1500 -i camera-photo "Screenshot" "Region copied to clipboard"
+                rm -f "$FILE"
+            fi
         fi
-        rm -f "$FILE"
     fi
 fi

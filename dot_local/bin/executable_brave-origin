@@ -1,6 +1,28 @@
 #!/usr/bin/env bash
-# Brave Browser Launcher (Intel iGPU VA-API hardware decode support)
-export LIBVA_DRIVER_NAME=iHD
+# Brave Browser Launcher (Mode-aware VA-API hardware decode support)
+if [ -z "$LIBVA_DRIVER_NAME" ]; then
+    if [ -z "$GPU_MODE" ]; then
+        if [ -r "${XDG_RUNTIME_DIR:-/run/user/$UID}/gpu_mode" ]; then
+            read -r GPU_MODE < "${XDG_RUNTIME_DIR:-/run/user/$UID}/gpu_mode"
+        elif command -v supergfxctl >/dev/null 2>&1; then
+            GPU_MODE="$(supergfxctl -g 2>/dev/null || echo 'Hybrid')"
+        else
+            GPU_MODE="Hybrid"
+        fi
+    fi
+
+    case "$GPU_MODE" in
+        Integrated|Hybrid|integrated|hybrid)
+            export LIBVA_DRIVER_NAME=iHD
+            ;;
+        AsusMuxDgpu|asuxmuxdgpu)
+            export LIBVA_DRIVER_NAME=nvidia
+            ;;
+        *)
+            unset LIBVA_DRIVER_NAME
+            ;;
+    esac
+fi
 
 BRAVE_BIN=$(command -v /usr/bin/brave-origin || command -v /usr/sbin/brave-origin || command -v /usr/bin/brave)
 if [ -z "$BRAVE_BIN" ]; then

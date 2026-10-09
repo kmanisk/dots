@@ -43,46 +43,25 @@ apply_voicing() {
     local voicing="$1"
     local title=""
     case "$voicing" in
+        custom|c)
+            voicing="custom"
+            title="Custom 2 (Dolby Access)"
+            ;;
         dynamic|dyn)
             voicing="dynamic"
-            title="Dynamic (DAX3)"
-            ;;
-        movie|m)
-            voicing="movie"
-            title="Movie (DAX3)"
+            title="Dynamic (DAX3 Default)"
             ;;
         music|mu)
             voicing="music"
-            title="Music (DAX3)"
-            ;;
-        game|g)
-            voicing="game"
-            title="Game (DAX3)"
-            ;;
-        voice|v)
-            voicing="voice"
-            title="Voice (DAX3)"
-            ;;
-        custom|c)
-            voicing="custom"
-            title="Custom 2 (Windows)"
+            title="Music (DAX3 Audiophile)"
             ;;
         balanced|b)
             voicing="balanced"
             title="Balanced (Linux)"
             ;;
-        detailed|d)
-            voicing="detailed"
-            title="Detailed (Linux)"
-            ;;
-        warm|w)
-            voicing="warm"
-            title="Warm (Linux)"
-            ;;
         *)
             echo "Error: Unknown profile '$voicing'." >&2
-            echo "Windows Modes: dynamic (dyn), movie (m), music (mu), game (g), voice (v), custom (c)" >&2
-            echo "Linux Voicings: balanced (b), detailed (d), warm (w)" >&2
+            echo "Available Profiles: custom (c), dynamic (dyn), music (mu), balanced (b)" >&2
             exit 1
             ;;
     esac
@@ -95,18 +74,17 @@ apply_voicing() {
         exit 1
     fi
 
-    # Deploy configuration and IRS
-    cp "$src_conf" "$RUNTIME_CONF_DIR/Dolby_Speaker.conf"
-    cp "$src_irs" "$RUNTIME_CONF_DIR/Dolby_Speaker.irs"
+    # Deploy active runner profile
+    ln -sf "$CONF_BASE/$voicing/runner.conf" "$CONF_BASE/active-runner.conf"
+    cp "$src_conf" "$CONF_BASE/active.conf"
+    cp "$src_irs" "$CONF_BASE/active.irs"
 
     # Update state
     sed -i '/^ACTIVE_VOICING=/d' "$STATE_FILE"
     echo "ACTIVE_VOICING=$voicing" >> "$STATE_FILE"
 
-    # Restart PipeWire to reload DSP filter graph
-    systemctl --user restart pipewire
-    # Allow pipewire & wireplumber to sync
-    sleep 0.5
+    # Instantly restart standalone speaker DSP runner (does NOT touch PipeWire, PulseAudio, or Bluetooth)
+    systemctl --user restart asus-speaker-dsp.service 2>/dev/null || systemctl --user start asus-speaker-dsp.service 2>/dev/null || true
 
     # Ensure filter state matches current enabled preference
     local nid
@@ -122,7 +100,7 @@ apply_voicing() {
 
     echo -e "\033[1;32m[spk]\033[0m Switched to \033[1m$title\033[0m profile (transparent on internal speakers)."
     if command -v notify-send >/dev/null 2>&1; then
-        notify-send -t 2000 -i audio-speakers "ASUS TUF Speaker DSP" "Profile: $title" 2>/dev/null || true
+        notify-send -t 2000 -i audio-speakers "ASUS TUF Speaker DSP" "Profile: $title" 2>/dev/null &
     fi
 }
 
@@ -138,7 +116,7 @@ dsp_off() {
 
     echo -e "\033[1;33m[spk]\033[0m Speaker DSP \033[1;31mDisabled\033[0m (bypassed to flat internal speakers)."
     if command -v notify-send >/dev/null 2>&1; then
-        notify-send -t 2000 -i audio-volume-muted "ASUS TUF Speaker DSP" "Disabled (Bypassed)" 2>/dev/null || true
+        notify-send -t 2000 -i audio-volume-muted "ASUS TUF Speaker DSP" "Disabled (Bypassed)" 2>/dev/null &
     fi
 }
 
@@ -153,7 +131,7 @@ dsp_on() {
 
     echo -e "\033[1;32m[spk]\033[0m Speaker DSP \033[1;32mEnabled\033[0m (transparent upstream DAX3 active)."
     if command -v notify-send >/dev/null 2>&1; then
-        notify-send -t 2000 -i audio-speakers "ASUS TUF Speaker DSP" "Enabled" 2>/dev/null || true
+        notify-send -t 2000 -i audio-speakers "ASUS TUF Speaker DSP" "Enabled" 2>/dev/null &
     fi
 }
 
@@ -203,18 +181,11 @@ show_help() {
     active_v=$(get_active_voicing)
     echo "Usage: spk [command]"
     echo ""
-    echo "Windows DAX3 Authentic Modes:"
-    echo "  dynamic, dyn   Switch to Dynamic mode (Windows DAX3 default, Leveler + Spatial)"
-    echo "  movie, m       Switch to Movie mode (DAX3 Cinema curve, warm bass, soft treble)"
-    echo "  music, mu      Switch to Music mode (DAX3 Audiophile, uncompressed dynamics)"
-    echo "  game, g        Switch to Game mode (DAX3 Gaming, +6dB loudness boost, Leveler)"
-    echo "  voice, v       Switch to Voice mode (DAX3 Speech, -15dB low-cut, +3dB dialog)"
+    echo "Core Speaker Profiles:"
     echo "  custom, c      Switch to Custom 2 mode (Dolby Access user preset, +11.6dB presence)"
-    echo ""
-    echo "Linux Reference Voicings:"
+    echo "  dynamic, dyn   Switch to Dynamic mode (Windows DAX3 default, Leveler + Spatial)"
+    echo "  music, mu      Switch to Music mode (DAX3 Audiophile, uncompressed dynamics)"
     echo "  balanced, b    Switch to Balanced voicing (reference DAX3 baseline)"
-    echo "  detailed, d    Switch to Detailed voicing (enhanced presence/clarity)"
-    echo "  warm, w        Switch to Warm voicing (rich low-end contour)"
     echo ""
     echo "Controls:"
     echo "  status         Display detailed DSP telemetry, routing & filter state"
@@ -227,32 +198,17 @@ show_help() {
 
 # Subcommand dispatch
 case "${1:-}" in
+    custom|c)
+        apply_voicing "custom"
+        ;;
     dynamic|dyn)
         apply_voicing "dynamic"
-        ;;
-    movie|m)
-        apply_voicing "movie"
         ;;
     music|mu)
         apply_voicing "music"
         ;;
-    game|g)
-        apply_voicing "game"
-        ;;
-    voice|v)
-        apply_voicing "voice"
-        ;;
-    custom|c)
-        apply_voicing "custom"
-        ;;
     balanced|b)
         apply_voicing "balanced"
-        ;;
-    detailed|d)
-        apply_voicing "detailed"
-        ;;
-    warm|w)
-        apply_voicing "warm"
         ;;
     off)
         dsp_off

@@ -68,6 +68,12 @@ else
     check_fail "WirePlumber user service is NOT active"
 fi
 
+if systemctl --user is-active --quiet asus-speaker-dsp; then
+    check_pass "ASUS TUF Speaker DSP runner service is active (asus-speaker-dsp)"
+else
+    check_fail "ASUS TUF Speaker DSP runner service is NOT active"
+fi
+
 # 3. LV2 Plugins & Dependencies
 header "3. DSP Plugins & Convolver"
 export LV2_PATH="${LV2_PATH:-/usr/lib/lv2:/usr/local/lib/lv2:$HOME/.lv2}"
@@ -97,23 +103,27 @@ fi
 
 # 4. Profile & FIR Asset Integrity
 header "4. Speaker DSP Profiles & FIR Assets"
-for v in dynamic movie music game voice custom balanced detailed warm; do
+for v in custom dynamic music balanced; do
     CONF="$HOME/.config/pipewire/asus-tuf-dax/$v/Dolby_Speaker.conf"
     IRS="$HOME/.config/pipewire/asus-tuf-dax/$v/Dolby_Speaker.irs"
     if [[ -f "$CONF" ]] && [[ -f "$IRS" ]] && [[ -s "$IRS" ]]; then
         IRS_SIZE=$(stat -c%s "$IRS")
-        check_pass "DSP Profile '$v': conf & irs intact ($IRS_SIZE bytes)"
+        check_pass "Core DSP Profile '$v': conf & irs intact ($IRS_SIZE bytes)"
     else
-        check_fail "DSP Profile '$v': files missing or empty in asus-tuf-dax/$v"
+        check_fail "Core DSP Profile '$v': files missing or empty in asus-tuf-dax/$v"
     fi
 done
 
-ACTIVE_CONF="$HOME/.config/pipewire/pipewire.conf.d/Dolby_Speaker.conf"
-ACTIVE_IRS="$HOME/.config/pipewire/pipewire.conf.d/Dolby_Speaker.irs"
-if [[ -f "$ACTIVE_CONF" ]] && [[ -f "$ACTIVE_IRS" ]]; then
-    check_pass "Active runtime profile deployed in pipewire.conf.d/"
+if [[ -d "$HOME/.config/pipewire/asus-tuf-dax/archive" ]]; then
+    ARCH_COUNT=$(find "$HOME/.config/pipewire/asus-tuf-dax/archive" -mindepth 1 -maxdepth 1 -type d | wc -l)
+    check_pass "Archived DSP Profiles: $ARCH_COUNT preserved in asus-tuf-dax/archive/"
+fi
+
+ACTIVE_RUNNER="$HOME/.config/pipewire/asus-tuf-dax/active-runner.conf"
+if [[ -f "$ACTIVE_RUNNER" ]] || [[ -L "$ACTIVE_RUNNER" ]]; then
+    check_pass "Active runtime runner profile deployed (active-runner.conf)"
 else
-    check_fail "Active runtime profile missing in ~/.config/pipewire/pipewire.conf.d/"
+    check_fail "Active runtime runner profile missing in ~/.config/pipewire/asus-tuf-dax/"
 fi
 
 # 5. WirePlumber Smart Filter Routing

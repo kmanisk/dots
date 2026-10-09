@@ -71,8 +71,11 @@ application/x-cb7=org.pwmt.zathura.desktop
 application/x-cbt=org.pwmt.zathura.desktop
 x-scheme-handler/ror2mm=amethystmodmanager-ror2mm.desktop
 x-scheme-handler/modl=amethystmodmanager-modl.desktop
-x-scheme-handler/nxm=amethystmodmanager-nxm.desktop
 image/vnd.microsoft.icon=swayimg.desktop
+x-scheme-handler/fdm=freedownloadmanager_fdm_up.desktop
+x-scheme-handler/magnet=freedownloadmanager_magnet_up.desktop
+application/x-bittorrent=freedownloadmanager_torrent.desktop
+x-scheme-handler/nxm=amethystmodmanager-nxm.desktop
 
 [Added Associations]
 video/mp4=mpv.desktop;vlc.desktop;fr.handbrake.ghb.desktop;

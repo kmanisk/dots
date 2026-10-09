@@ -5,7 +5,7 @@ IPC="i3-msg"
 [ -n "$SWAYSOCK" ] && IPC="swaymsg"
 CUR=$($IPC -t get_workspaces | python3 -c 'import json,sys; print([w["name"] for w in json.load(sys.stdin) if w["focused"]][0])' 2>/dev/null)
 if [ "$CUR" = "2" ]; then
-    $IPC "workspace number 4" >/dev/null 2>&1
+    $IPC "workspace number 4; mode \"gaming\"" >/dev/null 2>&1
 else
-    $IPC "workspace number 2" >/dev/null 2>&1
+    $IPC "workspace number 2; mode \"default\"" >/dev/null 2>&1
 fi
