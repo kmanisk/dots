@@ -1,3 +1,1460 @@
-schema_version = 1
+schema_version = 2
 active_preset = "Natural Clean"
-user_presets = []
+
+[[presets]]
+name = "Natural Clean"
+description = "Clean broadcast voice with DPDFNet neural denoising, 9-band EQ, compressor & limiter"
+category = "Natural"
+dpdfnet_attenuation_db = 45.0
+model_gain_db = 0.0
+pitch_semitones = 0.0
+formant_preserving = false
+ringmod_depth = 0.0
+ringmod_freq = 100.0
+ringmod_square = 0.0
+bitcrush_bits = 24
+downsample_rate = 48000
+distortion_level = 0.0
+flanger_enabled = false
+flanger_rate = 0.5
+delay_mix = 0.0
+delay_time = 0.0
+delay_feedback = 0.0
+hpf_freq = 20.0
+lpf_freq = 20000.0
+eq_freq = 2500.0
+eq_gain = 0.0
+eq_q = 1.0
+wet_dry_mix = 0.0
+verified = true
+user = false
+vocoder_mix = 0.0
+vocoder_carrier_hz = 110.0
+vocoder_detune = 0.0
+matrix_ring_mod = 0.0
+bandpass_hpf = 0.0
+bandpass_lpf = 0.0
+bitcrush_downsample = 1
+stutter_rate = 0.0
+stutter_duty = 0.5
+noise_gate_aggro = 0.0
+eq_enabled = false
+eq_gains = [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+eq_post_gain = 0.0
+compressor_enabled = false
+limiter_enabled = true
+noise_suppression = true
+
+[[presets]]
+name = "Deep Voice"
+description = "Natural warm baritone voice with preserved vocal formants (-3.5 st)"
+category = "Natural"
+dpdfnet_attenuation_db = 45.0
+model_gain_db = 2.0
+pitch_semitones = -3.5
+formant_preserving = true
+ringmod_depth = 0.0
+ringmod_freq = 100.0
+ringmod_square = 0.0
+bitcrush_bits = 24
+downsample_rate = 48000
+distortion_level = 0.0
+flanger_enabled = false
+flanger_rate = 0.5
+delay_mix = 0.0
+delay_time = 0.0
+delay_feedback = 0.0
+hpf_freq = 80.0
+lpf_freq = 20000.0
+eq_freq = 2400.0
+eq_gain = 1.5
+eq_q = 1.0
+wet_dry_mix = 0.0
+verified = true
+user = false
+vocoder_mix = 0.0
+vocoder_carrier_hz = 110.0
+vocoder_detune = 0.0
+matrix_ring_mod = 0.0
+bandpass_hpf = 0.0
+bandpass_lpf = 0.0
+bitcrush_downsample = 1
+stutter_rate = 0.0
+stutter_duty = 0.5
+noise_gate_aggro = 0.0
+eq_enabled = false
+eq_gains = [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+eq_post_gain = 0.0
+compressor_enabled = false
+limiter_enabled = true
+noise_suppression = true
+
+[[presets]]
+name = "Radio Announcer"
+description = "Warm, resonant broadcast studio tone with broadcast EQ & tube warmth"
+category = "Natural"
+dpdfnet_attenuation_db = 45.0
+model_gain_db = 2.0
+pitch_semitones = 0.0
+formant_preserving = true
+ringmod_depth = 0.0
+ringmod_freq = 100.0
+ringmod_square = 0.0
+bitcrush_bits = 24
+downsample_rate = 48000
+distortion_level = 0.04
+flanger_enabled = false
+flanger_rate = 0.5
+delay_mix = 0.0
+delay_time = 0.0
+delay_feedback = 0.0
+hpf_freq = 85.0
+lpf_freq = 20000.0
+eq_freq = 3200.0
+eq_gain = 2.5
+eq_q = 0.8
+wet_dry_mix = 0.0
+verified = true
+user = false
+vocoder_mix = 0.0
+vocoder_carrier_hz = 110.0
+vocoder_detune = 0.0
+matrix_ring_mod = 0.0
+bandpass_hpf = 0.0
+bandpass_lpf = 0.0
+bitcrush_downsample = 1
+stutter_rate = 0.0
+stutter_duty = 0.5
+noise_gate_aggro = 0.0
+eq_enabled = false
+eq_gains = [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+eq_post_gain = 0.0
+compressor_enabled = false
+limiter_enabled = true
+noise_suppression = true
+
+[[presets]]
+name = "Higher Voice"
+description = "Natural pitch elevation with preserved vocal formants (+3.0 st)"
+category = "Natural"
+dpdfnet_attenuation_db = 45.0
+model_gain_db = 2.0
+pitch_semitones = 3.0
+formant_preserving = true
+ringmod_depth = 0.0
+ringmod_freq = 100.0
+ringmod_square = 0.0
+bitcrush_bits = 24
+downsample_rate = 48000
+distortion_level = 0.0
+flanger_enabled = false
+flanger_rate = 0.5
+delay_mix = 0.0
+delay_time = 0.0
+delay_feedback = 0.0
+hpf_freq = 100.0
+lpf_freq = 20000.0
+eq_freq = 3500.0
+eq_gain = 1.5
+eq_q = 1.0
+wet_dry_mix = 0.0
+verified = true
+user = false
+vocoder_mix = 0.0
+vocoder_carrier_hz = 110.0
+vocoder_detune = 0.0
+matrix_ring_mod = 0.0
+bandpass_hpf = 0.0
+bandpass_lpf = 0.0
+bitcrush_downsample = 1
+stutter_rate = 0.0
+stutter_duty = 0.5
+noise_gate_aggro = 0.0
+eq_enabled = false
+eq_gains = [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+eq_post_gain = 0.0
+compressor_enabled = false
+limiter_enabled = true
+noise_suppression = true
+
+[[presets]]
+name = "Gruff Growl"
+description = "Raspy, heavy baritone growl with subharmonic grit and tube drive (-3.0 st)"
+category = "Natural"
+dpdfnet_attenuation_db = 48.0
+model_gain_db = 2.0
+pitch_semitones = -3.0
+formant_preserving = false
+ringmod_depth = 0.15
+ringmod_freq = 48.0
+ringmod_square = 0.0
+bitcrush_bits = 24
+downsample_rate = 48000
+distortion_level = 0.14
+flanger_enabled = false
+flanger_rate = 0.5
+delay_mix = 0.0
+delay_time = 0.0
+delay_feedback = 0.0
+hpf_freq = 90.0
+lpf_freq = 20000.0
+eq_freq = 2600.0
+eq_gain = 2.0
+eq_q = 1.2
+wet_dry_mix = 0.0
+verified = true
+user = false
+vocoder_mix = 0.0
+vocoder_carrier_hz = 110.0
+vocoder_detune = 0.0
+matrix_ring_mod = 0.0
+bandpass_hpf = 0.0
+bandpass_lpf = 0.0
+bitcrush_downsample = 1
+stutter_rate = 0.0
+stutter_duty = 0.5
+noise_gate_aggro = 0.0
+eq_enabled = false
+eq_gains = [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+eq_post_gain = 0.0
+compressor_enabled = false
+limiter_enabled = true
+noise_suppression = true
+
+[[presets]]
+name = "Chipmunk"
+description = "High-pitched animated cartoon character with upward formant shift (+7.0 st)"
+category = "Character"
+dpdfnet_attenuation_db = 48.0
+model_gain_db = 2.0
+pitch_semitones = 7.0
+formant_preserving = false
+ringmod_depth = 0.0
+ringmod_freq = 100.0
+ringmod_square = 0.0
+bitcrush_bits = 24
+downsample_rate = 48000
+distortion_level = 0.0
+flanger_enabled = false
+flanger_rate = 0.5
+delay_mix = 0.0
+delay_time = 0.0
+delay_feedback = 0.0
+hpf_freq = 120.0
+lpf_freq = 12000.0
+eq_freq = 2800.0
+eq_gain = 1.5
+eq_q = 1.0
+wet_dry_mix = 0.0
+verified = true
+user = false
+vocoder_mix = 0.0
+vocoder_carrier_hz = 110.0
+vocoder_detune = 0.0
+matrix_ring_mod = 0.0
+bandpass_hpf = 0.0
+bandpass_lpf = 0.0
+bitcrush_downsample = 1
+stutter_rate = 0.0
+stutter_duty = 0.5
+noise_gate_aggro = 0.0
+eq_enabled = false
+eq_gains = [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+eq_post_gain = 0.0
+compressor_enabled = false
+limiter_enabled = true
+noise_suppression = true
+
+[[presets]]
+name = "Darth Vader"
+description = "Deep villain voice (-5.0 st) with acoustic respirator resonance & crisp articulation"
+category = "Character"
+dpdfnet_attenuation_db = 48.0
+model_gain_db = 2.0
+pitch_semitones = -5.0
+formant_preserving = false
+ringmod_depth = 0.1
+ringmod_freq = 38.0
+ringmod_square = 0.0
+bitcrush_bits = 24
+downsample_rate = 48000
+distortion_level = 0.08
+flanger_enabled = false
+flanger_rate = 0.5
+delay_mix = 0.0
+delay_time = 0.0
+delay_feedback = 0.0
+hpf_freq = 75.0
+lpf_freq = 9000.0
+eq_freq = 2800.0
+eq_gain = 2.5
+eq_q = 1.0
+wet_dry_mix = 0.0
+verified = true
+user = false
+vocoder_mix = 0.0
+vocoder_carrier_hz = 110.0
+vocoder_detune = 0.0
+matrix_ring_mod = 0.0
+bandpass_hpf = 0.0
+bandpass_lpf = 0.0
+bitcrush_downsample = 1
+stutter_rate = 0.0
+stutter_duty = 0.5
+noise_gate_aggro = 0.0
+eq_enabled = false
+eq_gains = [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+eq_post_gain = 0.0
+compressor_enabled = false
+limiter_enabled = true
+noise_suppression = true
+
+[[presets]]
+name = "Megatron"
+description = "Metallic robotic warlord (-3.5 st) with 75 Hz ring mod, comb flanger & 16-bit drive"
+category = "Character"
+dpdfnet_attenuation_db = 48.0
+model_gain_db = 2.0
+pitch_semitones = -3.5
+formant_preserving = false
+ringmod_depth = 0.35
+ringmod_freq = 75.0
+ringmod_square = 0.0
+bitcrush_bits = 16
+downsample_rate = 48000
+distortion_level = 0.12
+flanger_enabled = true
+flanger_rate = 0.7
+delay_mix = 0.0
+delay_time = 0.0
+delay_feedback = 0.0
+hpf_freq = 20.0
+lpf_freq = 20000.0
+eq_freq = 3200.0
+eq_gain = 2.5
+eq_q = 1.2
+wet_dry_mix = 0.0
+verified = true
+user = false
+vocoder_mix = 0.0
+vocoder_carrier_hz = 110.0
+vocoder_detune = 0.0
+matrix_ring_mod = 0.0
+bandpass_hpf = 0.0
+bandpass_lpf = 0.0
+bitcrush_downsample = 1
+stutter_rate = 0.0
+stutter_duty = 0.5
+noise_gate_aggro = 0.0
+eq_enabled = false
+eq_gains = [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+eq_post_gain = 0.0
+compressor_enabled = false
+limiter_enabled = true
+noise_suppression = true
+
+[[presets]]
+name = "Giant"
+description = "Enormous subterranean behemoth (-6.0 st) with short cavern slapback"
+category = "Character"
+dpdfnet_attenuation_db = 48.0
+model_gain_db = 2.0
+pitch_semitones = -6.0
+formant_preserving = false
+ringmod_depth = 0.0
+ringmod_freq = 100.0
+ringmod_square = 0.0
+bitcrush_bits = 24
+downsample_rate = 48000
+distortion_level = 0.0
+flanger_enabled = false
+flanger_rate = 0.5
+delay_mix = 0.15
+delay_time = 0.08
+delay_feedback = 20.0
+hpf_freq = 70.0
+lpf_freq = 20000.0
+eq_freq = 2200.0
+eq_gain = 2.0
+eq_q = 1.0
+wet_dry_mix = 0.0
+verified = true
+user = false
+vocoder_mix = 0.0
+vocoder_carrier_hz = 110.0
+vocoder_detune = 0.0
+matrix_ring_mod = 0.0
+bandpass_hpf = 0.0
+bandpass_lpf = 0.0
+bitcrush_downsample = 1
+stutter_rate = 0.0
+stutter_duty = 0.5
+noise_gate_aggro = 0.0
+eq_enabled = false
+eq_gains = [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+eq_post_gain = 0.0
+compressor_enabled = false
+limiter_enabled = true
+noise_suppression = true
+
+[[presets]]
+name = "Goblin"
+description = "Mischievous nasal goblin (+4.5 st) with 1.6 kHz formant peak & controlled rasp"
+category = "Character"
+dpdfnet_attenuation_db = 48.0
+model_gain_db = 2.0
+pitch_semitones = 4.5
+formant_preserving = false
+ringmod_depth = 0.12
+ringmod_freq = 120.0
+ringmod_square = 0.0
+bitcrush_bits = 24
+downsample_rate = 48000
+distortion_level = 0.1
+flanger_enabled = false
+flanger_rate = 0.5
+delay_mix = 0.0
+delay_time = 0.0
+delay_feedback = 0.0
+hpf_freq = 150.0
+lpf_freq = 7500.0
+eq_freq = 1600.0
+eq_gain = 3.0
+eq_q = 1.5
+wet_dry_mix = 0.0
+verified = true
+user = false
+vocoder_mix = 0.0
+vocoder_carrier_hz = 110.0
+vocoder_detune = 0.0
+matrix_ring_mod = 0.0
+bandpass_hpf = 0.0
+bandpass_lpf = 0.0
+bitcrush_downsample = 1
+stutter_rate = 0.0
+stutter_duty = 0.5
+noise_gate_aggro = 0.0
+eq_enabled = false
+eq_gains = [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+eq_post_gain = 0.0
+compressor_enabled = false
+limiter_enabled = true
+noise_suppression = true
+
+[[presets]]
+name = "Child"
+description = "Believable youthful voice with natural formant preservation (+2.8 st)"
+category = "Character"
+dpdfnet_attenuation_db = 45.0
+model_gain_db = 2.0
+pitch_semitones = 2.8
+formant_preserving = true
+ringmod_depth = 0.0
+ringmod_freq = 100.0
+ringmod_square = 0.0
+bitcrush_bits = 24
+downsample_rate = 48000
+distortion_level = 0.0
+flanger_enabled = false
+flanger_rate = 0.5
+delay_mix = 0.0
+delay_time = 0.0
+delay_feedback = 0.0
+hpf_freq = 110.0
+lpf_freq = 20000.0
+eq_freq = 2800.0
+eq_gain = 1.0
+eq_q = 1.0
+wet_dry_mix = 0.0
+verified = true
+user = false
+vocoder_mix = 0.0
+vocoder_carrier_hz = 110.0
+vocoder_detune = 0.0
+matrix_ring_mod = 0.0
+bandpass_hpf = 0.0
+bandpass_lpf = 0.0
+bitcrush_downsample = 1
+stutter_rate = 0.0
+stutter_duty = 0.5
+noise_gate_aggro = 0.0
+eq_enabled = false
+eq_gains = [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+eq_post_gain = 0.0
+compressor_enabled = false
+limiter_enabled = true
+noise_suppression = true
+
+[[presets]]
+name = "Robot"
+description = "Synthesized robotic voice with 90 Hz amplitude modulation & focused speech band"
+category = "Robot/Vocoder"
+dpdfnet_attenuation_db = 48.0
+model_gain_db = 2.0
+pitch_semitones = 0.0
+formant_preserving = false
+ringmod_depth = 0.55
+ringmod_freq = 90.0
+ringmod_square = 0.0
+bitcrush_bits = 24
+downsample_rate = 48000
+distortion_level = 0.0
+flanger_enabled = false
+flanger_rate = 0.5
+delay_mix = 0.0
+delay_time = 0.0
+delay_feedback = 0.0
+hpf_freq = 150.0
+lpf_freq = 6000.0
+eq_freq = 2200.0
+eq_gain = 2.5
+eq_q = 1.2
+wet_dry_mix = 0.0
+verified = true
+user = false
+vocoder_mix = 0.0
+vocoder_carrier_hz = 110.0
+vocoder_detune = 0.0
+matrix_ring_mod = 0.0
+bandpass_hpf = 0.0
+bandpass_lpf = 0.0
+bitcrush_downsample = 1
+stutter_rate = 0.0
+stutter_duty = 0.5
+noise_gate_aggro = 0.0
+eq_enabled = false
+eq_gains = [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+eq_post_gain = 0.0
+compressor_enabled = false
+limiter_enabled = true
+noise_suppression = true
+
+[[presets]]
+name = "Cylon"
+description = "Battlestar Centurion robotic voice (-3.0 st, 16 Hz square tremolo & comb slap)"
+category = "Robot/Vocoder"
+dpdfnet_attenuation_db = 50.0
+model_gain_db = 2.0
+pitch_semitones = -3.0
+formant_preserving = false
+ringmod_depth = 0.85
+ringmod_freq = 16.0
+ringmod_square = 1.0
+bitcrush_bits = 24
+downsample_rate = 48000
+distortion_level = 0.1
+flanger_enabled = false
+flanger_rate = 0.5
+delay_mix = 0.15
+delay_time = 0.04
+delay_feedback = 15.0
+hpf_freq = 120.0
+lpf_freq = 20000.0
+eq_freq = 2500.0
+eq_gain = 0.0
+eq_q = 1.0
+wet_dry_mix = 0.0
+verified = true
+user = false
+vocoder_mix = 0.0
+vocoder_carrier_hz = 110.0
+vocoder_detune = 0.0
+matrix_ring_mod = 0.0
+bandpass_hpf = 0.0
+bandpass_lpf = 0.0
+bitcrush_downsample = 1
+stutter_rate = 0.0
+stutter_duty = 0.5
+noise_gate_aggro = 0.0
+eq_enabled = false
+eq_gains = [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+eq_post_gain = 0.0
+compressor_enabled = false
+limiter_enabled = true
+noise_suppression = true
+
+[[presets]]
+name = "Daft Punk"
+description = "Polished French electro synth voice (+1.0 st, 150 Hz RM, 1.2 Hz flanger sweep)"
+category = "Robot/Vocoder"
+dpdfnet_attenuation_db = 48.0
+model_gain_db = 2.0
+pitch_semitones = 1.0
+formant_preserving = false
+ringmod_depth = 0.4
+ringmod_freq = 150.0
+ringmod_square = 0.0
+bitcrush_bits = 16
+downsample_rate = 48000
+distortion_level = 0.06
+flanger_enabled = true
+flanger_rate = 1.2
+delay_mix = 0.0
+delay_time = 0.0
+delay_feedback = 0.0
+hpf_freq = 20.0
+lpf_freq = 20000.0
+eq_freq = 3800.0
+eq_gain = 2.5
+eq_q = 1.0
+wet_dry_mix = 0.0
+verified = true
+user = false
+vocoder_mix = 0.0
+vocoder_carrier_hz = 110.0
+vocoder_detune = 0.0
+matrix_ring_mod = 0.0
+bandpass_hpf = 0.0
+bandpass_lpf = 0.0
+bitcrush_downsample = 1
+stutter_rate = 0.0
+stutter_duty = 0.5
+noise_gate_aggro = 0.0
+eq_enabled = false
+eq_gains = [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+eq_post_gain = 0.0
+compressor_enabled = false
+limiter_enabled = true
+noise_suppression = true
+
+[[presets]]
+name = "Kraftwerk"
+description = "Vintage restrained electronic synth voice (120 Hz modulation, 5 kHz lowpass cut)"
+category = "Robot/Vocoder"
+dpdfnet_attenuation_db = 48.0
+model_gain_db = 2.0
+pitch_semitones = 0.0
+formant_preserving = false
+ringmod_depth = 0.35
+ringmod_freq = 120.0
+ringmod_square = 0.0
+bitcrush_bits = 24
+downsample_rate = 48000
+distortion_level = 0.0
+flanger_enabled = false
+flanger_rate = 0.5
+delay_mix = 0.0
+delay_time = 0.0
+delay_feedback = 0.0
+hpf_freq = 180.0
+lpf_freq = 5000.0
+eq_freq = 2500.0
+eq_gain = 0.0
+eq_q = 1.0
+wet_dry_mix = 0.0
+verified = true
+user = false
+vocoder_mix = 0.0
+vocoder_carrier_hz = 110.0
+vocoder_detune = 0.0
+matrix_ring_mod = 0.0
+bandpass_hpf = 0.0
+bandpass_lpf = 0.0
+bitcrush_downsample = 1
+stutter_rate = 0.0
+stutter_duty = 0.5
+noise_gate_aggro = 0.0
+eq_enabled = false
+eq_gains = [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+eq_post_gain = 0.0
+compressor_enabled = false
+limiter_enabled = true
+noise_suppression = true
+
+[[presets]]
+name = "Dalek"
+description = "Iconic BBC Doctor Who Dalek ring modulation (+1.0 st, 30 Hz RM & valve drive)"
+category = "Robot/Vocoder"
+dpdfnet_attenuation_db = 50.0
+model_gain_db = 2.0
+pitch_semitones = 1.0
+formant_preserving = false
+ringmod_depth = 1.0
+ringmod_freq = 30.0
+ringmod_square = 0.0
+bitcrush_bits = 24
+downsample_rate = 48000
+distortion_level = 0.18
+flanger_enabled = false
+flanger_rate = 0.5
+delay_mix = 0.0
+delay_time = 0.0
+delay_feedback = 0.0
+hpf_freq = 220.0
+lpf_freq = 20000.0
+eq_freq = 2500.0
+eq_gain = 3.5
+eq_q = 1.5
+wet_dry_mix = 0.0
+verified = true
+user = false
+vocoder_mix = 0.0
+vocoder_carrier_hz = 110.0
+vocoder_detune = 0.0
+matrix_ring_mod = 0.0
+bandpass_hpf = 0.0
+bandpass_lpf = 0.0
+bitcrush_downsample = 1
+stutter_rate = 0.0
+stutter_duty = 0.5
+noise_gate_aggro = 0.0
+eq_enabled = false
+eq_gains = [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+eq_post_gain = 0.0
+compressor_enabled = false
+limiter_enabled = true
+noise_suppression = true
+
+[[presets]]
+name = "Walkie Talkie"
+description = "Military radio transceiver bandpass (480–3100 Hz, 8 kHz telecom downsample)"
+category = "Radio/Space"
+dpdfnet_attenuation_db = 48.0
+model_gain_db = 2.0
+pitch_semitones = 0.0
+formant_preserving = false
+ringmod_depth = 0.0
+ringmod_freq = 100.0
+ringmod_square = 0.0
+bitcrush_bits = 12
+downsample_rate = 8000
+distortion_level = 0.14
+flanger_enabled = false
+flanger_rate = 0.5
+delay_mix = 0.0
+delay_time = 0.0
+delay_feedback = 0.0
+hpf_freq = 480.0
+lpf_freq = 3100.0
+eq_freq = 1800.0
+eq_gain = 3.0
+eq_q = 1.2
+wet_dry_mix = 0.0
+verified = true
+user = false
+vocoder_mix = 0.0
+vocoder_carrier_hz = 110.0
+vocoder_detune = 0.0
+matrix_ring_mod = 0.0
+bandpass_hpf = 0.0
+bandpass_lpf = 0.0
+bitcrush_downsample = 1
+stutter_rate = 0.0
+stutter_duty = 0.5
+noise_gate_aggro = 0.0
+eq_enabled = false
+eq_gains = [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+eq_post_gain = 0.0
+compressor_enabled = false
+limiter_enabled = true
+noise_suppression = true
+
+[[presets]]
+name = "Old Telephone"
+description = "Vintage POTS landline telephone (320–3400 Hz bandpass, clean carbon mic curve)"
+category = "Radio/Space"
+dpdfnet_attenuation_db = 48.0
+model_gain_db = 2.0
+pitch_semitones = 0.0
+formant_preserving = false
+ringmod_depth = 0.0
+ringmod_freq = 100.0
+ringmod_square = 0.0
+bitcrush_bits = 12
+downsample_rate = 8000
+distortion_level = 0.05
+flanger_enabled = false
+flanger_rate = 0.5
+delay_mix = 0.0
+delay_time = 0.0
+delay_feedback = 0.0
+hpf_freq = 320.0
+lpf_freq = 3400.0
+eq_freq = 1100.0
+eq_gain = 2.0
+eq_q = 1.0
+wet_dry_mix = 0.0
+verified = true
+user = false
+vocoder_mix = 0.0
+vocoder_carrier_hz = 110.0
+vocoder_detune = 0.0
+matrix_ring_mod = 0.0
+bandpass_hpf = 0.0
+bandpass_lpf = 0.0
+bitcrush_downsample = 1
+stutter_rate = 0.0
+stutter_duty = 0.5
+noise_gate_aggro = 0.0
+eq_enabled = false
+eq_gains = [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+eq_post_gain = 0.0
+compressor_enabled = false
+limiter_enabled = true
+noise_suppression = true
+
+[[presets]]
+name = "Megaphone"
+description = "Projected public address horn (550–4200 Hz, 2 kHz horn bell resonance & drive)"
+category = "Radio/Space"
+dpdfnet_attenuation_db = 48.0
+model_gain_db = 2.0
+pitch_semitones = 0.0
+formant_preserving = false
+ringmod_depth = 0.0
+ringmod_freq = 100.0
+ringmod_square = 0.0
+bitcrush_bits = 24
+downsample_rate = 48000
+distortion_level = 0.16
+flanger_enabled = false
+flanger_rate = 0.5
+delay_mix = 0.0
+delay_time = 0.0
+delay_feedback = 0.0
+hpf_freq = 550.0
+lpf_freq = 4200.0
+eq_freq = 2000.0
+eq_gain = 3.5
+eq_q = 1.5
+wet_dry_mix = 0.0
+verified = true
+user = false
+vocoder_mix = 0.0
+vocoder_carrier_hz = 110.0
+vocoder_detune = 0.0
+matrix_ring_mod = 0.0
+bandpass_hpf = 0.0
+bandpass_lpf = 0.0
+bitcrush_downsample = 1
+stutter_rate = 0.0
+stutter_duty = 0.5
+noise_gate_aggro = 0.0
+eq_enabled = false
+eq_gains = [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+eq_post_gain = 0.0
+compressor_enabled = false
+limiter_enabled = true
+noise_suppression = true
+
+[[presets]]
+name = "Cave"
+description = "Deep cavern acoustic echo (140 ms pre-delay, 35% feedback, 5.5 kHz air damping)"
+category = "Radio/Space"
+dpdfnet_attenuation_db = 48.0
+model_gain_db = 2.0
+pitch_semitones = 0.0
+formant_preserving = false
+ringmod_depth = 0.0
+ringmod_freq = 100.0
+ringmod_square = 0.0
+bitcrush_bits = 24
+downsample_rate = 48000
+distortion_level = 0.0
+flanger_enabled = false
+flanger_rate = 0.5
+delay_mix = 0.3
+delay_time = 0.14
+delay_feedback = 35.0
+hpf_freq = 20.0
+lpf_freq = 5500.0
+eq_freq = 2500.0
+eq_gain = 0.0
+eq_q = 1.0
+wet_dry_mix = 0.0
+verified = true
+user = false
+vocoder_mix = 0.0
+vocoder_carrier_hz = 110.0
+vocoder_detune = 0.0
+matrix_ring_mod = 0.0
+bandpass_hpf = 0.0
+bandpass_lpf = 0.0
+bitcrush_downsample = 1
+stutter_rate = 0.0
+stutter_duty = 0.5
+noise_gate_aggro = 0.0
+eq_enabled = false
+eq_gains = [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+eq_post_gain = 0.0
+compressor_enabled = false
+limiter_enabled = true
+noise_suppression = true
+
+[[presets]]
+name = "Stadium Echo"
+description = "Massive public arena PA system echo (240 ms slap, 45% feedback)"
+category = "Radio/Space"
+dpdfnet_attenuation_db = 48.0
+model_gain_db = 2.0
+pitch_semitones = 0.0
+formant_preserving = false
+ringmod_depth = 0.0
+ringmod_freq = 100.0
+ringmod_square = 0.0
+bitcrush_bits = 24
+downsample_rate = 48000
+distortion_level = 0.0
+flanger_enabled = false
+flanger_rate = 0.5
+delay_mix = 0.35
+delay_time = 0.24
+delay_feedback = 45.0
+hpf_freq = 20.0
+lpf_freq = 20000.0
+eq_freq = 3000.0
+eq_gain = 2.0
+eq_q = 1.0
+wet_dry_mix = 0.0
+verified = true
+user = false
+vocoder_mix = 0.0
+vocoder_carrier_hz = 110.0
+vocoder_detune = 0.0
+matrix_ring_mod = 0.0
+bandpass_hpf = 0.0
+bandpass_lpf = 0.0
+bitcrush_downsample = 1
+stutter_rate = 0.0
+stutter_duty = 0.5
+noise_gate_aggro = 0.0
+eq_enabled = false
+eq_gains = [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+eq_post_gain = 0.0
+compressor_enabled = false
+limiter_enabled = true
+noise_suppression = true
+
+[[presets]]
+name = "Sci-Fi Alien"
+description = "Harmonic extraterrestrial voice (+4.0 st, 190 Hz RM, flanger modulation)"
+category = "Experimental"
+dpdfnet_attenuation_db = 48.0
+model_gain_db = 2.0
+pitch_semitones = 4.0
+formant_preserving = false
+ringmod_depth = 0.4
+ringmod_freq = 190.0
+ringmod_square = 0.0
+bitcrush_bits = 24
+downsample_rate = 48000
+distortion_level = 0.0
+flanger_enabled = true
+flanger_rate = 0.6
+delay_mix = 0.0
+delay_time = 0.0
+delay_feedback = 0.0
+hpf_freq = 20.0
+lpf_freq = 20000.0
+eq_freq = 2500.0
+eq_gain = 0.0
+eq_q = 1.0
+wet_dry_mix = 0.0
+verified = true
+user = false
+vocoder_mix = 0.0
+vocoder_carrier_hz = 110.0
+vocoder_detune = 0.0
+matrix_ring_mod = 0.0
+bandpass_hpf = 0.0
+bandpass_lpf = 0.0
+bitcrush_downsample = 1
+stutter_rate = 0.0
+stutter_duty = 0.5
+noise_gate_aggro = 0.0
+eq_enabled = false
+eq_gains = [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+eq_post_gain = 0.0
+compressor_enabled = false
+limiter_enabled = true
+noise_suppression = true
+
+[[presets]]
+name = "Ghost"
+description = "Ethereal spectral whisper (+2.0 st, ambient feedback delay & liquid flanger)"
+category = "Experimental"
+dpdfnet_attenuation_db = 48.0
+model_gain_db = 2.0
+pitch_semitones = 2.0
+formant_preserving = false
+ringmod_depth = 0.0
+ringmod_freq = 100.0
+ringmod_square = 0.0
+bitcrush_bits = 24
+downsample_rate = 48000
+distortion_level = 0.0
+flanger_enabled = true
+flanger_rate = 0.3
+delay_mix = 0.25
+delay_time = 0.18
+delay_feedback = 45.0
+hpf_freq = 20.0
+lpf_freq = 20000.0
+eq_freq = 2500.0
+eq_gain = 0.0
+eq_q = 1.0
+wet_dry_mix = 0.0
+verified = true
+user = false
+vocoder_mix = 0.0
+vocoder_carrier_hz = 110.0
+vocoder_detune = 0.0
+matrix_ring_mod = 0.0
+bandpass_hpf = 0.0
+bandpass_lpf = 0.0
+bitcrush_downsample = 1
+stutter_rate = 0.0
+stutter_duty = 0.5
+noise_gate_aggro = 0.0
+eq_enabled = false
+eq_gains = [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+eq_post_gain = 0.0
+compressor_enabled = false
+limiter_enabled = true
+noise_suppression = true
+
+[[presets]]
+name = "Demon"
+description = "Abyssal demonic entity (-6.0 st, 42 Hz growl, tube distortion & presence)"
+category = "Experimental"
+dpdfnet_attenuation_db = 50.0
+model_gain_db = 2.0
+pitch_semitones = -6.0
+formant_preserving = false
+ringmod_depth = 0.18
+ringmod_freq = 42.0
+ringmod_square = 0.0
+bitcrush_bits = 24
+downsample_rate = 48000
+distortion_level = 0.22
+flanger_enabled = false
+flanger_rate = 0.5
+delay_mix = 0.0
+delay_time = 0.0
+delay_feedback = 0.0
+hpf_freq = 80.0
+lpf_freq = 20000.0
+eq_freq = 2400.0
+eq_gain = 2.5
+eq_q = 1.0
+wet_dry_mix = 0.0
+verified = true
+user = false
+vocoder_mix = 0.0
+vocoder_carrier_hz = 110.0
+vocoder_detune = 0.0
+matrix_ring_mod = 0.0
+bandpass_hpf = 0.0
+bandpass_lpf = 0.0
+bitcrush_downsample = 1
+stutter_rate = 0.0
+stutter_duty = 0.5
+noise_gate_aggro = 0.0
+eq_enabled = false
+eq_gains = [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+eq_post_gain = 0.0
+compressor_enabled = false
+limiter_enabled = true
+noise_suppression = true
+
+[[presets]]
+name = "Cyber Chopper"
+description = "Rhythmic cyber stutter voice (6 Hz square AM stutter, -2.0 st pitch)"
+category = "Experimental"
+dpdfnet_attenuation_db = 50.0
+model_gain_db = 2.0
+pitch_semitones = -2.0
+formant_preserving = false
+ringmod_depth = 0.85
+ringmod_freq = 6.0
+ringmod_square = 1.0
+bitcrush_bits = 24
+downsample_rate = 48000
+distortion_level = 0.0
+flanger_enabled = false
+flanger_rate = 0.5
+delay_mix = 0.0
+delay_time = 0.0
+delay_feedback = 0.0
+hpf_freq = 20.0
+lpf_freq = 20000.0
+eq_freq = 2500.0
+eq_gain = 0.0
+eq_q = 1.0
+wet_dry_mix = 0.0
+verified = true
+user = false
+vocoder_mix = 0.0
+vocoder_carrier_hz = 110.0
+vocoder_detune = 0.0
+matrix_ring_mod = 0.0
+bandpass_hpf = 0.0
+bandpass_lpf = 0.0
+bitcrush_downsample = 1
+stutter_rate = 0.0
+stutter_duty = 0.5
+noise_gate_aggro = 0.0
+eq_enabled = false
+eq_gains = [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+eq_post_gain = 0.0
+compressor_enabled = false
+limiter_enabled = true
+noise_suppression = true
+
+[[presets]]
+name = "Underwater"
+description = "Submerged acoustic immersion (650 Hz lowpass, liquid flanger chorus)"
+category = "Experimental"
+dpdfnet_attenuation_db = 45.0
+model_gain_db = 2.0
+pitch_semitones = 0.0
+formant_preserving = false
+ringmod_depth = 0.0
+ringmod_freq = 100.0
+ringmod_square = 0.0
+bitcrush_bits = 24
+downsample_rate = 48000
+distortion_level = 0.0
+flanger_enabled = true
+flanger_rate = 0.35
+delay_mix = 0.0
+delay_time = 0.0
+delay_feedback = 0.0
+hpf_freq = 20.0
+lpf_freq = 650.0
+eq_freq = 180.0
+eq_gain = 3.0
+eq_q = 1.0
+wet_dry_mix = 0.0
+verified = true
+user = false
+vocoder_mix = 0.0
+vocoder_carrier_hz = 110.0
+vocoder_detune = 0.0
+matrix_ring_mod = 0.0
+bandpass_hpf = 0.0
+bandpass_lpf = 0.0
+bitcrush_downsample = 1
+stutter_rate = 0.0
+stutter_duty = 0.5
+noise_gate_aggro = 0.0
+eq_enabled = false
+eq_gains = [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+eq_post_gain = 0.0
+compressor_enabled = false
+limiter_enabled = true
+noise_suppression = true
+
+[[presets]]
+name = "Lo-Fi Static"
+description = "Vintage 10-bit arcade downsampling (6000 Hz sample rate, valve saturation)"
+category = "Experimental"
+dpdfnet_attenuation_db = 48.0
+model_gain_db = 2.0
+pitch_semitones = 0.0
+formant_preserving = false
+ringmod_depth = 0.0
+ringmod_freq = 100.0
+ringmod_square = 0.0
+bitcrush_bits = 10
+downsample_rate = 6000
+distortion_level = 0.18
+flanger_enabled = false
+flanger_rate = 0.5
+delay_mix = 0.0
+delay_time = 0.0
+delay_feedback = 0.0
+hpf_freq = 200.0
+lpf_freq = 5000.0
+eq_freq = 2500.0
+eq_gain = 0.0
+eq_q = 1.0
+wet_dry_mix = 0.0
+verified = true
+user = false
+vocoder_mix = 0.0
+vocoder_carrier_hz = 110.0
+vocoder_detune = 0.0
+matrix_ring_mod = 0.0
+bandpass_hpf = 0.0
+bandpass_lpf = 0.0
+bitcrush_downsample = 1
+stutter_rate = 0.0
+stutter_duty = 0.5
+noise_gate_aggro = 0.0
+eq_enabled = false
+eq_gains = [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+]
+eq_post_gain = 0.0
+compressor_enabled = false
+limiter_enabled = true
+noise_suppression = true

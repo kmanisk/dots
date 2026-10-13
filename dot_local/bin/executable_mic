@@ -58,6 +58,10 @@ case "${1:-}" in
         shift
         exec audio "$@"
         ;;
+    hear|sidetone|monitor)
+        shift
+        exec micstudio hear "$@"
+        ;;
     *)
         exec micstudio "$@"
         ;;
