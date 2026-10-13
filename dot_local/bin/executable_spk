@@ -59,6 +59,10 @@ apply_voicing() {
             voicing="balanced"
             title="Balanced (Linux)"
             ;;
+        experimental|exp|e)
+            voicing="experimental"
+            title="Experimental (Calf Bypassed)"
+            ;;
         *)
             echo "Error: Unknown profile '$voicing'." >&2
             echo "Available Profiles: custom (c), dynamic (dyn), music (mu), balanced (b)" >&2
@@ -209,6 +213,9 @@ case "${1:-}" in
         ;;
     balanced|b)
         apply_voicing "balanced"
+        ;;
+    experimental|exp|e)
+        apply_voicing "experimental"
         ;;
     off)
         dsp_off

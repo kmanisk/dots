@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# ds3-randomizer-gui: Launch DS3 Randomizer GUI under Proton without Steam AppID inheritance
+set -e
+
+unset SteamAppId
+unset SteamGameId
+
+export STEAM_COMPAT_CLIENT_INSTALL_PATH="$HOME/.local/share/Steam"
+export STEAM_COMPAT_DATA_PATH="$HOME/.local/share/Steam/steamapps/compatdata/374320"
+export PROTON_USE_WINED3D=1
+export LIBGL_ALWAYS_SOFTWARE=1
+
+GAME_DIR="/mnt/Games/NonSteamGames/Dark Souls III"
+if [ -d "$GAME_DIR/randomizer" ]; then
+    RAND_DIR="$GAME_DIR/randomizer"
+elif [ -d "$HOME/Games/DS3Randomizer/randomizer" ]; then
+    RAND_DIR="$HOME/Games/DS3Randomizer/randomizer"
+else
+    echo "Error: Randomizer directory not found!" >&2
+    exit 1
+fi
+
+if [ -f "$HOME/.local/share/Steam/compatibilitytools.d/proton-cachyos-slr/proton" ]; then
+    PROTON_BIN="$HOME/.local/share/Steam/compatibilitytools.d/proton-cachyos-slr/proton"
+elif [ -f "$HOME/.local/share/Steam/compatibilitytools.d/GE-Proton11-7-x86_64/proton" ]; then
+    PROTON_BIN="$HOME/.local/share/Steam/compatibilitytools.d/GE-Proton11-7-x86_64/proton"
+else
+    PROTON_BIN="$HOME/.local/share/Steam/steamapps/common/Proton - Experimental/proton"
+fi
+
+cd "$RAND_DIR"
+
+# Launch in background and focus window once mapped
+"$PROTON_BIN" run "$RAND_DIR/DS3Randomizer.exe" "$@" &
+PID=$!
+
+(
+    for i in {1..30}; do
+        if [ -n "$SWAYSOCK" ] || [ -n "$WAYLAND_DISPLAY" ]; then
+            if swaymsg '[title="(?i).*randomizer.*"] focus' >/dev/null 2>&1; then
+                break
+            fi
+        fi
+        sleep 0.2
+    done
+) &
+
+wait "$PID" || true
+
+# If new randomized files were generated, automatically sync them to the game root
+if [ -f "$RAND_DIR/Data0.bdt" ] && [ -d "$GAME_DIR" ]; then
+    cp -f "$RAND_DIR/Data0.bdt" "$GAME_DIR/Data0.bdt"
+    for d in event msg script sfx map menu; do
+        [ -d "$RAND_DIR/$d" ] && cp -rf "$RAND_DIR/$d" "$GAME_DIR/"
+    done
+    notify-send -i input-gaming "Dark Souls III Randomizer" "New seed files applied to game directory!" 2>/dev/null || true
+    echo "Randomizer files synchronized to $GAME_DIR"
+fi

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Mod Engine 3 Manager
+GenericName=FromSoftware Mod Manager
+Comment=Manage and launch mods for Dark Souls III and FromSoftware games
+Exec=/home/manisk/.local/bin/me3-manager
+Icon=input-gaming
+Terminal=false
+Categories=Game;Utility;
+StartupNotify=true

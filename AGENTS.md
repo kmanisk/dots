@@ -145,3 +145,11 @@ the strength of a description alone.
 
 - **Never modify `~/.config/MangoHud/MangoHud.conf`**. The configuration is managed by chezmoi (`pci_dev=0000:01:00.0`, custom colors, font, and scaling).
 - Keep `~/.config/MangoHud/MangoHud.conf` protected (immutable) so GUI tools like Goverlay cannot overwrite it.
+
+---
+
+## 10. Microphone & Bluetooth Audio Policy
+
+- **Always use the internal laptop microphone (`alsa_input.pci-0000_00_1f.3.analog-stereo` via `ghelper-audio`)**.
+- **Never allow Bluetooth headphones to switch into handsfree / headset mode (HSP/HFP / CVSD / mSBC)**. Bluetooth headphones must stay strictly in high-fidelity A2DP playback mode (`bluez5.roles = [ a2dp_sink a2dp_source ]`).
+- **All noise suppression, voice changing, and chat applications must use `ghelper-audio` as their recording input**, never a Bluetooth handsfree source.

@@ -1,22 +1,18 @@
 #!/usr/bin/env bash
-# rofi-games — game launcher menu (Alt+g). All entries use Proton, never vanilla Wine.
+# rofi-games / game launcher menu (Alt+g) powered by fuzzel.
 export PATH="$HOME/.local/bin:$PATH"
 
-options="ELDEN RING\nELDEN RING + LSFG 2x\nSteam library\nConfigure LSFG (GUI)\nKill game"
-# Dynamic Epic entries (auto-registered by legendary-tui): Title|appid|prefix per line.
+options="ELDEN RING + LSFG 3x\nER Randomizer Config (GUI)\nDARK SOULS III + LSFG\nDS3 Randomizer Config (GUI)\nSteam library\nConfigure LSFG (GUI)\nKill game"
 REG="$HOME/.config/rofi/epic-games.list"
 if [ -f "$REG" ]; then
     while IFS='|' read -r title _ _; do
-        [ -n "$title" ] && options="$options
-$title"
+        [ -n "$title" ] && options="$options\n$title"
     done < "$REG"
 fi
-chosen=$(echo -e "$options" | rofi -dmenu -i \
-    -sort \
-    -sorting-method "fzf" \
-    -matching "fuzzy" \
-    -p "Games" \
-    -theme "$HOME/.config/rofi/games.rasi")
+
+chosen=$(echo -e "$options" | fuzzel --dmenu --prompt "❯ " --width 38 --lines 10)
+
+[ -z "$chosen" ] && exit 0
 
 # Epic registry hit? Dispatch generically — no per-game edits needed.
 if [ -f "$REG" ]; then
@@ -29,8 +25,10 @@ if [ -f "$REG" ]; then
 fi
 
 case "$chosen" in
-    *"ELDEN RING + LSFG"*) mangohud eldenring-lsfg ;;
-    *"ELDEN RING"*)     env DISABLE_LSFGVK=1 mangohud eldenring-run ;;
+    *"ELDEN RING + LSFG"*) eldenring-lsfg ;;
+    *"ER Randomizer"*)  eldenring-randomizer-gui ;;
+    *"DARK SOULS III + LSFG"*) mangohud darksouls3-run ;;
+    *"DS3 Randomizer"*) ds3-randomizer-gui ;;
     *"Steam"*)          env STEAM_DGPU=1 steam-workspace ;;
     *"Configure LSFG"*) ( ~/.local/bin/lsfg-vk-ui >/dev/null 2>&1 & ) ;;
     *"Kill"*)           killgame ;;

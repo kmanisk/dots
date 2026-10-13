@@ -14,7 +14,8 @@ case "${1:-}" in
         exec micstudio clean
         ;;
     reset)
-        exec micstudio reset
+        shift
+        exec micstudio reset "$@"
         ;;
     fx)
         exec micstudio voice "Deep Voice"
@@ -64,6 +65,10 @@ case "${1:-}" in
     hear|sidetone|monitor)
         shift
         exec micstudio hear "$@"
+        ;;
+    spectrograph|spec|spectrum)
+        shift
+        exec micstudio spectrograph "$@"
         ;;
     *)
         exec micstudio "$@"

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Eden CYCLES ReShade Installer
+GenericName=ReShade Preset Installer
+Comment=Install Eden CYCLES lighting and color graphics overhaul for Dark Souls III
+Exec=/home/manisk/.local/bin/cycles-installer-gui
+Icon=input-gaming
+Terminal=false
+Categories=Game;Utility;
+StartupNotify=true

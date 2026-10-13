@@ -617,6 +617,21 @@ def apply_theme(name, no_nvim=False):
             t = threading.Thread(target=_rpc_one, args=(sock,), daemon=True)
             t.start()
 
+        # Pre-compile base46 disk cache in background so future Neovim launches load the active theme immediately
+        try:
+            cache_theme_file = os.path.expanduser("~/.local/share/nvim/base46/current_theme")
+            os.makedirs(os.path.dirname(cache_theme_file), exist_ok=True)
+            with open(cache_theme_file, "w") as f:
+                f.write(f"{name}\n")
+            subprocess.Popen(
+                ["nvim", "--headless", "-c", f"lua pcall(function() require('nvconfig').base46.theme = '{name}'; require('base46').load_all_highlights() end)", "-c", "q"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True
+            )
+        except Exception:
+            pass
+
     # Sway IPC: live client borders and swaybar colors (single batched command)
     if procs["sway"]:
         sway_cmd = (

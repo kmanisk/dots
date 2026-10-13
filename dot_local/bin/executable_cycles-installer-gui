@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# cycles-installer-gui: Launch Eden CYCLES Installer under Proton
+set -e
+
+unset SteamAppId
+unset SteamGameId
+
+export STEAM_COMPAT_CLIENT_INSTALL_PATH="$HOME/.local/share/Steam"
+export STEAM_COMPAT_DATA_PATH="$HOME/.local/share/Steam/steamapps/compatdata/374320"
+export PROTON_USE_WINED3D=1
+export LIBGL_ALWAYS_SOFTWARE=1
+
+CYCLES_DIR="$HOME/Games/CYCLES"
+mkdir -p "$CYCLES_DIR"
+if [ ! -f "$CYCLES_DIR/CYCLES - Installer.exe" ]; then
+    if [ -f "$HOME/Downloads/CYCLES - Installer-808-3-0-1-1654111167.zip" ]; then
+        7z e -y -o"$CYCLES_DIR" "$HOME/Downloads/CYCLES - Installer-808-3-0-1-1654111167.zip" "CYCLES - Installer.exe"
+    elif [ -f "/tmp/cycles/CYCLES - Installer.exe" ]; then
+        cp -f "/tmp/cycles/CYCLES - Installer.exe" "$CYCLES_DIR/"
+    fi
+fi
+
+if [ -f "$HOME/.local/share/Steam/compatibilitytools.d/proton-cachyos-slr/proton" ]; then
+    PROTON_BIN="$HOME/.local/share/Steam/compatibilitytools.d/proton-cachyos-slr/proton"
+elif [ -f "$HOME/.local/share/Steam/compatibilitytools.d/GE-Proton11-7-x86_64/proton" ]; then
+    PROTON_BIN="$HOME/.local/share/Steam/compatibilitytools.d/GE-Proton11-7-x86_64/proton"
+else
+    PROTON_BIN="$HOME/.local/share/Steam/steamapps/common/Proton - Experimental/proton"
+fi
+
+cd "$CYCLES_DIR"
+
+"$PROTON_BIN" run "$CYCLES_DIR/CYCLES - Installer.exe" "$@" &
+PID=$!
+
+(
+    for i in {1..30}; do
+        if [ -n "$SWAYSOCK" ] || [ -n "$WAYLAND_DISPLAY" ]; then
+            if swaymsg '[title="(?i).*cycles.*"] focus' >/dev/null 2>&1; then
+                break
+            fi
+        fi
+        sleep 0.2
+    done
+) &
+
+wait "$PID" || true

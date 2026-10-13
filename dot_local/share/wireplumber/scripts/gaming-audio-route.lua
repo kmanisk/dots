@@ -1,19 +1,77 @@
 -- WirePlumber 0.5 - Gaming Audio Automatic Route Policy
--- Automatically targets allowlisted competitive games to sink.peace_gaming
--- (Peace EQ + LoudMax LADSPA) while preserving speaker/headphone transparency
--- for all desktop streams.
---
--- Invariants:
--- 1. Matches ONLY Stream/Output/Audio playback streams.
--- 2. Runs BEFORE linking/find-default-target to intercept game streams before default sink assignment.
--- 3. Sets has_defined_target = true to prevent get-filter-from-target
---    from wrapping the game stream in sink.asus_speakers.
--- 4. Never touches microphone / voice capture streams (Stream/Input/Audio).
-
 lutils = require ("linking-utils")
 cutils = require ("common-utils")
 log = Log.open_topic ("s-gaming-route")
 
+local BT_ADDRESS = "B0:38:E2:78:9B:FE"
+local ALSA_SINK_NAME = "alsa_output.pci-0000_00_1f.3.analog-stereo"
+local last_target_name = nil
+
+-- Hook 1: Dynamic target selection for playback.peace_gaming
+SimpleEventHook {
+  name = "linking/find-peace-playback-target",
+  after = "linking/get-filter-from-target",
+  before = "linking/prepare-link",
+  interests = {
+    EventInterest {
+      Constraint { "event.type", "=", "select-target" },
+      Constraint { "event.session-item.interface", "=", "linkable" },
+    },
+  },
+  execute = function (event)
+    local _, om, si, si_props, si_flags, target =
+        lutils:unwrap_select_target_event (event)
+
+    local node_name = si_props ["node.name"] or ""
+    if node_name ~= "playback.peace_gaming" then
+      return
+    end
+
+    local chosen_target = nil
+    local target_desc = "Analog Stereo"
+
+    -- Priority 1: Bluetooth A2DP Sink (Soundcore Q20i)
+    for lnkbl in om:iterate { type = "SiLinkable" } do
+      local props = lnkbl.properties
+      if props ["item.node.direction"] == "input" and
+         props ["media.class"] == "Audio/Sink" and
+         (props ["api.bluez5.address"] == BT_ADDRESS or props ["device.api"] == "bluez5") and
+         lutils.canLink (si_props, lnkbl) then
+        chosen_target = lnkbl
+        target_desc = "Soundcore Q20i (Bluetooth A2DP)"
+        break
+      end
+    end
+
+    -- Priority 2: Fallback to ALSA Analog Stereo
+    if not chosen_target then
+      for lnkbl in om:iterate { type = "SiLinkable" } do
+        local props = lnkbl.properties
+        if props ["item.node.direction"] == "input" and
+           props ["node.name"] == ALSA_SINK_NAME and
+           lutils.canLink (si_props, lnkbl) then
+          chosen_target = lnkbl
+          target_desc = "Analog Stereo"
+          break
+        end
+      end
+    end
+
+    if chosen_target then
+      local t_name = chosen_target.properties ["node.name"]
+      if t_name ~= last_target_name then
+        log:notice (string.format ("Peace gaming target changed: %s -> %s (%s)",
+          tostring (last_target_name), tostring (t_name), target_desc))
+        last_target_name = t_name
+      end
+      si_flags.has_defined_target = true
+      si_flags.has_node_defined_target = true
+      event:set_data ("target", chosen_target)
+    end
+  end
+}:register ()
+
+-- Hook 2: Route competitive games to sink.peace_gaming
 SimpleEventHook {
   name = "linking/find-gaming-target",
   after = "linking/find-defined-target",
@@ -21,13 +79,13 @@ SimpleEventHook {
   interests = {
     EventInterest {
       Constraint { "event.type", "=", "select-target" },
+      Constraint { "event.session-item.interface", "=", "linkable" },
     },
   },
   execute = function (event)
     local _, om, si, si_props, si_flags, target =
         lutils:unwrap_select_target_event (event)
 
-    -- If target was already picked by explicit target.object from application, don't override
     if target then
       return
     end
@@ -87,4 +145,3 @@ SimpleEventHook {
     end
   end
 }:register ()
-

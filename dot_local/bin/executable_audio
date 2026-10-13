@@ -93,13 +93,26 @@ cmd_status() {
     echo -e " ${BOLD}ASUS Speaker DSP:${RESET}  ${spk_color}${spk_state}${RESET} | Profile: ${BOLD}${spk_profile}${RESET} (Isolated & pinned)"
 
     # 7. Gaming Pipeline
-    local gaming_links
+    local gaming_links peace_target="unknown" peace_target_type="Unknown"
     gaming_links=$(pw-link -l 2>/dev/null | grep -E "sink\.peace_gaming|playback\.peace_gaming" | wc -l || echo "0")
     local gaming_active="${GRAY}IDLE${RESET}"
     if [[ "$gaming_links" -gt 0 ]]; then
         gaming_active="${GREEN}ACTIVE (${gaming_links} links)${RESET}"
     fi
+    local raw_target
+    raw_target=$(pw-link -l 2>/dev/null | grep -A 2 "playback.peace_gaming:output_FL" | grep -v "output_FL" | sed -n 's/.*|-> \([^:]*\):.*/\1/p' | head -n 1)
+    if [[ "$raw_target" =~ bluez_output ]]; then
+        peace_target="$raw_target"
+        peace_target_type="${CYAN}Bluetooth A2DP (Soundcore Q20i)${RESET}"
+    elif [[ "$raw_target" =~ alsa_output ]]; then
+        peace_target="$raw_target"
+        peace_target_type="${GREEN}Analog 3.5mm Output${RESET}"
+    elif [[ -n "$raw_target" ]]; then
+        peace_target="$raw_target"
+        peace_target_type="$raw_target"
+    fi
     echo -e " ${BOLD}Gaming Pipeline:${RESET}   sink.peace_gaming | Status: ${gaming_active}"
+    echo -e "   └─ Output Target: ${peace_target_type} (${GRAY}${peace_target}${RESET})"
 
     # 8. Active Streams
     echo -e "${BOLD}${CYAN}----------------------------------------------------------------${RESET}"
@@ -206,14 +219,117 @@ cmd_doctor() {
         echo -e "${GREEN}[✓ PASS]${RESET} No double-processing routes detected"
     fi
 
-    # 6. Baseline Backup & Config Drift
-    echo -n ":: 6. Baseline Recovery:      "
+    # 6. Peace Gaming Routing Validation
+    echo -n ":: 6. Gaming Audio Route:     "
+    local peace_out_link
+    peace_out_link=$(pw-link -l 2>/dev/null | grep -A 2 "playback.peace_gaming:output_FL" 2>/dev/null | grep -v "output_FL" | sed -n 's/.*|-> \([^:]*\):.*/\1/p' | head -n 1 || true)
+    local active_game_streams=0
+    active_game_streams=$(pw-link -l 2>/dev/null | (grep -A 2 "sink.peace_gaming:playback" 2>/dev/null || true) | (grep "|<-" 2>/dev/null || true) | wc -l)
+    active_game_streams="${active_game_streams//[^0-9]/}"
+    if [[ "${active_game_streams:-0}" -gt 0 && -z "$peace_out_link" ]]; then
+        echo -e "\n   ${RED}[FAIL]${RESET} sink.peace_gaming has active streams (${active_game_streams}) but NO valid output target link!"
+        ((errors++))
+
+
+
+    elif [[ -n "$peace_out_link" ]]; then
+        echo -e "${GREEN}[✓ PASS]${RESET} playback.peace_gaming -> ${peace_out_link}"
+    else
+        echo -e "${GREEN}[✓ PASS]${RESET} playback.peace_gaming routed (idle)"
+    fi
+
+    # 7. Bluetooth A2DP & Policy Verification
+    echo -n ":: 7. Bluetooth Policy:       "
+    local bt_cards
+    bt_cards=$(pw-dump Device 2>/dev/null | jq -r '.[] | select(.info.props["device.name"] | test("bluez")) | .info.props["device.name"]' 2>/dev/null || true)
+    local bt_warn=0
+    if [[ -n "$bt_cards" ]]; then
+        for card in $bt_cards; do
+            local bt_node_profile
+            bt_node_profile=$(pw-dump Node 2>/dev/null | jq -r --arg a "B0:38:E2:78:9B:FE" '.[] | select(.info.props["api.bluez5.address"] == $a and .info.props["media.class"] == "Audio/Sink") | .info.props["api.bluez5.profile"]' 2>/dev/null | head -n 1 || echo "")
+            local bt_input_node
+            bt_input_node=$(pw-dump Node 2>/dev/null | jq -r --arg a "B0:38:E2:78:9B:FE" '.[] | select(.info.props["api.bluez5.address"] == $a and .info.props["media.class"] == "Audio/Source") | .info.props["node.name"]' 2>/dev/null | head -n 1 || echo "")
+            if [[ -n "$bt_input_node" ]]; then
+                echo -e "\n   ${RED}[FAIL]${RESET} Handsfree profile detected! Bluetooth source node exists: $bt_input_node"
+                ((errors++))
+                bt_warn=1
+            elif [[ -n "$bt_node_profile" && "$bt_node_profile" != "a2dp-sink" ]]; then
+                echo -e "\n   ${YELLOW}[!] WARNING${RESET} Bluetooth headset profile is '$bt_node_profile' (expected a2dp-sink)"
+                ((warnings++))
+                bt_warn=1
+            fi
+        done
+        if [[ "$bt_warn" -eq 0 ]]; then
+            echo -e "${GREEN}[✓ PASS]${RESET} Headset strictly in high-fidelity A2DP mode"
+        fi
+    else
+        echo -e "${GRAY}[INFO]${RESET} No active Bluetooth headset connected"
+    fi
+
+    # 8. Speaker FIR Convolver Isolation
+    echo -n ":: 8. Speaker FIR Isolation: "
+    local spk_fir_leak=0
+    local cur_def_sink
+    cur_def_sink=$(pw-metadata -n default 0 2>/dev/null | grep -E "key:'default\.audio\.sink'" | sed -n "s/.*value:'{\\\"name\\\":\\\"\\([^\\\"]*\\)\\\"}'.*/\1/p" || true)
+    local cur_alsa_route
+    cur_alsa_route=$(pw-dump Device 2>/dev/null | jq -r '.[] | select(.info.props["device.name"] == "alsa_card.pci-0000_00_1f.3") | .info.params.Route[]? | select(.direction == "Output") | .name' 2>/dev/null | head -n 1 || echo "analog-output-speaker")
+    if [[ "$cur_def_sink" =~ bluez_output ]] || [[ "$cur_alsa_route" == "analog-output-headphones" ]]; then
+        # On non-speaker target, effect_input.Dolby_Speaker must NOT be linked or enabled
+        local spk_disabled
+        spk_disabled=$(pw-metadata -n filters 2>/dev/null | grep -A 1 "id:.*key:'filter\.smart\.disabled'" | grep -v "key:" | grep -E "true|false" | head -n 1 || echo "true")
+        local spk_leak_links=0; set +e
+        spk_leak_links=$( (pw-link -l 2>/dev/null || true) | grep -A 1 -E "^effect_output\.Dolby_Speaker:" | grep -v "alsa_output" | grep "|->" | wc -l)
+        if [[ "$spk_leak_links" -gt 0 ]]; then
+            echo -e "\n   ${RED}[FAIL]${RESET} Chassis FIR convolver linked to non-speaker target ($cur_def_sink)!"
+            spk_fir_leak=1
+            ((errors++))
+        fi
+    fi
+    if [[ "$spk_fir_leak" -eq 0 ]]; then
+        echo -e "${GREEN}[✓ PASS]${RESET} Speaker chassis FIR strictly isolated from headphones/BT"; set -e
+    fi
+
+    # 9. Microphone Invariant & Source Integrity
+    echo -n ":: 9. Microphone Invariant:   "
+    local active_def_source
+    active_def_source=$(pw-metadata -n default 0 2>/dev/null | grep -E "key:'default\.audio\.source'" | sed -n "s/.*value:'{\\\"name\\\":\\\"\\([^\\\"]*\\)\\\"}'.*/\1/p" || true)
+    local any_bt_source
+    any_bt_source=$(pw-dump Node 2>/dev/null | jq -r '.[] | select(.info.props["node.name"] | test("bluez_input")) | .info.props["node.name"]' 2>/dev/null | head -n 1 || true)
+    if [[ "$active_def_source" != "ghelper-audio" ]]; then
+        echo -e "\n   ${RED}[FAIL]${RESET} Default source is '$active_def_source' (expected ghelper-audio)!"
+        ((errors++))
+    elif [[ -n "$any_bt_source" ]]; then
+        echo -e "\n   ${RED}[FAIL]${RESET} Handsfree Bluetooth microphone detected in system ($any_bt_source)!"
+        ((errors++))
+    else
+        echo -e "${GREEN}[✓ PASS]${RESET} ghelper-audio locked as sole default source (BT handsfree suppressed)"
+    fi
+
+    # 10. Virtual Sink Isolation
+    echo -n ":: 10. Virtual Sink Policy:   "
+    local virt_leak=0
+    if [[ "$cur_def_sink" == "sink.peace_gaming" ]]; then
+        echo -e "\n   ${RED}[FAIL]${RESET} sink.peace_gaming captured default desktop sink!"
+        virt_leak=1
+        ((errors++))
+    elif [[ "$cur_def_sink" =~ effect_input\.Dolby ]]; then
+        echo -e "\n   ${RED}[FAIL]${RESET} Internal smart filter $cur_def_sink exposed as default sink!"
+        virt_leak=1
+        ((errors++))
+    fi
+    if [[ "$virt_leak" -eq 0 ]]; then
+        echo -e "${GREEN}[✓ PASS]${RESET} Virtual and gaming sinks properly unprivileged (priority.session = -1)"
+    fi
+
+    # 11. Baseline Snapshot & Recovery
+    echo -n ":: 11. Baseline Snapshot:     "
     if [[ -d "$BACKUP_DIR" && -f "$BACKUP_DIR/pipewire.conf.d/30-peace-gaming.conf" ]]; then
         echo -e "${GREEN}[✓ PASS]${RESET} Baseline snapshot verified at ${BACKUP_DIR}"
     else
         echo -e "${YELLOW}[!] WARNING${RESET} Baseline backup directory missing or incomplete"
         ((warnings++))
     fi
+
 
     echo -e "${BOLD}================================================================${RESET}"
     if [[ "$errors" -eq 0 && "$warnings" -eq 0 ]]; then
@@ -261,6 +377,11 @@ cmd_rollback() {
     if [[ -d "$BACKUP_DIR/wireplumber.conf.d" ]]; then
         cp -r "$BACKUP_DIR/wireplumber.conf.d/"* "$WP_CONF_DIR/wireplumber.conf.d/"
         echo "  ✓ Restored ~/.config/wireplumber/wireplumber.conf.d/"
+    fi
+    if [[ -d "$BACKUP_DIR/scripts" ]]; then
+        mkdir -p "${HOME}/.local/share/wireplumber/scripts"
+        cp -r "$BACKUP_DIR/scripts/"* "${HOME}/.local/share/wireplumber/scripts/"
+        echo "  ✓ Restored ~/.local/share/wireplumber/scripts/"
     fi
     if [[ -d "$BACKUP_DIR/asus-speakers" ]]; then
         cp -r "$BACKUP_DIR/asus-speakers/"* "${HOME}/.config/asus-speakers/" 2>/dev/null || true

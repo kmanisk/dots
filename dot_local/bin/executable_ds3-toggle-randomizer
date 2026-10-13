@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# ds3-toggle-randomizer: Switch between Vanilla and Randomized files for DS3
+GAME_DIR="/mnt/Games/NonSteamGames/Dark Souls III"
+
+if [ ! -d "$GAME_DIR" ]; then
+    notify-send "DS3 Randomizer" "Game directory not found!"
+    exit 1
+fi
+
+cd "$GAME_DIR"
+
+if [ -f "Data0.bdt.vanilla_bak" ] && [ -f "Data0.bdt" ]; then
+    # Currently randomized or custom Data0. Check state
+    if cmp -s "Data0.bdt" "Data0.bdt.vanilla_bak"; then
+        # Currently vanilla -> switch to randomized
+        if [ -f "randomizer/Data0.bdt" ]; then
+            cp -f "randomizer/Data0.bdt" "Data0.bdt"
+            cp -rf randomizer/event randomizer/msg randomizer/script randomizer/sfx randomizer/map ./ 2>/dev/null || true
+            notify-send -i input-gaming "Dark Souls III" "Randomizer ENABLED"
+            echo "Randomizer ENABLED"
+        else
+            notify-send "Dark Souls III" "Randomizer data not generated yet!"
+        fi
+    else
+        # Currently randomized -> switch to vanilla
+        cp -f "Data0.bdt.vanilla_bak" "Data0.bdt"
+        rm -rf event msg script sfx map
+        notify-send -i input-gaming "Dark Souls III" "Switched to VANILLA (Randomizer disabled)"
+        echo "Switched to VANILLA"
+    fi
+else
+    notify-send "Dark Souls III" "No vanilla backup found!"
+fi

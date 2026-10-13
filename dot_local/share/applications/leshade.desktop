@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=LeShade ReShade Manager
+GenericName=ReShade Installer & Manager
+Comment=Install and manage ReShade for Linux Wine and Proton games
+Exec=/home/manisk/.local/bin/leshade
+Icon=input-gaming
+Terminal=false
+Categories=Game;Utility;
+StartupNotify=true

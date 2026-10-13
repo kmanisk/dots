@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Network Route & Priority
+Comment=Switch between Ethernet and Wi-Fi priority with fallback
+Exec=rofi-network
+Icon=network-transmit-receive
+Terminal=false
+Type=Application
+Categories=Network;Settings;System;
+Keywords=network;ethernet;wifi;route;priority;tether;switch;

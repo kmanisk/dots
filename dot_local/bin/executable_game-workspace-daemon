@@ -2,9 +2,10 @@
 """
 game-workspace-daemon:
 Event-driven Sway IPC daemon to guarantee:
-- Workspace 2: Browsers (Brave, Firefox, etc.) and Video players (mpv, vlc)
+- Workspace 2: Browsers (Brave, Firefox, etc.)
 - Workspace 4: Games & Game Launchers (Steam games, CS2, Elden Ring, GTA IV, Rockstar)
 - Picture-in-Picture: Floats freely on the active workspace without eviction
+- Video players (mpv, vlc): left alone, open where launched
 Pure Python, zero external dependencies, direct UNIX socket IPC over $SWAYSOCK.
 """
 import os
@@ -86,7 +87,6 @@ def find_window_workspace(tree, con_id):
     return search(tree, None)
 
 BROWSER_RE = re.compile(r"\b(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha|qutebrowser)\b", re.I)
-VIDEO_RE = re.compile(r"\b(mpv|vlc)\b", re.I)
 PIP_RE = re.compile(r"picture[- ]in[- ]picture", re.I)
 GAME_RE = re.compile(r"steam_app_|gamescope|cs2|eldenring|dyinglight|farcry|gtaiv|hll|hellletloose|launcher\.exe|socialclubhelper\.exe|playgtaiv", re.I)
 GAME_TITLE_RE = re.compile(r"^(rockstar games.*|grand theft auto iv|gtaiv)$", re.I)
@@ -117,18 +117,8 @@ def route_container(cmd_sock, con, tree=None):
             ipc_cmd(cmd_sock, f"[con_id={cid}] move to workspace number 2")
         return
 
-    # Backstop 2: Video players to Workspace 2
-    if VIDEO_RE.search(ident):
-        if tree is None:
-            tree = get_tree(cmd_sock)
-        cur_ws = find_window_workspace(tree, cid)
-        if cur_ws and cur_ws != "2":
-            log(f"ROUTE VIDEO con_id={cid} ({ident}) from ws {cur_ws} -> ws2")
-            ipc_cmd(cmd_sock, f"[con_id={cid}] move to workspace number 2, focus")
-        return
-
-    # Backstop 3: Games to Workspace 4
-    if not BROWSER_RE.search(ident) and not VIDEO_RE.search(ident):
+    # Backstop 2: Games to Workspace 4
+    if not BROWSER_RE.search(ident):
         if GAME_RE.search(ident) or GAME_TITLE_RE.search(title):
             if tree is None:
                 tree = get_tree(cmd_sock)

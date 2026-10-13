@@ -1,0 +1,367 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# rofi-network — Network Priority & Dual Link Route Switcher
+# Interactive Rofi interface & CLI utility for Ethernet / Wi-Fi priority control
+# ==============================================================================
+# Automatically maintains wired/USB tethering Ethernet as primary (metric 50)
+# and Wi-Fi as seamless standby fallback (metric 600).
+# Allows instantaneous manual switching between links with zero connection drops.
+# ==============================================================================
+
+set -euo pipefail
+export PATH="$HOME/.local/bin:$PATH"
+
+THEME="$HOME/.config/rofi/system-floating.rasi"
+
+# Helper for async desktop notifications
+notify() {
+    local urgency="${1:-normal}"
+    local icon="${2:-network-transmit-receive}"
+    local title="$3"
+    local msg="$4"
+    notify-send -t 4000 -u "$urgency" -i "$icon" "$title" "$msg" 2>/dev/null &
+}
+
+# Query active default route from Linux kernel FIB routing table
+get_default_route_info() {
+    local fib_line
+    fib_line=$(ip route get 1.1.1.1 2>/dev/null | head -n1 || true)
+    DEF_DEV=$(echo "$fib_line" | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}')
+    DEF_GW=$(echo "$fib_line" | awk '{for(i=1;i<=NF;i++) if($i=="via") print $(i+1)}')
+
+    if [[ -n "$DEF_DEV" ]]; then
+        DEF_METRIC=$(ip route show default dev "$DEF_DEV" 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="metric") print $(i+1)}' | head -n1 || echo "")
+    else
+        DEF_METRIC=""
+    fi
+}
+
+# Query active interfaces
+query_interfaces() {
+    get_default_route_info
+
+    # Active Ethernet (Wired LAN, USB Tethering / Jio)
+    ETH_DEV=""
+    ETH_UUID=""
+    ETH_NAME=""
+    ETH_IP=""
+    ETH_METRIC=""
+    local eth_line
+    eth_line=$(nmcli -t -f DEVICE,TYPE,UUID,NAME con show --active 2>/dev/null | grep -E ":.*ethernet.*:" | head -n1 || true)
+    if [[ -n "$eth_line" ]]; then
+        ETH_DEV=$(echo "$eth_line" | cut -d: -f1)
+        ETH_UUID=$(echo "$eth_line" | cut -d: -f3)
+        ETH_NAME=$(echo "$eth_line" | cut -d: -f4-)
+        ETH_IP=$(nmcli -t -f IP4.ADDRESS device show "$ETH_DEV" 2>/dev/null | head -n1 | cut -d: -f2 || true)
+        ETH_METRIC=$(ip route show default dev "$ETH_DEV" 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="metric") print $(i+1)}' | head -n1 || echo "50")
+    fi
+
+    # Active Wi-Fi
+    WIFI_DEV=""
+    WIFI_UUID=""
+    WIFI_NAME=""
+    WIFI_IP=""
+    WIFI_SIGNAL=""
+    WIFI_METRIC=""
+    local wifi_line
+    wifi_line=$(nmcli -t -f DEVICE,TYPE,UUID,NAME con show --active 2>/dev/null | grep -E ":.*(wifi|wireless).*:" | head -n1 || true)
+    if [[ -n "$wifi_line" ]]; then
+        WIFI_DEV=$(echo "$wifi_line" | cut -d: -f1)
+        WIFI_UUID=$(echo "$wifi_line" | cut -d: -f3)
+        WIFI_NAME=$(echo "$wifi_line" | cut -d: -f4-)
+        WIFI_IP=$(nmcli -t -f IP4.ADDRESS device show "$WIFI_DEV" 2>/dev/null | head -n1 | cut -d: -f2 || true)
+        WIFI_SIGNAL=$(nmcli -t -f IN-USE,SIGNAL device wifi list 2>/dev/null | grep '^\*' | cut -d: -f2 | head -n1 || echo "")
+        WIFI_METRIC=$(ip route show default dev "$WIFI_DEV" 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="metric") print $(i+1)}' | head -n1 || echo "600")
+    fi
+}
+
+# Switch to Ethernet Primary
+switch_to_ethernet() {
+    query_interfaces
+    if [[ -z "$ETH_DEV" || -z "$ETH_UUID" ]]; then
+        notify "critical" "network-error" "Network Priority" "Cannot switch: No active Ethernet or USB tether connection found."
+        echo "Error: No active Ethernet device found." >&2
+        return 1
+    fi
+
+    echo "Switching primary route to Ethernet ($ETH_DEV)..."
+    nmcli con modify "$ETH_UUID" ipv4.route-metric 50 ipv6.route-metric 50 2>/dev/null || true
+    nmcli device reapply "$ETH_DEV" 2>/dev/null || true
+
+    if [[ -n "$WIFI_DEV" && -n "$WIFI_UUID" ]]; then
+        nmcli con modify "$WIFI_UUID" ipv4.route-metric 600 ipv6.route-metric 600 2>/dev/null || true
+        nmcli device reapply "$WIFI_DEV" 2>/dev/null || true
+    fi
+
+    resolvectl flush-caches 2>/dev/null || true
+
+    local wifi_info=""
+    if [[ -n "$WIFI_NAME" ]]; then
+        wifi_info="• Wi-Fi ($WIFI_NAME) active on fallback"
+    fi
+    notify "normal" "network-wired" "Network Priority" "Primary route: Ethernet ($ETH_DEV)\n${wifi_info}"
+}
+
+# Switch to Wi-Fi Primary
+switch_to_wifi() {
+    query_interfaces
+    if [[ -z "$WIFI_DEV" || -z "$WIFI_UUID" ]]; then
+        notify "critical" "network-error" "Network Priority" "Cannot switch: Wi-Fi is disconnected."
+        echo "Error: No active Wi-Fi device found." >&2
+        return 1
+    fi
+
+    echo "Switching primary route to Wi-Fi ($WIFI_DEV)..."
+    nmcli con modify "$WIFI_UUID" ipv4.route-metric 40 ipv6.route-metric 40 2>/dev/null || true
+    nmcli device reapply "$WIFI_DEV" 2>/dev/null || true
+
+    if [[ -n "$ETH_DEV" && -n "$ETH_UUID" ]]; then
+        nmcli con modify "$ETH_UUID" ipv4.route-metric 600 ipv6.route-metric 600 2>/dev/null || true
+        nmcli device reapply "$ETH_DEV" 2>/dev/null || true
+    fi
+
+    resolvectl flush-caches 2>/dev/null || true
+
+    local eth_info=""
+    if [[ -n "$ETH_NAME" ]]; then
+        eth_info="• Ethernet ($ETH_NAME) active on standby"
+    fi
+    notify "normal" "network-wireless" "Network Priority" "Primary route: Wi-Fi ($WIFI_NAME)\n${eth_info}"
+}
+
+# Reset to Auto-Priority (Ethernet primary, Wi-Fi fallback)
+reset_auto() {
+    query_interfaces
+    echo "Resetting to Auto-Priority baseline..."
+    if [[ -n "$ETH_DEV" && -n "$ETH_UUID" ]]; then
+        nmcli con modify "$ETH_UUID" ipv4.route-metric 50 ipv6.route-metric 50 2>/dev/null || true
+        nmcli device reapply "$ETH_DEV" 2>/dev/null || true
+    fi
+
+    if [[ -n "$WIFI_DEV" && -n "$WIFI_UUID" ]]; then
+        nmcli con modify "$WIFI_UUID" ipv4.route-metric 600 ipv6.route-metric 600 2>/dev/null || true
+        nmcli device reapply "$WIFI_DEV" 2>/dev/null || true
+    fi
+
+    resolvectl flush-caches 2>/dev/null || true
+    notify "normal" "network-transmit-receive" "Network Priority" "Auto-Priority restored:\nEthernet (metric 50) > Wi-Fi fallback (metric 600)"
+}
+
+# Toggle Primary between Ethernet and Wi-Fi
+toggle_primary() {
+    query_interfaces
+    if [[ "$DEF_DEV" == "$ETH_DEV" && -n "$WIFI_DEV" ]]; then
+        switch_to_wifi
+    elif [[ -n "$ETH_DEV" ]]; then
+        switch_to_ethernet
+    else
+        echo "Unable to toggle: Insufficient dual connections." >&2
+    fi
+}
+
+# Toggle Wi-Fi connection
+toggle_wifi() {
+    query_interfaces
+    if [[ -n "$WIFI_DEV" ]]; then
+        echo "Disconnecting Wi-Fi $WIFI_DEV..."
+        nmcli device disconnect "$WIFI_DEV" 2>/dev/null || true
+        notify "normal" "network-wireless-disconnected" "Wi-Fi Control" "Wi-Fi disconnected."
+    else
+        echo "Connecting Wi-Fi..."
+        nmcli device connect wlan0 2>/dev/null || true
+        notify "normal" "network-wireless" "Wi-Fi Control" "Connecting Wi-Fi..."
+    fi
+}
+
+# Optimize DNS / Tether
+optimize_dns() {
+    if [[ -x "$HOME/.local/bin/setup-tether-dns" ]]; then
+        "$HOME/.local/bin/setup-tether-dns" >/dev/null 2>&1 || true
+    else
+        resolvectl flush-caches 2>/dev/null || true
+    fi
+    notify "normal" "network-server" "Network Optimizer" "DNS caches flushed and tether settings re-optimized."
+}
+
+# Network Diagnostics
+show_diagnostics() {
+    query_interfaces
+    local eth_ping="N/A"
+    local wifi_ping="N/A"
+
+    if [[ -n "$ETH_DEV" ]]; then
+        eth_ping=$(ping -c 1 -W 2 -I "$ETH_DEV" 1.1.1.1 2>/dev/null | awk -F'time=' '/time=/ {print $2}' || echo "Fail")
+    fi
+
+    if [[ -n "$WIFI_DEV" ]]; then
+        wifi_ping=$(ping -c 1 -W 2 -I "$WIFI_DEV" 1.1.1.1 2>/dev/null | awk -F'time=' '/time=/ {print $2}' || echo "Fail")
+    fi
+
+    local diag_msg="Primary Gateway: ${DEF_DEV:-None} (${DEF_GW:-None})
+--------------------------------------
+Ethernet (${ETH_DEV:-None}):
+  • Role: $([[ "$DEF_DEV" == "$ETH_DEV" ]] && echo "PRIMARY" || echo "Standby")
+  • IP: ${ETH_IP:-Disconnected}
+  • Ping: ${eth_ping}
+Wi-Fi (${WIFI_DEV:-None}):
+  • Role: $([[ "$DEF_DEV" == "$WIFI_DEV" ]] && echo "PRIMARY" || echo "Standby")
+  • SSID: ${WIFI_NAME:-Disconnected} (${WIFI_SIGNAL:-0}%)
+  • IP: ${WIFI_IP:-Disconnected}
+  • Ping: ${wifi_ping}"
+
+    notify "normal" "network-workgroup" "Network Diagnostics" "$diag_msg"
+    echo "$diag_msg"
+}
+
+# Print Status
+print_status() {
+    query_interfaces
+    echo "=================================================="
+    echo "          Network Route & Priority Status         "
+    echo "=================================================="
+    echo "Active Default Gateway: dev=${DEF_DEV:-none} via=${DEF_GW:-none} metric=${DEF_METRIC:-none}"
+    echo ""
+    if [[ -n "$ETH_DEV" ]]; then
+        local eth_role="STANDBY FALLBACK"
+        if [[ "$DEF_DEV" == "$ETH_DEV" ]]; then eth_role="ACTIVE PRIMARY"; fi
+        echo "Ethernet ($ETH_DEV):"
+        echo "  • Connection : $ETH_NAME"
+        echo "  • IP Address : $ETH_IP"
+        echo "  • Metric     : $ETH_METRIC"
+        echo "  • Role       : $eth_role"
+    else
+        echo "Ethernet: Disconnected / Cable unplugged"
+    fi
+    echo ""
+    if [[ -n "$WIFI_DEV" ]]; then
+        local wifi_role="STANDBY FALLBACK"
+        if [[ "$DEF_DEV" == "$WIFI_DEV" ]]; then wifi_role="ACTIVE PRIMARY"; fi
+        echo "Wi-Fi ($WIFI_DEV):"
+        echo "  • SSID       : $WIFI_NAME (${WIFI_SIGNAL:-0}% signal)"
+        echo "  • IP Address : $WIFI_IP"
+        echo "  • Metric     : $WIFI_METRIC"
+        echo "  • Role       : $wifi_role"
+    else
+        echo "Wi-Fi: Disconnected"
+    fi
+    echo "=================================================="
+}
+
+# ------------------------------------------------------------------------------
+# CLI Dispatcher
+# ------------------------------------------------------------------------------
+if [[ $# -gt 0 ]]; then
+    case "$1" in
+        --eth|eth|ethernet)
+            switch_to_ethernet
+            exit 0
+            ;;
+        --wifi|wifi)
+            switch_to_wifi
+            exit 0
+            ;;
+        --auto|auto|reset)
+            reset_auto
+            exit 0
+            ;;
+        --toggle|toggle)
+            toggle_primary
+            exit 0
+            ;;
+        --status|status)
+            print_status
+            exit 0
+            ;;
+        --diag|diag|diagnostics)
+            show_diagnostics
+            exit 0
+            ;;
+        --toggle-wifi)
+            toggle_wifi
+            exit 0
+            ;;
+        --help|-h)
+            echo "Usage: $(basename "$0") [eth|wifi|auto|toggle|status|diag|--toggle-wifi]"
+            exit 0
+            ;;
+    esac
+fi
+
+# ------------------------------------------------------------------------------
+# Interactive Rofi GUI
+# ------------------------------------------------------------------------------
+query_interfaces
+
+# Build Banner Message
+ROUTE_BANNER="🌐 Primary: ${DEF_DEV:-None} (${DEF_GW:-None}) • Metric: ${DEF_METRIC:-None}"
+if [[ -n "$ETH_DEV" && -n "$WIFI_DEV" ]]; then
+    if [[ "$DEF_DEV" == "$ETH_DEV" ]]; then
+        ROUTE_BANNER="⚡ Primary: Ethernet ($ETH_DEV) • Fallback: Wi-Fi ($WIFI_NAME ${WIFI_SIGNAL}% - metric $WIFI_METRIC)"
+    else
+        ROUTE_BANNER="📶 Primary: Wi-Fi ($WIFI_NAME) • Standby: Ethernet ($ETH_DEV - metric $ETH_METRIC)"
+    fi
+elif [[ -n "$ETH_DEV" ]]; then
+    ROUTE_BANNER="⚡ Active: Ethernet ($ETH_DEV) • Wi-Fi is disconnected"
+elif [[ -n "$WIFI_DEV" ]]; then
+    ROUTE_BANNER="📶 Active: Wi-Fi ($WIFI_NAME) • Ethernet is disconnected"
+fi
+
+# Construct Menu Options
+mark_eth="○"
+mark_wifi="○"
+if [[ "$DEF_DEV" == "$ETH_DEV" && -n "$ETH_DEV" ]]; then mark_eth="●"; fi
+if [[ "$DEF_DEV" == "$WIFI_DEV" && -n "$WIFI_DEV" ]]; then mark_wifi="●"; fi
+
+opt_eth="${mark_eth} Switch Route to Ethernet (${ETH_NAME:-Disconnected})"
+opt_wifi="${mark_wifi} Switch Route to Wi-Fi (${WIFI_NAME:-Disconnected})"
+opt_auto="󰑐 Reset Auto Priority (Ethernet 50 > Wi-Fi 600)"
+opt_toggle_wifi="󰤨 Toggle Wi-Fi Connection ($([ -n "$WIFI_DEV" ] && echo "Connected" || echo "Disconnected"))"
+opt_dns="󰌗 Optimize Ethernet & Public DNS"
+opt_diag="📊 Network Diagnostics & Latency Test"
+
+options="${opt_eth}
+${opt_wifi}
+${opt_auto}
+${opt_toggle_wifi}
+${opt_dns}
+${opt_diag}"
+
+# Row selection
+selected_row=0
+if [[ "$DEF_DEV" == "$ETH_DEV" ]]; then
+    selected_row=1 # Highlight Wi-Fi switch as immediate alternative
+else
+    selected_row=0 # Highlight Ethernet switch
+fi
+
+chosen=$(echo -e "$options" | rofi \
+    -dmenu \
+    -i \
+    -no-sort \
+    -p "Network Route" \
+    -mesg "$ROUTE_BANNER" \
+    -theme "$THEME" \
+    -selected-row "$selected_row")
+
+[[ -z "$chosen" ]] && exit 0
+
+case "$chosen" in
+    *"Switch Route to Ethernet"*)
+        switch_to_ethernet
+        ;;
+    *"Switch Route to Wi-Fi"*)
+        switch_to_wifi
+        ;;
+    *"Reset Auto Priority"*)
+        reset_auto
+        ;;
+    *"Toggle Wi-Fi"*)
+        toggle_wifi
+        ;;
+    *"Optimize Ethernet & Public DNS"*)
+        optimize_dns
+        ;;
+    *"Network Diagnostics"*)
+        show_diagnostics
+        ;;
+esac

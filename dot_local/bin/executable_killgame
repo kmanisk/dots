@@ -48,14 +48,8 @@ if [ "${#FOUND_PIDS[@]}" -gt 0 ]; then
 
     echo "==> Done. Gaming session terminated."
 else
-    # NOTHING is running! Make it smart: launch rofi-games menu
-    echo "==> No active game or Steam processes found."
-    if [ -n "${SWAYSOCK:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ] || [ -n "${DISPLAY:-}" ]; then
-        if [ -x "$HOME/.local/bin/rofi-games" ]; then
-            exec "$HOME/.local/bin/rofi-games"
-        else
-            notify-send -a "Game Launcher" -u low -i input-gaming \
-                "No Games Running" "No active games or Steam processes detected" 2>/dev/null || true
-        fi
-    fi
+    # NOTHING is running: Caps+R is kill-only, never open the launcher.
+    echo "==> No active game or Steam processes found. Nothing to kill."
+    notify-send -a "Game Terminator" -u low -i input-gaming \
+        "Nothing to Kill" "No active games or Steam processes detected" 2>/dev/null || true
 fi
