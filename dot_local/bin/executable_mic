@@ -13,6 +13,9 @@ case "${1:-}" in
     clean)
         exec micstudio clean
         ;;
+    reset)
+        exec micstudio reset
+        ;;
     fx)
         exec micstudio voice "Deep Voice"
         ;;
