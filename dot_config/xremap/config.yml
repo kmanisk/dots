@@ -29,8 +29,8 @@ keymap:
         launch: ["/home/manisk/.local/bin/nvibrant-ctl", "up"]
       CapsLock-z:
         launch: ["/home/manisk/.local/bin/nvibrant-ctl", "down"]
-      # Emergency kill game
-      CapsLock-r:
+      # Emergency kill game (requires Shift to avoid accidental reload collision in FPS games)
+      CapsLock-Shift-r:
         launch: ["/home/manisk/.local/bin/killgame"]
 
   # --- General Universal Copy / Paste / Cut (All GUI Applications) ---
