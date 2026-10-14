@@ -29,6 +29,9 @@ keymap:
         launch: ["/home/manisk/.local/bin/nvibrant-ctl", "up"]
       CapsLock-z:
         launch: ["/home/manisk/.local/bin/nvibrant-ctl", "down"]
+      # Fullscreen Screenshot (Workspace 4 saves to Screenshots/Gaming; Desktop copies to clipboard)
+      CapsLock-Space:
+        launch: ["/home/manisk/.local/bin/screenshot-fullscreen", "--clipboard-only"]
       # Emergency kill game (requires Shift to avoid accidental reload collision in FPS games)
       CapsLock-Shift-r:
         launch: ["/home/manisk/.local/bin/killgame"]
@@ -84,11 +87,8 @@ keymap:
       CapsLock-EQUAL: F12
       # Screenshots:
       # - CapsLock + s: Region selection -> saved to ~/Pictures/Screenshots + clipboard
-      # - CapsLock + Space: Fullscreen -> clipboard only (zero file storage)
       CapsLock-s:
         launch: ["/home/manisk/.local/bin/screenshot-region", "--save"]
-      CapsLock-Space:
-        launch: ["/home/manisk/.local/bin/screenshot-fullscreen", "--clipboard-only"]
 
       # Window Close & Kill (Sway native integration):
       # - CapsLock + q: Graceful close (without reaching down to physical Super)

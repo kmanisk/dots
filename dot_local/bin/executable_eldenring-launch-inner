@@ -41,24 +41,10 @@ if [ -f "$ME2_DIR/modengine2_launcher.exe" ]; then
     if [ -f "$ME2_DIR/config_eldenringrandomizer.toml" ]; then
         CONFIG_NAME="config_eldenringrandomizer.toml"
     fi
-    "$PROTON_BIN" run "$ME2_DIR/modengine2_launcher.exe" -t er -c "$CONFIG_NAME" -p "Z:\\mnt\\Games\\NonSteamGames\\ELDEN RING\\Game\\eldenring.exe" &
-    ME2_PID=$!
-    # Wait up to 30s for eldenring.exe to spawn
-    for _ in {1..30}; do
-        if pgrep -f "eldenring.exe" >/dev/null 2>&1; then
-            break
-        fi
-        sleep 1
-    done
-
-    # Monitor eldenring.exe until it closes
-    while pgrep -f "eldenring.exe" >/dev/null 2>&1; do
-        sleep 2
-    done
-    wait "$ME2_PID" 2>/dev/null || true
+    exec "$PROTON_BIN" run "$ME2_DIR/modengine2_launcher.exe" -t er -c "$CONFIG_NAME" -p "Z:\\mnt\\Games\\NonSteamGames\\ELDEN RING\\Game\\eldenring.exe"
 else
     cd "$GAME_DIR"
-    "$PROTON_BIN" run "$GAME_EXE" "$@"
+    exec "$PROTON_BIN" run "$GAME_EXE" "$@"
 fi
 
 exit 0
