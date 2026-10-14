@@ -17,13 +17,31 @@ if [[ -z "$CURRENT" ]]; then
     CURRENT=$(grep -E '^Xcursor\.theme:' "$HOME/.Xresources" 2>/dev/null | awk '{print $2}' || true)
 fi
 
-if [ "$CURRENT" = "$LIGHT_THEME" ]; then
-    NEW_THEME="$DARK_THEME"
-    MODE="Dark"
-else
-    NEW_THEME="$LIGHT_THEME"
-    MODE="Light"
-fi
+TARGET_MODE="${1:-toggle}"
+
+case "$TARGET_MODE" in
+    dark|Dark)
+        NEW_THEME="$DARK_THEME"
+        MODE="Dark"
+        ;;
+    light|Light)
+        NEW_THEME="$LIGHT_THEME"
+        MODE="Light"
+        ;;
+    status)
+        echo "Current cursor: $CURRENT"
+        exit 0
+        ;;
+    toggle|*)
+        if [ "$CURRENT" = "$DARK_THEME" ]; then
+            NEW_THEME="$LIGHT_THEME"
+            MODE="Light"
+        else
+            NEW_THEME="$DARK_THEME"
+            MODE="Dark"
+        fi
+        ;;
+esac
 
 # 2. Determine current cursor size (preserve user's size setting)
 SIZE=$(gsettings get org.gnome.desktop.interface cursor-size 2>/dev/null | tr -d "'\"" || true)
