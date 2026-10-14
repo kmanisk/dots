@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# eldenring-launch-inner: Executed inside gamescope to launch and monitor Elden Ring
+set -e
+
+export PROTON_USE_XALIA=0
+export PROTON_NO_XALIA=1
+
+export SteamAppId="1245620"
+export SteamGameId="1245620"
+export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_COMPAT_CLIENT_INSTALL_PATH:-$HOME/.local/share/Steam}"
+export STEAM_COMPAT_DATA_PATH="${STEAM_COMPAT_DATA_PATH:-$HOME/.local/share/Steam/steamapps/compatdata/2703476723}"
+
+export MANGOHUD=1
+export MANGOHUD_CONFIGFILE="/mnt/Games/NonSteamGames/ELDEN RING/Game/MangoHud.conf"
+unset MANGOHUD_CONFIG
+export VKD3D_CONFIG="no_upload_hvv,force_host_cached"
+export PROTON_ENABLE_NVAPI=0
+
+export WINEDLLOVERRIDES="dinput8=b"
+
+# Auto power profile: Set Performance mode while playing Elden Ring, restore Balanced on exit
+asusctl profile set Performance >/dev/null 2>&1 || true
+trap 'asusctl profile set Balanced >/dev/null 2>&1 || true' EXIT INT TERM
+
+ME2_DIR="/mnt/Games/NonSteamGames/ELDEN RING/ModEngine2/ModEngine-2.1.0.0-win64"
+GAME_DIR="/mnt/Games/NonSteamGames/ELDEN RING/Game"
+GAME_EXE="$GAME_DIR/eldenring.exe"
+
+# Select Proton runner
+if [ -f "$HOME/.local/share/Steam/compatibilitytools.d/proton-cachyos-slr/proton" ]; then
+    PROTON_BIN="$HOME/.local/share/Steam/compatibilitytools.d/proton-cachyos-slr/proton"
+elif [ -f "$HOME/.local/share/Steam/compatibilitytools.d/GE-Proton11-7-x86_64/proton" ]; then
+    PROTON_BIN="$HOME/.local/share/Steam/compatibilitytools.d/GE-Proton11-7-x86_64/proton"
+else
+    PROTON_BIN="$HOME/.local/share/Steam/steamapps/common/Proton - Experimental/proton"
+fi
+
+if [ -f "$ME2_DIR/modengine2_launcher.exe" ]; then
+    cd "$ME2_DIR"
+    CONFIG_NAME="config_eldenring.toml"
+    if [ -f "$ME2_DIR/config_eldenringrandomizer.toml" ]; then
+        CONFIG_NAME="config_eldenringrandomizer.toml"
+    fi
+    "$PROTON_BIN" run "$ME2_DIR/modengine2_launcher.exe" -t er -c "$CONFIG_NAME" -p "Z:\\mnt\\Games\\NonSteamGames\\ELDEN RING\\Game\\eldenring.exe"
+    # Wait up to 30s for eldenring.exe to spawn
+    for _ in {1..30}; do
+        if pgrep -f "eldenring.exe" >/dev/null 2>&1; then
+            break
+        fi
+        sleep 1
+    done
+
+    # Monitor eldenring.exe until it closes
+    while pgrep -f "eldenring.exe" >/dev/null 2>&1; do
+        sleep 2
+    done
+else
+    cd "$GAME_DIR"
+    "$PROTON_BIN" run "$GAME_EXE" "$@"
+fi
+
+exit 0

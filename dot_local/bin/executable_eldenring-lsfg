@@ -48,6 +48,7 @@ export VKD3D_CONFIG="no_upload_hvv,force_host_cached"
 export PROTON_ENABLE_NVAPI=0
 export PROTON_USE_XALIA=0
 export PROTON_NO_XALIA=1
+export WINEDLLOVERRIDES="dinput8=b"
 
 # MangoHud overlay: Position at top-right with custom layout (i5 Blue -> RTX 5050 Green -> Memory -> FPS)
 export MANGOHUD=1
