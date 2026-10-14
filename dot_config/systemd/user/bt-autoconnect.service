@@ -5,6 +5,7 @@ Wants=bluetooth.target
 
 [Service]
 Type=simple
+Slice=background.slice
 Environment=PYTHONUNBUFFERED=1
 ExecStart=%h/.local/bin/bt-autoconnect --daemon --verbose
 Restart=always

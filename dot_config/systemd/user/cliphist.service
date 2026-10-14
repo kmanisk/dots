@@ -4,6 +4,7 @@ Documentation=man:cliphist(1)
 
 [Service]
 Type=simple
+Slice=background.slice
 ExecStart=%h/.local/bin/cliphist-daemon
 Restart=always
 RestartSec=1s

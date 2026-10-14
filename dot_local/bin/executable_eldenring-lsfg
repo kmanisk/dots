@@ -10,22 +10,49 @@ export SteamGameId="1245620"
 export STEAM_COMPAT_CLIENT_INSTALL_PATH="$HOME/.local/share/Steam"
 export STEAM_COMPAT_DATA_PATH="$HOME/.local/share/Steam/steamapps/compatdata/2703476723"
 
-# Offload directly to RTX 5050 Mobile
-export __NV_PRIME_RENDER_OFFLOAD=1
-export __GLX_VENDOR_LIBRARY_NAME=nvidia
-export __VK_LAYER_NV_optimus=NVIDIA_only
+# --- GPU mode-aware graphics environment (AGENTS.md Rule 2) ---
+if [ -z "$GPU_MODE" ]; then
+    if [ -r "${XDG_RUNTIME_DIR:-/run/user/$UID}/gpu_mode" ]; then
+        read -r GPU_MODE < "${XDG_RUNTIME_DIR:-/run/user/$UID}/gpu_mode"
+    else
+        GPU_MODE="$(supergfxctl -g 2>/dev/null || true)"
+    fi
+fi
+
+case "$GPU_MODE" in
+    Hybrid)
+        export __NV_PRIME_RENDER_OFFLOAD=1
+        export __GLX_VENDOR_LIBRARY_NAME=nvidia
+        export __VK_LAYER_NV_optimus=NVIDIA_only
+        export LIBVA_DRIVER_NAME=iHD
+        ;;
+    AsusMuxDgpu)
+        unset __NV_PRIME_RENDER_OFFLOAD
+        unset __GLX_VENDOR_LIBRARY_NAME
+        export __VK_LAYER_NV_optimus=NVIDIA_only
+        export LIBVA_DRIVER_NAME=nvidia
+        ;;
+    *)
+        export __NV_PRIME_RENDER_OFFLOAD=1
+        export __GLX_VENDOR_LIBRARY_NAME=nvidia
+        export __VK_LAYER_NV_optimus=NVIDIA_only
+        ;;
+esac
+
+# Audio routing to tactical gaming sink
+export PIPEWIRE_NODE="sink.peace_gaming"
+export PULSE_SINK="sink.peace_gaming"
 
 # Blackwell (RTX 50-series) VKD3D memory alignment & stability fixes
 export VKD3D_CONFIG="no_upload_hvv,force_host_cached"
 export PROTON_ENABLE_NVAPI=0
-
-# Load in-game mods: EldenModLoader (dinput8.dll) -> loads CameraFix.dll & mods
-export WINEDLLOVERRIDES="dinput8=n,b"
+export PROTON_USE_XALIA=0
+export PROTON_NO_XALIA=1
 
 # MangoHud overlay: Position at top-right with custom layout (i5 Blue -> RTX 5050 Green -> Memory -> FPS)
 export MANGOHUD=1
 export MANGOHUD_CONFIGFILE="/mnt/Games/NonSteamGames/ELDEN RING/Game/MangoHud.conf"
-export MANGOHUD_CONFIG="position=top-right"
+unset MANGOHUD_CONFIG
 
 # LSFG-VK 2.0: Enable the "Elden Ring" profile (2x multiplier -> 120 FPS)
 if [ "${ENABLE_LSFG:-1}" = "1" ] && [ "${DISABLE_LSFGVK:-0}" != "1" ]; then
@@ -41,7 +68,7 @@ asusctl profile set Performance >/dev/null 2>&1 || true
 trap 'asusctl profile set Balanced >/dev/null 2>&1 || true' EXIT INT TERM
 
 # Focus Workspace 4 automatically (Sway or i3 IPC)
-notify-send -i input-gaming "ELDEN RING" "Launching Elden Ring with LSFG 3x (Performance Mode)..." 2>/dev/null || true
+notify-send -i input-gaming "ELDEN RING" "Launching Elden Ring (120 FPS Locked)..." 2>/dev/null || true
 if [ -n "$SWAYSOCK" ] || [ -n "$WAYLAND_DISPLAY" ]; then
     swaymsg "workspace number 4" >/dev/null 2>&1 || true
 else
@@ -64,9 +91,9 @@ fi
 INNER_BIN="$HOME/.local/bin/eldenring-launch-inner"
 
 if [ -n "$SWAYSOCK" ] || [ -n "$WAYLAND_DISPLAY" ]; then
-    gamescope --mangoapp -W 1920 -H 1200 -w 1920 -h 1200 -f -r 165 -- "$INNER_BIN" "$@"
+    taskset -c 0-11 gamescope -W 1920 -H 1200 -w 1920 -h 1200 -f -r 120 --framerate-limit 120 -g --force-grab-cursor -- "$INNER_BIN" "$@"
 else
-    "$INNER_BIN" "$@"
+    taskset -c 0-11 "$INNER_BIN" "$@"
 fi
 
 STATUS=$?

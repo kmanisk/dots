@@ -2,7 +2,7 @@
 # rofi-games / game launcher menu (Alt+g) powered by fuzzel.
 export PATH="$HOME/.local/bin:$PATH"
 
-options="ELDEN RING + LSFG 3x\nER Randomizer Config (GUI)\nDARK SOULS III + LSFG\nDS3 Randomizer Config (GUI)\nSteam library\nConfigure LSFG (GUI)\nKill game"
+options="ELDEN RING + LSFG (120 FPS)\nGrand Theft Auto IV + LSFG (165 FPS)\nER Randomizer Config (GUI)\nDARK SOULS III + LSFG\nDS3 Randomizer Config (GUI)\nSteam library\nConfigure LSFG (GUI)\nKill game"
 REG="$HOME/.config/rofi/epic-games.list"
 if [ -f "$REG" ]; then
     while IFS='|' read -r title _ _; do
@@ -26,6 +26,7 @@ fi
 
 case "$chosen" in
     *"ELDEN RING + LSFG"*) eldenring-lsfg ;;
+    *"Grand Theft Auto IV"*) env STEAM_DGPU=1 steam steam://rungameid/12210 ;;
     *"ER Randomizer"*)  eldenring-randomizer-gui ;;
     *"DARK SOULS III + LSFG"*) mangohud darksouls3-run ;;
     *"DS3 Randomizer"*) ds3-randomizer-gui ;;

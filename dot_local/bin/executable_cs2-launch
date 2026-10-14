@@ -96,11 +96,21 @@ fi
 
 CS2_FLAGS=(-vulkan -fullscreen -w "$TARGET_W" -h "$TARGET_H" -threads 6 -mainthreadpriority 2 -nojoy -novid +fps_max 0 +fps_max_ui 0)
 
+# --- ananicy-cpp conflict resolution (AGENTS.md Rule 2) ---
+ananicy_was_active=0
+if systemctl is-active --quiet ananicy-cpp.service 2>/dev/null; then
+    ananicy_was_active=1
+    sudo systemctl stop ananicy-cpp.service 2>/dev/null || true
+fi
+
 # --- sway gaming mode ---
 if [ -n "${SWAYSOCK:-}" ] && command -v swaymsg >/dev/null 2>&1; then
     swaymsg 'mode "gaming"' >/dev/null 2>&1 || true
 fi
 cleanup() {
+    if [ "$ananicy_was_active" = "1" ]; then
+        sudo systemctl start ananicy-cpp.service 2>/dev/null || true
+    fi
     if [ -n "${SWAYSOCK:-}" ] && command -v swaymsg >/dev/null 2>&1; then
         swaymsg 'mode "default"' >/dev/null 2>&1 || true
     fi
