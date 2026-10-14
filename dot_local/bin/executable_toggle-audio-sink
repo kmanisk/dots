@@ -166,4 +166,27 @@ except Exception:
     pass
 " "$NEXT_SINK" 2>/dev/null || true
 
+# 4b. Hot-reload Gaming Audio (playback.peace_gaming) to track selected target sink
+if pw-link -l 2>/dev/null | grep -q "playback.peace_gaming"; then
+    for p in $(pw-link -l 2>/dev/null | grep -A 2 "playback.peace_gaming:output_FL" | grep "|->" | awk '{print $2}'); do
+        [[ -n "$p" ]] && pw-link -d "playback.peace_gaming:output_FL" "$p" 2>/dev/null || true
+    done
+    for p in $(pw-link -l 2>/dev/null | grep -A 2 "playback.peace_gaming:output_FR" | grep "|->" | awk '{print $2}'); do
+        [[ -n "$p" ]] && pw-link -d "playback.peace_gaming:output_FR" "$p" 2>/dev/null || true
+    done
+    fl_port=$(pw-link -i 2>/dev/null | grep -E "^${NEXT_SINK}:(playback_FL|playback_1)" | head -n 1 || true)
+    fr_port=$(pw-link -i 2>/dev/null | grep -E "^${NEXT_SINK}:(playback_FR|playback_2)" | head -n 1 || true)
+    if [[ -n "$fl_port" && -n "$fr_port" ]]; then
+        pw-link "playback.peace_gaming:output_FL" "$fl_port" 2>/dev/null || true
+        pw-link "playback.peace_gaming:output_FR" "$fr_port" 2>/dev/null || true
+    fi
+fi
+
+# 5. Live sidetone reload for MicStudio (keeps sidetone cleanly synced across sink toggles)
+if [[ -f "$HOME/.config/micstudio/settings.toml" ]] && grep -q '^hear_voice = true' "$HOME/.config/micstudio/settings.toml"; then
+    mic hear on >/dev/null 2>&1 || true
+elif pw-link -l 2>/dev/null | grep -A 2 "ghelper-audio:capture_MONO" | grep -q "playback_"; then
+    mic hear on >/dev/null 2>&1 || true
+fi
+
 notify-send -t 2000 -i "$NEXT_ICON" "Audio Output Switched" "${NEXT_PREFIX}${NEXT_DESC}" 2>/dev/null &

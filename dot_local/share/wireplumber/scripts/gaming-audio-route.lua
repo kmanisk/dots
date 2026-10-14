@@ -3,9 +3,33 @@ lutils = require ("linking-utils")
 cutils = require ("common-utils")
 log = Log.open_topic ("s-gaming-route")
 
-local BT_ADDRESS = "B0:38:E2:78:9B:FE"
 local ALSA_SINK_NAME = "alsa_output.pci-0000_00_1f.3.analog-stereo"
 local last_target_name = nil
+
+local metadata_default_om = ObjectManager {
+  Interest {
+    type = "metadata",
+    Constraint { "metadata.name", "=", "default" },
+  }
+}
+
+local function getDefaultSinkName()
+  local meta = metadata_default_om:lookup()
+  if not meta then
+    meta = cutils.get_default_metadata_object()
+  end
+  if not meta then return nil end
+  local val = meta:find(0, "default.audio.sink")
+  if not val then return nil end
+  if Json and Json.Raw then
+    local j = Json.Raw(val)
+    if j:is_object() then
+      local obj = j:parse()
+      if obj and obj["name"] then return obj["name"] end
+    end
+  end
+  return val:match('"name"%s*:%s*"([^"]+)"')
+end
 
 -- Hook 1: Dynamic target selection for playback.peace_gaming
 SimpleEventHook {
@@ -27,31 +51,53 @@ SimpleEventHook {
       return
     end
 
-    local chosen_target = nil
-    local target_desc = "Analog Stereo"
+    local def_sink = getDefaultSinkName()
+    if not def_sink or def_sink == "sink.peace_gaming" or def_sink:match("^effect_") then
+      def_sink = ALSA_SINK_NAME
+    end
 
-    -- Priority 1: Bluetooth A2DP Sink (Soundcore Q20i)
+    local chosen_target = nil
+    local target_desc = def_sink
+
+    -- 1. Match current user-selected default output sink
     for lnkbl in om:iterate { type = "SiLinkable" } do
       local props = lnkbl.properties
       if props ["item.node.direction"] == "input" and
          props ["media.class"] == "Audio/Sink" and
-         (props ["api.bluez5.address"] == BT_ADDRESS or props ["device.api"] == "bluez5") and
+         props ["node.name"] == def_sink and
          lutils.canLink (si_props, lnkbl) then
         chosen_target = lnkbl
-        target_desc = "Soundcore Q20i (Bluetooth A2DP)"
         break
       end
     end
 
-    -- Priority 2: Fallback to ALSA Analog Stereo
-    if not chosen_target then
+    -- 2. Fallback to ALSA Analog Stereo if def_sink not available
+    if not chosen_target and def_sink ~= ALSA_SINK_NAME then
       for lnkbl in om:iterate { type = "SiLinkable" } do
         local props = lnkbl.properties
         if props ["item.node.direction"] == "input" and
+           props ["media.class"] == "Audio/Sink" and
            props ["node.name"] == ALSA_SINK_NAME and
            lutils.canLink (si_props, lnkbl) then
           chosen_target = lnkbl
-          target_desc = "Analog Stereo"
+          target_desc = ALSA_SINK_NAME .. " (Fallback)"
+          break
+        end
+      end
+    end
+
+    -- 3. Emergency fallback: any available physical Audio/Sink
+    if not chosen_target then
+      for lnkbl in om:iterate { type = "SiLinkable" } do
+        local props = lnkbl.properties
+        local nname = props ["node.name"] or ""
+        if props ["item.node.direction"] == "input" and
+           props ["media.class"] == "Audio/Sink" and
+           nname ~= "sink.peace_gaming" and
+           not nname:match("^effect_") and
+           lutils.canLink (si_props, lnkbl) then
+          chosen_target = lnkbl
+          target_desc = nname .. " (Emergency Fallback)"
           break
         end
       end
@@ -145,3 +191,6 @@ SimpleEventHook {
     end
   end
 }:register ()
+
+metadata_default_om:activate ()
+
