@@ -5,7 +5,7 @@ Xft.lcdfilter: lcddefault
 Xft.hintstyle: hintslight
 Xft.hinting: 1
 Xft.antialias: 1
-Xcursor.size: 44
+Xcursor.size: 32
 Xcursor.theme: phinger-cursors-gruvbox-material-light
 
 ! =============================================================================

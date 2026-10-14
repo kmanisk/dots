@@ -39,8 +39,9 @@ export QT_QPA_PLATFORM="wayland;xcb"
 export SDL_VIDEODRIVER="wayland,x11"
 export CLUTTER_BACKEND=wayland
 export _JAVA_AWT_WM_NONREPARENTING=1
-
-# Native Wayland Toolkits
+# WLR cursor fallback for NVIDIA and hybrid GPU configurations (fixes invisible cursor in Xwayland/Steam)
+export WLR_NO_HARDWARE_CURSORS=1
+export XCURSOR_PATH="$HOME/.local/share/icons:$HOME/.icons:/usr/share/icons:/usr/share/pixmaps"
 
 # Pin Sway compositor directly to Intel iGPU in Hybrid/Integrated modes to ensure RTX 5050 suspends
 if [ "$GPU_MODE" = "Hybrid" ] || [ "$GPU_MODE" = "Integrated" ]; then

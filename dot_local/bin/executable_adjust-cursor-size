@@ -16,7 +16,7 @@ fi
 if [[ -z "$CURRENT_SIZE" || "$CURRENT_SIZE" -le 0 ]]; then
     CURRENT_SIZE=$(grep -E '^Xcursor\.size:' "$HOME/.Xresources" 2>/dev/null | awk '{print $2}' || true)
 fi
-CURRENT_SIZE="${CURRENT_SIZE:-40}"
+CURRENT_SIZE="${CURRENT_SIZE:-32}"
 
 NEW_SIZE=$(( CURRENT_SIZE + DELTA ))
 

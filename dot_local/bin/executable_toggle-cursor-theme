@@ -51,7 +51,7 @@ fi
 if [[ -z "$SIZE" || "$SIZE" -le 0 ]]; then
     SIZE=$(grep -E '^Xcursor\.size:' "$HOME/.Xresources" 2>/dev/null | awk '{print $2}' || true)
 fi
-SIZE="${SIZE:-40}"
+SIZE="${SIZE:-32}"
 
 # 3. Apply to GNOME / GTK settings (GSettings)
 gsettings set org.gnome.desktop.interface cursor-theme "$NEW_THEME" 2>/dev/null || true

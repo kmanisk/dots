@@ -14,7 +14,11 @@ if [ "${STEAM_DGPU:-0}" != "1" ]; then
     unset NVD_BACKEND
 fi
 
-# Force desktop UI / font scaling for 16" 1920x1200 Display (i3/X11, scale 1.0)
-export STEAM_FORCE_DESKTOPUI_SCALING="${STEAM_FORCE_DESKTOPUI_SCALING:-1.35}"
+# Desktop UI scaling for 16" 1920x1200 Display (scale 1.0 prevents CEF coordinate desync on XWayland)
+if [ "${STEAM_FORCE_DESKTOPUI_SCALING:-}" = "1.35" ]; then
+    export STEAM_FORCE_DESKTOPUI_SCALING=1.0
+else
+    export STEAM_FORCE_DESKTOPUI_SCALING="${STEAM_FORCE_DESKTOPUI_SCALING:-1.0}"
+fi
 
 exec /usr/bin/steam "$@"
