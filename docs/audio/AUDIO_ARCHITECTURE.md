@@ -280,9 +280,9 @@ Formerly, creative effects ran in a secondary filter chain (`41-mic-fx.conf`). I
 2. **Single Pure Linear DSP Architecture**:
    * All processing occurs in a unified sequential pipeline with zero branch divergence, ensuring 100% phase alignment and zero unaligned latency warnings across all 27 presets.
    * On Natural Clean, RubberBand is placed in pure dry passthrough mode (`pitch = 0.0, wet/dry = 1.0 (dry)`), SWH Delayorama is locked to `0.0`, and Flanger/RingMod/Decimator are bypassed.
-3. **Strict Sidetone Anti-Echo Gate (`device.form_factor`)**:
-   * Sidetone monitoring (`mic hear on`) strictly checks the active sink's `device.form_factor` (`headphone`, `headset`, `hands-free`).
-   * Blocks room speakers, Bluetooth boxes (Boult BassBox, JBL, etc.), and soundbars to physically prevent acoustic feedback loops.
+3. **Sidetone Feedback Protection & Device Support**:
+   * Sidetone monitoring (`v` key in MicStudio TUI or `mic hear on` CLI) routes the unified capture node to the default playback device (Bluetooth headsets/speakers, 3.5mm wired headphones).
+   * Built-in laptop chassis speakers (`analog-output-speaker`) are suppressed to protect the hardware and user against high-frequency acoustic feedback loops, while 3.5mm wired headphones (`analog-output-headphones`) and Bluetooth endpoints (`bluez_output.*`) are fully supported.
 4. **27 Production Presets**:
    * *Natural Clean, Deep Voice, Radio Announcer, Higher Voice, Gruff Growl, Chipmunk, Darth Vader, Megatron, Giant, Goblin, Child, Robot, Cylon, Daft Punk, Kraftwerk, Dalek, Walkie Talkie, Old Telephone, Megaphone, Cave, Stadium Echo, Sci-Fi Alien, Ghost, Demon, Cyber Chopper, Underwater, Lo-Fi Static.*
 3. **Preset Level & Gain Architecture**:
