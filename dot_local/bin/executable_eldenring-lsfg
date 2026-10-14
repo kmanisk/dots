@@ -90,11 +90,7 @@ fi
 
 INNER_BIN="$HOME/.local/bin/eldenring-launch-inner"
 
-if [ -n "$SWAYSOCK" ] || [ -n "$WAYLAND_DISPLAY" ]; then
-    taskset -c 0-11 gamescope -W 1920 -H 1200 -w 1920 -h 1200 -f -r 120 --framerate-limit 120 -g --force-grab-cursor -- "$INNER_BIN" "$@"
-else
-    taskset -c 0-11 "$INNER_BIN" "$@"
-fi
+taskset -c 0-11 "$INNER_BIN" "$@"
 
 STATUS=$?
 exit "$STATUS"

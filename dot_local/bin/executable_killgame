@@ -7,7 +7,7 @@
 # ==============================================================================
 set -euo pipefail
 
-GAME_PATTERNS="cs2|gamescope|gamescopereaper|steam|steamwebhelper|eldenring|gtaiv|darksouls|farcry|wineserver|pressure-vessel|Discovery\.exe|HuntGame\.exe|TslGame\.exe|r5apex\.exe|d3ddriverquery"
+GAME_PATTERNS="cs2|gamescope|gamescopereaper|steam|steamwebhelper|eldenring|gtaiv|darksouls|farcry|wineserver|pressure-vessel|Discovery\.exe|HuntGame\.exe|TslGame\.exe|r5apex\.exe|d3ddriverquery|crashpad_handler|modengine2"
 
 # Find running game/Steam PIDs (excluding bash/killgame/grep themselves)
 FOUND_PIDS=()
