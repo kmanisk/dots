@@ -223,15 +223,12 @@ Stage 2: DPDFNet Neural Noise Suppressor (libdpdfnet_ladspa.so, Attenuation Limi
 Stage 3: Latency Alignment Delay Node (builtin delay, latency = 0.08 s)
         │  • Accurately reports the model's 80 ms declared context window to PipeWire.
         ▼
-Stage 4: Parallel Voice FX & Clean Bypass Architecture (builtin fx_bypass_mixer):
-        │  • Branch 1 (Clean Dry Path):
-        │      Direct connection from dpdfnet_latency -> fx_bypass_mixer:In 1.
-        │      Completely bypasses RubberBand FFT phase vocoder in Natural Clean mode (Gain 1 = 1.0, Gain 2 = 0.0),
-        │      saving ~20 ms of FFT phase vocoder latency and serial LADSPA processing.
-        │  • Branch 2 (Creative Voice FX Path):
-        │      RubberBand Mono (pitch/formant) -> SWH RingMod -> SWH Decimator -> LSP Flanger Mono
-        │      -> SWH Delayorama (Delay/Echo) -> Biquad HPF/LPF/Peak Filters -> fx_bypass_mixer:In 2.
-        │      When a creative preset engages, MicStudio sets Gain 1 = 0.0, Gain 2 = 1.0.
+Stage 4: In-Chain Voice FX Engine (Single Linear PipeWire Filter Chain):
+        │  • RubberBand Mono (pitch/formant), SWH RingMod, SWH Decimator, LSP Flanger Mono,
+        │    SWH Delayorama (Delay/Echo), Biquad HPF/LPF/Peak Filters.
+        │  • Pure single linear pipeline: zero parallel branch divergence, zero unaligned latency warnings.
+        │  • Fully dry/bypassed on Natural Clean (Dry/Wet = 0.0, pitch = 0.0, delay = 0.0, flanger bypass);
+        │    instantaneously engages on Creative Presets.
         ▼
 Stage 5: Broadcast Parametric EQ Cascade (RBJ Biquads):
         │  • 80 Hz Low Shelf    : -2.0 dB (Q = 0.707)  — Sub-rumble control
@@ -280,10 +277,13 @@ Formerly, creative effects ran in a secondary filter chain (`41-mic-fx.conf`). I
 1. **Architecture & Zero-Dropout Parameter Hot Reload**:
    * All voice morphing (RubberBand, RingMod, Decimator, Flanger, Delayorama, and Biquad FX filters) runs in-line inside `capture.ghelper-audio`.
    * When switching presets in MicStudio or via CLI (`mic voice "<Preset>"`), PipeWire parameters are updated atomically in sub-milliseconds without stream restarts, buffer drops, or device re-selection.
-2. **Zero-Latency Clean Bypass Architecture (`fx_bypass_mixer`)**:
-   * Natural Clean mode directs clean, latency-compensated audio straight into `fx_bypass_mixer` (`Gain 1 = 1.0, Gain 2 = 0.0`), bypassing the RubberBand FFT phase vocoder and shaving ~20 ms of microphone round-trip latency.
-   * Engaging any creative preset dynamically crossfades or switches `fx_bypass_mixer` (`Gain 1 = 0.0, Gain 2 = 1.0`) to route audio through the creative voice FX cascade.
-3. **27 Production Presets**:
+2. **Single Pure Linear DSP Architecture**:
+   * All processing occurs in a unified sequential pipeline with zero branch divergence, ensuring 100% phase alignment and zero unaligned latency warnings across all 27 presets.
+   * On Natural Clean, RubberBand is placed in pure dry passthrough mode (`pitch = 0.0, wet/dry = 1.0 (dry)`), SWH Delayorama is locked to `0.0`, and Flanger/RingMod/Decimator are bypassed.
+3. **Strict Sidetone Anti-Echo Gate (`device.form_factor`)**:
+   * Sidetone monitoring (`mic hear on`) strictly checks the active sink's `device.form_factor` (`headphone`, `headset`, `hands-free`).
+   * Blocks room speakers, Bluetooth boxes (Boult BassBox, JBL, etc.), and soundbars to physically prevent acoustic feedback loops.
+4. **27 Production Presets**:
    * *Natural Clean, Deep Voice, Radio Announcer, Higher Voice, Gruff Growl, Chipmunk, Darth Vader, Megatron, Giant, Goblin, Child, Robot, Cylon, Daft Punk, Kraftwerk, Dalek, Walkie Talkie, Old Telephone, Megaphone, Cave, Stadium Echo, Sci-Fi Alien, Ghost, Demon, Cyber Chopper, Underwater, Lo-Fi Static.*
 3. **Preset Level & Gain Architecture**:
    * **Isolated Quiet Voice Boost (+4 dB)**: Pre-FX compressor threshold lowering and +7.0 dB makeup gain is strictly isolated to **Natural Clean**, lifting soft conversational speech into nominal broadcast range.
