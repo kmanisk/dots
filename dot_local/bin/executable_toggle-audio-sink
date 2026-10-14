@@ -131,7 +131,7 @@ else
     pw-metadata -n default 0 default.audio.sink "{\"name\":\"$NEXT_SINK\"}" 2>/dev/null || true
 fi
 
-# Move all active application playback streams to the selected destination sink
+# 4. Move all active application playback streams to the selected destination sink
 python3 -c "
 import subprocess, sys
 target_sink = sys.argv[1]

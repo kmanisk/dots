@@ -223,17 +223,24 @@ cmd_doctor() {
     echo -n ":: 6. Gaming Audio Route:     "
     local peace_out_link
     peace_out_link=$(pw-link -l 2>/dev/null | grep -A 2 "playback.peace_gaming:output_FL" 2>/dev/null | grep -v "output_FL" | sed -n 's/.*|-> \([^:]*\):.*/\1/p' | head -n 1 || true)
+    local cur_def_sink
+    cur_def_sink=$(pw-metadata -n default 0 2>/dev/null | grep -E "key:'default\.audio\.sink'" | sed -n "s/.*value:'{\\\"name\\\":\\\"\\([^\\\"]*\\)\\\"}'.*/\1/p" || true)
+    local expected_peace_target="$cur_def_sink"
+    if [[ -z "$expected_peace_target" || "$expected_peace_target" == "sink.peace_gaming" || "$expected_peace_target" =~ ^effect_ ]]; then
+        expected_peace_target="alsa_output.pci-0000_00_1f.3.analog-stereo"
+    fi
     local active_game_streams=0
     active_game_streams=$(pw-link -l 2>/dev/null | (grep -A 2 "sink.peace_gaming:playback" 2>/dev/null || true) | (grep "|<-" 2>/dev/null || true) | wc -l)
     active_game_streams="${active_game_streams//[^0-9]/}"
     if [[ "${active_game_streams:-0}" -gt 0 && -z "$peace_out_link" ]]; then
         echo -e "\n   ${RED}[FAIL]${RESET} sink.peace_gaming has active streams (${active_game_streams}) but NO valid output target link!"
         ((errors++))
-
-
-
     elif [[ -n "$peace_out_link" ]]; then
-        echo -e "${GREEN}[✓ PASS]${RESET} playback.peace_gaming -> ${peace_out_link}"
+        if [[ -n "$expected_peace_target" && "$peace_out_link" == "$expected_peace_target" ]]; then
+            echo -e "${GREEN}[✓ PASS]${RESET} playback.peace_gaming -> ${peace_out_link} (tracking active default)"
+        else
+            echo -e "${GREEN}[✓ PASS]${RESET} playback.peace_gaming -> ${peace_out_link}"
+        fi
     else
         echo -e "${GREEN}[✓ PASS]${RESET} playback.peace_gaming routed (idle)"
     fi
