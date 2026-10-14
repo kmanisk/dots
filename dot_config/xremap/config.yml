@@ -3,8 +3,6 @@ virtual_modifiers:
 
 modmap:
   - name: Global Modmap
-    application:
-      not: ["cs2", "gamescope", "eldenring.exe", "GTAIV.exe", "steam_app_.*", "steam_app_1245620", "steam_app_12210"]
     remap:
       CapsLock:
         held: CapsLock
@@ -13,6 +11,28 @@ modmap:
       RightAlt: RightMeta
 
 keymap:
+  # --- Universal Hardware Controls (Volume, Brightness, Vibrance in Games & Desktop) ---
+  - name: Universal Hardware Controls
+    remap:
+      # Brightness (CapsLock + [ for up, ' for down)
+      CapsLock-LEFTBRACE:
+        launch: ["/home/manisk/.local/bin/change-brightness", "+5%"]
+      CapsLock-APOSTROPHE:
+        launch: ["/home/manisk/.local/bin/change-brightness", "5%-"]
+      # Volume (CapsLock + ] for up, \ for down)
+      CapsLock-RIGHTBRACE:
+        launch: ["/home/manisk/.local/bin/volume-notify", "up"]
+      CapsLock-BACKSLASH:
+        launch: ["/home/manisk/.local/bin/volume-notify", "down"]
+      # NVIDIA Vibrance (CapsLock + x for up, z for down)
+      CapsLock-x:
+        launch: ["/home/manisk/.local/bin/nvibrant-ctl", "up"]
+      CapsLock-z:
+        launch: ["/home/manisk/.local/bin/nvibrant-ctl", "down"]
+      # Emergency kill game
+      CapsLock-r:
+        launch: ["/home/manisk/.local/bin/killgame"]
+
   # --- General Universal Copy / Paste / Cut (All GUI Applications) ---
   - name: Universal Copy Paste
     application:
@@ -35,9 +55,6 @@ keymap:
       CapsLock-l: Right
       CapsLock-o: C-Left
       CapsLock-p: C-Right
-      # Brightness (CapsLock + [ for up, ' for down)
-      CapsLock-LEFTBRACE: BrightnessUp
-      CapsLock-APOSTROPHE: BrightnessDown
       # Actions
       CapsLock-n: Enter
       CapsLock-SEMICOLON: [End, Enter]
@@ -65,9 +82,6 @@ keymap:
       CapsLock-0: F10
       CapsLock-MINUS: F11
       CapsLock-EQUAL: F12
-      # Volume: ] for up, \ for down
-      CapsLock-RIGHTBRACE: VolumeUp
-      CapsLock-BACKSLASH: VolumeDown
       # Screenshots:
       # - CapsLock + s: Region selection -> saved to ~/Pictures/Screenshots + clipboard
       # - CapsLock + Space: Fullscreen -> clipboard only (zero file storage)
@@ -93,10 +107,6 @@ keymap:
       CapsLock-e:
         launch: ["/home/manisk/.local/bin/steam-workspace", "--silent"]
 
-      # Kill Steam & Games (Force Terminator):
-      CapsLock-r:
-        launch: ["/home/manisk/.local/bin/killgame"]
-
       # Passthrough
       CapsLock-a: a
       CapsLock-b: b
@@ -105,11 +115,6 @@ keymap:
       # Clipboard image viewer (clipboard image -> imv)
       CapsLock-v:
         launch: ["/home/manisk/.local/bin/clipboard-view"]
-      # NVIDIA vibrance down/up (±5%, themed OSD via nvibrant-ctl)
-      CapsLock-x:
-        launch: ["/home/manisk/.local/bin/nvibrant-ctl", "up"]
-      CapsLock-z:
-        launch: ["/home/manisk/.local/bin/nvibrant-ctl", "down"]
 
   # --- Mouse scroll (Alt+Ctrl layer, vim-style: j=down, k=up) ---
   # xremap can't emit wheel natively (upstream XUPSCROLL match-only),
