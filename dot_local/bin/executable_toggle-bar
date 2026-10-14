@@ -7,14 +7,20 @@
 export DISPLAY="${DISPLAY:-:0}"
 export PATH="$HOME/.local/bin:$PATH"
 
-STATE_FILE="$HOME/.config/polybar/bar_state"
-mkdir -p "$HOME/.config/polybar"
+SWAY_STATE_FILE="$HOME/.local/state/sway/bar_state"
+POLY_STATE_FILE="$HOME/.config/polybar/bar_state"
+mkdir -p "$HOME/.local/state/sway" "$HOME/.config/polybar"
 
-CURRENT_STATE=$(cat "$STATE_FILE" 2>/dev/null || echo "false")
+if [ -n "$SWAYSOCK" ] || [ -n "$WAYLAND_DISPLAY" ]; then
+    CURRENT_STATE=$(cat "$SWAY_STATE_FILE" 2>/dev/null || cat "$POLY_STATE_FILE" 2>/dev/null || echo "false")
+else
+    CURRENT_STATE=$(cat "$POLY_STATE_FILE" 2>/dev/null || echo "false")
+fi
 
 case "$CURRENT_STATE" in
     false|hidden|0|off)
-        echo "true" > "$STATE_FILE"
+        echo "true" > "$SWAY_STATE_FILE"
+        echo "true" > "$POLY_STATE_FILE"
         if [ -n "$SWAYSOCK" ] || [ -n "$WAYLAND_DISPLAY" ]; then
             swaymsg "bar bar-0 mode dock" >/dev/null 2>&1
         else
@@ -22,7 +28,8 @@ case "$CURRENT_STATE" in
         fi
         ;;
     *)
-        echo "false" > "$STATE_FILE"
+        echo "false" > "$SWAY_STATE_FILE"
+        echo "false" > "$POLY_STATE_FILE"
         if [ -n "$SWAYSOCK" ] || [ -n "$WAYLAND_DISPLAY" ]; then
             swaymsg "bar bar-0 mode invisible" >/dev/null 2>&1
         else

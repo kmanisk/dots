@@ -24,7 +24,7 @@ SESSION = SAVE_DIR / "session.json"
 PREV = SAVE_DIR / "session.json.prev"
 STEAM_KILLED = SAVE_DIR / "steam_was_killed"
 NL_STATE = Path.home() / ".config" / "nightlight_state"
-BAR_STATE = Path.home() / ".config" / "polybar" / "bar_state"
+BAR_STATE = Path.home() / ".local" / "state" / "sway" / "bar_state"
 TOGGLE_NL = Path.home() / ".local" / "bin" / "toggle-nightlight"
 SKIP_WS = {"4", "__i3_scratch"}
 FORMAT_VERSION = 2
@@ -48,7 +48,7 @@ def discover_socket():
         if cand:
             tried.append(cand)
     try:
-        tried.extend(sorted(str(p) for p in runtime_dir().glob("sway-ipc.*.sock")))
+        tried.extend(sorted((str(p) for p in runtime_dir().glob("sway-ipc.*.sock")), reverse=True))
     except OSError:
         pass
     for sock in tried:
@@ -58,6 +58,7 @@ def discover_socket():
             subprocess.check_output(
                 ["swaymsg", "-s", sock, "-t", "get_version"],
                 stderr=subprocess.DEVNULL, timeout=5)
+            os.environ["SWAYSOCK"] = sock
             return sock
         except Exception:
             continue

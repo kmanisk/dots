@@ -1,64 +1,174 @@
-#!/usr/bin/env bash
-# sway-idle-guard: pause swayidle while a fullscreen window is focused.
-# Prevents auto-lock / black screen during fullscreen gaming (controller
-# play generates no keyboard/mouse input, so idle timers would fire).
-# Event-driven via sway subscribe — no polling. Singleton via flock.
-set -u
-LOCK="/tmp/sway-idle-guard.lock"
-exec 9>"$LOCK"
-flock -n 9 || exit 0
+#!/usr/bin/env python3
+"""
+sway-idle-guard:
+Reliably pause/resume swayidle during gaming or fullscreen media.
+Features:
+- Subscribes to Sway IPC ("window", "workspace", "mode")
+- Checks if a game is active on any visible workspace OR if current window is fullscreen
+- Also checks if gaming mode is active
+- If a game or fullscreen window is visible/active, pauses swayidle (SIGSTOP)
+- Otherwise, resumes swayidle (SIGCONT)
+- Zero CPU usage (event driven, singleton via flock)
+"""
+import os
+import sys
+import socket
+import struct
+import json
+import fcntl
+import subprocess
 
-set_state() { # $1 = paused|active
-    if [ "$1" = "paused" ]; then
-        pkill -STOP -x swayidle 2>/dev/null
-    else
-        pkill -CONT -x swayidle 2>/dev/null
-    fi
-}
+LOCK_FILE = "/tmp/sway-idle-guard.lock"
 
-apply_current() {
-    if swaymsg -t get_tree 2>/dev/null | python3 -c '
-import json, sys
-try:
-    tree = json.load(sys.stdin)
-except Exception:
-    sys.exit(1)
+GAME_KEYWORDS = (
+    "steam_app_", "gamescope", "cs2", "eldenring", "dyinglight",
+    "farcry", "gtaiv", "hll", "hellletloose", "launcher.exe",
+    "socialclubhelper.exe", "playgtaiv", "wine", "darksouls"
+)
 
-def check_game_active(node, current_ws=None):
-    if node.get("type") == "workspace":
-        current_ws = node.get("name")
-        # If workspace 4 has any windows and is focused/visible, inhibit idle
-        if current_ws == "4" and (node.get("nodes") or node.get("floating_nodes")):
-            return True
+GAME_TITLES = (
+    "grand theft auto", "gtaiv", "rockstar games", "elden ring",
+    "counter-strike", "dark souls"
+)
 
-    # Check focused container
-    if node.get("focused"):
-        if node.get("fullscreen_mode"):
-            return True
-        if current_ws == "4":
-            return True
-        c = str(node.get("app_id") or node.get("window_properties", {}).get("class") or "").lower()
-        t = str(node.get("name") or "").lower()
-        if any(k in c for k in ["steam_app_", "gamescope", "cs2", "eldenring", "gtaiv", "launcher.exe", "socialclubhelper.exe", "playgtaiv"]):
-            return True
-        if any(k in t for k in ["grand theft auto", "gtaiv", "rockstar games", "elden ring"]):
-            return True
+def create_ipc_socket():
+    import glob
+    sock_path = os.environ.get("SWAYSOCK")
+    if not sock_path:
+        uid = os.getuid()
+        cands = glob.glob(f"/run/user/{uid}/sway-ipc.*.sock")
+        if cands:
+            sock_path = cands[0]
+    if not sock_path or not os.path.exists(sock_path):
+        raise RuntimeError(f"Sway IPC socket not found: {sock_path}")
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.connect(sock_path)
+    return s
 
-    for child in node.get("nodes", []) + node.get("floating_nodes", []):
-        if check_game_active(child, current_ws):
-            return True
+def send_ipc(sock, msg_type, payload_str=""):
+    payload = payload_str.encode("utf-8")
+    header = b"i3-ipc" + struct.pack("<II", len(payload), msg_type)
+    sock.sendall(header + payload)
+
+def recv_ipc(sock):
+    magic = sock.recv(6)
+    if not magic or magic != b"i3-ipc":
+        return None, None
+    raw_header = sock.recv(8)
+    if len(raw_header) < 8:
+        return None, None
+    length, msg_type = struct.unpack("<II", raw_header)
+    data = b""
+    while len(data) < length:
+        chunk = sock.recv(min(length - len(data), 65536))
+        if not chunk:
+            break
+        data += chunk
+    return msg_type, json.loads(data.decode("utf-8"))
+
+def query_ipc(sock, msg_type, payload_str=""):
+    send_ipc(sock, msg_type, payload_str)
+    _, res = recv_ipc(sock)
+    return res
+
+def set_idle_state(should_pause):
+    sig = "-STOP" if should_pause else "-CONT"
+    subprocess.run(["pkill", sig, "-x", "swayidle"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+def is_game_window(node):
+    app_id = str(node.get("app_id") or "").lower()
+    props = node.get("window_properties") or {}
+    cls = str(props.get("class") or "").lower()
+    title = str(node.get("name") or "").lower()
+    ident = f"{app_id} {cls}"
+    if any(k in ident for k in GAME_KEYWORDS):
+        return True
+    if any(k in title for k in GAME_TITLES):
+        return True
     return False
 
-sys.exit(0 if check_game_active(tree) else 1)
-'; then
-        set_state paused
-    else
-        set_state active
-    fi
-}
+def check_should_inhibit(cmd_sock, current_mode="default"):
+    if current_mode == "gaming":
+        return True
 
-apply_current  # initial state (e.g. login straight into a game)
-stdbuf -o0 swaymsg -t subscribe -m '["window"]' 2>/dev/null | while read -r ev; do
-    echo "$ev" | grep -qE '"change":[[:space:]]*"focus"|"change":[[:space:]]*"fullscreen_mode"' || continue
-    apply_current
-done
+    try:
+        workspaces = query_ipc(cmd_sock, 1, "") # get_workspaces
+        tree = query_ipc(cmd_sock, 4, "")       # get_tree
+    except Exception:
+        return False
+
+    if not workspaces or not tree:
+        return False
+
+    visible_workspaces = {w.get("name") for w in workspaces if w.get("visible")}
+
+    def evaluate_node(node, cur_ws=None):
+        if node.get("type") == "workspace":
+            cur_ws = node.get("name")
+
+        # 1. Any focused window that is fullscreen
+        if node.get("focused") and node.get("fullscreen_mode") and node.get("fullscreen_mode") > 0:
+            return True
+
+        # 2. Any focused window that is a game
+        if node.get("focused") and is_game_window(node):
+            return True
+
+        # 3. Any game window currently on a visible workspace
+        if cur_ws in visible_workspaces and is_game_window(node):
+            return True
+
+        for child in node.get("nodes", []) + node.get("floating_nodes", []):
+            if evaluate_node(child, cur_ws):
+                return True
+        return False
+
+    return evaluate_node(tree)
+
+def main():
+    lock_fd = open(LOCK_FILE, "w")
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except IOError:
+        sys.exit(0)
+
+    try:
+        cmd_sock = create_ipc_socket()
+        sub_sock = create_ipc_socket()
+    except Exception as e:
+        sys.exit(1)
+
+    current_mode = "default"
+    current_paused = None
+
+    # Initial check
+    should_pause = check_should_inhibit(cmd_sock, current_mode)
+    set_idle_state(should_pause)
+    current_paused = should_pause
+
+    # Subscribe to window, workspace, and mode events
+    send_ipc(sub_sock, 2, json.dumps(["window", "workspace", "mode"]))
+    _, sub_res = recv_ipc(sub_sock)
+    if not sub_res or not sub_res.get("success"):
+        sys.exit(1)
+
+    while True:
+        try:
+            msg_type, event = recv_ipc(sub_sock)
+            if event is None:
+                break
+
+            # If mode change occurred
+            if "change" in event and "pclass" not in event:
+                if isinstance(event.get("change"), str) and event.get("change") in ("default", "gaming"):
+                    current_mode = event.get("change")
+
+            should_pause = check_should_inhibit(cmd_sock, current_mode)
+            if should_pause != current_paused:
+                set_idle_state(should_pause)
+                current_paused = should_pause
+        except Exception:
+            pass
+
+if __name__ == "__main__":
+    main()

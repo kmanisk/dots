@@ -1,37 +1,63 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# swaybar-status: Ultra-lightweight POSIX status generator for swaybar
-# Zero bloat: reads directly from /proc and /sys, no external polling daemons
+# swaybar-status: Zero-fork pure Bash status generator for swaybar
+# Zero bloat: 0 subprocesses/forks per loop, accurate x86_pkg_temp discovery
 # ==============================================================================
 
-while true; do
-    # CPU usage from /proc/loadavg
-    CPU_LOAD=$(awk '{print $1}' /proc/loadavg)
+# 1. Discover the real CPU Package thermal zone once at startup (prioritize x86_pkg_temp)
+CPU_TEMP_FILE=""
+for z in /sys/class/thermal/thermal_zone*; do
+    if [ -r "$z/type" ]; then
+        read -r ztype < "$z/type"
+        if [ "$ztype" = "x86_pkg_temp" ]; then
+            CPU_TEMP_FILE="$z/temp"
+            break
+        elif [ "$ztype" = "TCPU" ] && [ -z "$CPU_TEMP_FILE" ]; then
+            CPU_TEMP_FILE="$z/temp"
+        fi
+    fi
+done
+[ -z "$CPU_TEMP_FILE" ] && CPU_TEMP_FILE="/sys/class/thermal/thermal_zone0/temp"
 
-    # Memory from /proc/meminfo
-    MEM_TOTAL=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
-    MEM_AVAIL=$(awk '/MemAvailable/ {print $2}' /proc/meminfo)
+# 2. Discover battery path once at startup
+BAT_DIR=""
+for b in /sys/class/power_supply/BAT1 /sys/class/power_supply/BAT0; do
+    [ -d "$b" ] && { BAT_DIR="$b"; break; }
+done
+
+# 3. Open an anonymous FIFO on FD 9 so read -t 2 sleeps with ZERO external /bin/sleep forks
+FIFO_PATH="${XDG_RUNTIME_DIR:-/tmp}/swaybar-status.$$.fifo"
+mkfifo "$FIFO_PATH" 2>/dev/null
+exec 9<> "$FIFO_PATH"
+rm -f "$FIFO_PATH"
+
+while true; do
+    # Pure bash read from /proc/loadavg (0 awk forks)
+    read -r CPU_LOAD _ < /proc/loadavg
+
+    # Pure bash read from /proc/meminfo (0 awk forks)
+    MEM_TOTAL=0; MEM_AVAIL=0
+    while IFS=': ' read -r key val _; do
+        case "$key" in
+            MemTotal)     MEM_TOTAL=$val ;;
+            MemAvailable) MEM_AVAIL=$val; break ;;
+        esac
+    done < /proc/meminfo
     MEM_USED_MIB=$(( (MEM_TOTAL - MEM_AVAIL) / 1024 ))
 
-    # CPU Package Temp from /sys
-    TEMP="N/A"
-    for t in /sys/class/thermal/thermal_zone*/temp; do
-        if [ -f "$t" ]; then
-            raw=$(cat "$t" 2>/dev/null)
-            if [ -n "$raw" ] && [ "$raw" -gt 0 ]; then
-                TEMP="$(( raw / 1000 ))°C"
-                break
-            fi
-        fi
-    done
+    # Pure bash read of CPU Package Temp (0 cat forks)
+    if [ -r "$CPU_TEMP_FILE" ]; then
+        read -r raw_temp < "$CPU_TEMP_FILE"
+        TEMP="$(( raw_temp / 1000 ))°C"
+    else
+        TEMP="N/A"
+    fi
 
-    # Battery
+    # Pure bash read of Battery (0 cat forks)
     BAT_STATUS=""
-    if [ -d /sys/class/power_supply/BAT1 ] || [ -d /sys/class/power_supply/BAT0 ]; then
-        BAT_DIR="/sys/class/power_supply/BAT1"
-        [ ! -d "$BAT_DIR" ] && BAT_DIR="/sys/class/power_supply/BAT0"
-        CAP=$(cat "$BAT_DIR/capacity" 2>/dev/null)
-        STAT=$(cat "$BAT_DIR/status" 2>/dev/null)
+    if [ -n "$BAT_DIR" ]; then
+        read -r CAP < "$BAT_DIR/capacity"
+        read -r STAT < "$BAT_DIR/status"
         if [ "$STAT" = "Charging" ]; then
             BAT_STATUS=" ⚡ ${CAP}% |"
         else
@@ -39,9 +65,12 @@ while true; do
         fi
     fi
 
-    # Date and Time
-    DATETIME=$(date "+%a %b %d  %H:%M")
+    # Pure bash builtin strftime (0 /bin/date forks)
+    printf -v DATETIME '%(%a %b %d  %H:%M)T' -1
 
-    echo "CPU: ${CPU_LOAD} | MEM: ${MEM_USED_MIB}M | TEMP: ${TEMP} |${BAT_STATUS} ${DATETIME}"
-    sleep 2
+    printf 'CPU: %s | MEM: %dM | TEMP: %s |%s %s\n' \
+        "$CPU_LOAD" "$MEM_USED_MIB" "$TEMP" "$BAT_STATUS" "$DATETIME"
+
+    # Builtin sleep via FIFO timeout (0 external /bin/sleep forks)
+    read -r -t 2 -u 9 _
 done

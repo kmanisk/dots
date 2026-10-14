@@ -1,0 +1,14 @@
+[Unit]
+Description=Bluetooth Auto-Connect Daemon for Boult BassBox & Soundcore Q20i
+After=bluetooth.target wireplumber.service
+Wants=bluetooth.target
+
+[Service]
+Type=simple
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%h/.local/bin/bt-autoconnect --daemon --verbose
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

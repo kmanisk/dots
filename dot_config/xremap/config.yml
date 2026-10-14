@@ -3,6 +3,8 @@ virtual_modifiers:
 
 modmap:
   - name: Global Modmap
+    application:
+      not: ["cs2", "gamescope", "eldenring.exe", "GTAIV.exe", "steam_app_.*", "steam_app_1245620", "steam_app_12210"]
     remap:
       CapsLock:
         held: CapsLock
@@ -14,7 +16,7 @@ keymap:
   # --- General Universal Copy / Paste / Cut (All GUI Applications) ---
   - name: Universal Copy Paste
     application:
-      not: ["Alacritty", "kitty", "scratch-term", "scratch-notes"]
+      not: ["Alacritty", "kitty", "scratch-term", "scratch-notes", "cs2", "gamescope", "eldenring.exe", "GTAIV.exe", "steam_app_.*", "steam_app_1245620", "steam_app_12210"]
     exact_match: true
     remap:
       Super-c: C-c # Win+C -> Ctrl+C (Universal Copy)
@@ -23,6 +25,8 @@ keymap:
 
   # --- CapsLock layer ---
   - name: CapsLock layer
+    application:
+      not: ["cs2", "gamescope", "eldenring.exe", "GTAIV.exe", "steam_app_.*", "steam_app_1245620", "steam_app_12210"]
     remap:
       # Navigation
       CapsLock-h: Left
@@ -65,10 +69,12 @@ keymap:
       CapsLock-RIGHTBRACE: VolumeUp
       CapsLock-BACKSLASH: VolumeDown
       # Screenshots:
-      # - CapsLock + s: Region selection -> clipboard only (zero file storage)
-      # - CapsLock + Space: Fullscreen -> saved to ~/Pictures/Screenshots + clipboard
-      CapsLock-s: SysRq
-      CapsLock-Space: Shift-SysRq
+      # - CapsLock + s: Region selection -> saved to ~/Pictures/Screenshots + clipboard
+      # - CapsLock + Space: Fullscreen -> clipboard only (zero file storage)
+      CapsLock-s:
+        launch: ["/home/manisk/.local/bin/screenshot-region", "--save"]
+      CapsLock-Space:
+        launch: ["/home/manisk/.local/bin/screenshot-fullscreen", "--clipboard-only"]
 
       # Window Close & Kill (Sway native integration):
       # - CapsLock + q: Graceful close (without reaching down to physical Super)

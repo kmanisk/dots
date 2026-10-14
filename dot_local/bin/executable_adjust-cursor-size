@@ -11,12 +11,12 @@ DELTA="${1:-4}"
 # 1. Get current size from gsettings or fallback to sway config / Xresources
 CURRENT_SIZE=$(gsettings get org.gnome.desktop.interface cursor-size 2>/dev/null | tr -d "'\"" || true)
 if [[ -z "$CURRENT_SIZE" || "$CURRENT_SIZE" -le 0 ]]; then
-    CURRENT_SIZE=$(grep -oE 'seat seat0 xcursor_theme [^ ]+ [0-9]+' "$HOME/.config/sway/config" 2>/dev/null | awk '{print $4}' || true)
+    CURRENT_SIZE=$(grep -oE 'seat seat0 xcursor_theme [^ ]+ [0-9]+' "$HOME/.config/sway/config.d/10-display.conf" "$HOME/.config/sway/config" 2>/dev/null | awk '{print $4}' | head -n1 || true)
 fi
 if [[ -z "$CURRENT_SIZE" || "$CURRENT_SIZE" -le 0 ]]; then
     CURRENT_SIZE=$(grep -E '^Xcursor\.size:' "$HOME/.Xresources" 2>/dev/null | awk '{print $2}' || true)
 fi
-CURRENT_SIZE="${CURRENT_SIZE:-37}"
+CURRENT_SIZE="${CURRENT_SIZE:-40}"
 
 NEW_SIZE=$(( CURRENT_SIZE + DELTA ))
 
@@ -31,7 +31,7 @@ fi
 # 2. Get current cursor theme
 CURRENT_THEME=$(gsettings get org.gnome.desktop.interface cursor-theme 2>/dev/null | tr -d "'\"" || true)
 if [[ -z "$CURRENT_THEME" ]]; then
-    CURRENT_THEME=$(grep -oE 'seat seat0 xcursor_theme [^ ]+' "$HOME/.config/sway/config" 2>/dev/null | awk '{print $4}' || true)
+    CURRENT_THEME=$(grep -oE 'seat seat0 xcursor_theme [^ ]+' "$HOME/.config/sway/config.d/10-display.conf" "$HOME/.config/sway/config" 2>/dev/null | awk '{print $4}' | head -n1 || true)
 fi
 CURRENT_THEME="${CURRENT_THEME:-phinger-cursors-gruvbox-material}"
 
@@ -65,9 +65,11 @@ if [ -n "${DISPLAY:-}" ] && command -v xsetroot >/dev/null 2>&1; then
 fi
 
 # 8. Update Sway config & live compositor
-if [ -f "$HOME/.config/sway/config" ]; then
-    sed -i -E "s/^(seat seat0 xcursor_theme [^ ]+ )[0-9]+/\1$NEW_SIZE/" "$HOME/.config/sway/config" 2>/dev/null || true
-fi
+for scfg in "$HOME/.config/sway/config.d/10-display.conf" "$HOME/.config/sway/config"; do
+    if [ -f "$scfg" ]; then
+        sed -i -E "s/^(seat seat0 xcursor_theme [^ ]+ )[0-9]+/\1$NEW_SIZE/" "$scfg" 2>/dev/null || true
+    fi
+done
 
 export XCURSOR_THEME="$CURRENT_THEME"
 export XCURSOR_SIZE="$NEW_SIZE"
@@ -77,7 +79,6 @@ command -v dbus-update-activation-environment >/dev/null 2>&1 && \
 
 if [ -n "${SWAYSOCK:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
     swaymsg "seat seat0 xcursor_theme $CURRENT_THEME $NEW_SIZE" >/dev/null 2>&1 || true
-    swaymsg reload >/dev/null 2>&1 || true
 fi
 
 # 9. Notify user

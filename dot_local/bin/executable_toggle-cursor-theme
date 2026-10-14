@@ -11,7 +11,7 @@ LIGHT_THEME="phinger-cursors-gruvbox-material-light"
 # 1. Determine current cursor theme
 CURRENT=$(gsettings get org.gnome.desktop.interface cursor-theme 2>/dev/null | tr -d "'\"" || true)
 if [[ -z "$CURRENT" ]]; then
-    CURRENT=$(grep -oE 'seat seat0 xcursor_theme [^ ]+' "$HOME/.config/sway/config" 2>/dev/null | awk '{print $4}' || true)
+    CURRENT=$(grep -oE 'seat seat0 xcursor_theme [^ ]+' "$HOME/.config/sway/config.d/10-display.conf" "$HOME/.config/sway/config" 2>/dev/null | awk '{print $4}' | head -n1 || true)
 fi
 if [[ -z "$CURRENT" ]]; then
     CURRENT=$(grep -E '^Xcursor\.theme:' "$HOME/.Xresources" 2>/dev/null | awk '{print $2}' || true)
@@ -28,12 +28,12 @@ fi
 # 2. Determine current cursor size (preserve user's size setting)
 SIZE=$(gsettings get org.gnome.desktop.interface cursor-size 2>/dev/null | tr -d "'\"" || true)
 if [[ -z "$SIZE" || "$SIZE" -le 0 ]]; then
-    SIZE=$(grep -oE 'seat seat0 xcursor_theme [^ ]+ [0-9]+' "$HOME/.config/sway/config" 2>/dev/null | awk '{print $4}' || true)
+    SIZE=$(grep -oE 'seat seat0 xcursor_theme [^ ]+ [0-9]+' "$HOME/.config/sway/config.d/10-display.conf" "$HOME/.config/sway/config" 2>/dev/null | awk '{print $4}' | head -n1 || true)
 fi
 if [[ -z "$SIZE" || "$SIZE" -le 0 ]]; then
     SIZE=$(grep -E '^Xcursor\.size:' "$HOME/.Xresources" 2>/dev/null | awk '{print $2}' || true)
 fi
-SIZE="${SIZE:-37}"
+SIZE="${SIZE:-40}"
 
 # 3. Apply to GNOME / GTK settings (GSettings)
 gsettings set org.gnome.desktop.interface cursor-theme "$NEW_THEME" 2>/dev/null || true
@@ -78,9 +78,11 @@ if [ -n "${DISPLAY:-}" ] && command -v xsetroot >/dev/null 2>&1; then
 fi
 
 # 9. Sync Sway (Wayland) compositor & session
-if [ -f "$HOME/.config/sway/config" ]; then
-    sed -i -E "s/^(seat seat0 xcursor_theme )[^ ]+( [0-9]+)?/\1$NEW_THEME $SIZE/" "$HOME/.config/sway/config" 2>/dev/null || true
-fi
+for scfg in "$HOME/.config/sway/config.d/10-display.conf" "$HOME/.config/sway/config"; do
+    if [ -f "$scfg" ]; then
+        sed -i -E "s/^(seat seat0 xcursor_theme )[^ ]+( [0-9]+)?/\1$NEW_THEME $SIZE/" "$scfg" 2>/dev/null || true
+    fi
+done
 
 export XCURSOR_THEME="$NEW_THEME"
 export XCURSOR_SIZE="$SIZE"
@@ -90,7 +92,6 @@ command -v dbus-update-activation-environment >/dev/null 2>&1 && \
 
 if [ -n "${SWAYSOCK:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
     swaymsg "seat seat0 xcursor_theme $NEW_THEME $SIZE" >/dev/null 2>&1 || true
-    swaymsg reload >/dev/null 2>&1 || true
 fi
 
 # 10. Notification (works on Mako, Dunst, SwayNC)

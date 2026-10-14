@@ -40,8 +40,7 @@ export SDL_VIDEODRIVER="wayland,x11"
 export CLUTTER_BACKEND=wayland
 export _JAVA_AWT_WM_NONREPARENTING=1
 
-# WLR cursor fallback for hybrid GPU configurations
-export WLR_NO_HARDWARE_CURSORS=1
+# Native Wayland Toolkits
 
 # Pin Sway compositor directly to Intel iGPU in Hybrid/Integrated modes to ensure RTX 5050 suspends
 if [ "$GPU_MODE" = "Hybrid" ] || [ "$GPU_MODE" = "Integrated" ]; then

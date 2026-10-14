@@ -6,7 +6,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 # Best-effort session save for the active compositor (never blocks the action).
 save_session() {
-    if [ "${XDG_SESSION_TYPE:-}" = "wayland" ]; then
+    if [ -n "${SWAYSOCK:-}" ] || [ "${XDG_SESSION_TYPE:-}" = "wayland" ]; then
         ~/.local/bin/sway-session-save --all --quiet 2>/dev/null || :
     else
         ~/.local/bin/i3-session-save --all 2>/dev/null || :
@@ -48,6 +48,10 @@ case "$chosen" in
         ;;
     *"Logout"*)
         save_session
-        i3-msg exit
+        if [ -n "${SWAYSOCK:-}" ] || [ "${XDG_SESSION_TYPE:-}" = "wayland" ]; then
+            swaymsg exit
+        else
+            i3-msg exit
+        fi
         ;;
 esac

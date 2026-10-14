@@ -575,7 +575,7 @@ def apply_theme(name, no_nvim=False):
     # -------------------------------------------------------------
 
     # Single-pass /proc scan to discover all relevant processes at once
-    procs = scan_running_processes({"sway", "btop", "dunst", "mako", "waybar", "yazi", "cava", "kitty", "legendary-tui"})
+    procs = scan_running_processes({"sway", "btop", "dunst", "mako", "yazi", "cava", "kitty", "legendary-tui"})
 
     # Neovim RPC (system -> all live NvChad instances via their sockets)
     # NvChad spawns an --embed child that owns the socket; that child responds to RPC.
@@ -734,12 +734,6 @@ def apply_theme(name, no_nvim=False):
         except Exception:
             pass
 
-    # Waybar (if running)
-    for pid in procs["waybar"]:
-        try:
-            os.kill(pid, signal.SIGUSR2)
-        except Exception:
-            pass
 
     # Cava: reload colors only via SIGUSR2 (instantaneous, 0 audio drop)
     for pid in procs.get("cava", []):

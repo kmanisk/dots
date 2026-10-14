@@ -1,0 +1,298 @@
+#!/usr/bin/env python3
+"""
+bt-autoconnect — Intelligent, ultra-lightweight Bluetooth Auto-Connect Daemon
+Targeting:
+  - Boult BassBox (9E:74:98:79:5D:15)
+  - soundcore Q20i (B0:38:E2:78:9B:FE)
+
+Features:
+  - Event-driven via system D-Bus (GLib mainloop)
+  - 0 CPU overhead when connected (dormant event listening)
+  - Non-blocking asynchronous connection attempts when disconnected
+  - Immediate reconnection on adapter power-on and system resume from sleep
+  - Desktop notification on connection
+"""
+
+import sys
+import os
+import argparse
+import subprocess
+import json
+import dbus
+import dbus.mainloop.glib
+from gi.repository import GLib
+
+CONFIG_DIR = os.path.expanduser("~/.config/bt-autoconnect")
+CONFIG_FILE = os.path.join(CONFIG_DIR, "devices.json")
+
+DEFAULT_TARGET_DEVICES = {
+    "9E:74:98:79:5D:15": "Boult BassBox",
+    "B0:38:E2:78:9B:FE": "soundcore Q20i",
+}
+
+def load_target_devices():
+    if os.path.isfile(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return {k.upper(): str(v) for k, v in data.items()}
+        except Exception as e:
+            print(f"[bt-autoconnect] Warning: Could not read {CONFIG_FILE}: {e}", file=sys.stderr)
+    return dict(DEFAULT_TARGET_DEVICES)
+
+def save_target_devices(devices):
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    with open(CONFIG_FILE, "w") as f:
+        json.dump(devices, f, indent=2)
+
+POLL_INTERVAL_SEC = 20
+
+class BluetoothAutoConnector:
+    def __init__(self, verbose=False):
+        self.verbose = verbose
+        self.targets = load_target_devices()
+        self.bus = dbus.SystemBus()
+        self.manager = dbus.Interface(
+            self.bus.get_object("org.bluez", "/"),
+            "org.freedesktop.DBus.ObjectManager"
+        )
+        self.timer_id = None
+        self.connecting_devices = set()
+
+        # Listen for Device property changes (Connected, etc.)
+        self.bus.add_signal_receiver(
+            self.on_properties_changed,
+            dbus_interface="org.freedesktop.DBus.Properties",
+            signal_name="PropertiesChanged",
+            path_keyword="path"
+        )
+
+        # Listen for system resume from sleep
+        try:
+            self.bus.add_signal_receiver(
+                self.on_prepare_for_sleep,
+                bus_name="org.freedesktop.login1",
+                dbus_interface="org.freedesktop.login1.Manager",
+                signal_name="PrepareForSleep"
+            )
+        except Exception as e:
+            self.log(f"Warning: Could not hook PrepareForSleep: {e}")
+
+    def log(self, msg):
+        if self.verbose:
+            print(f"[bt-autoconnect] {msg}", flush=True)
+
+    def notify(self, title, msg, icon="audio-headphones"):
+        try:
+            subprocess.Popen(
+                ["notify-send", "-a", "Bluetooth", "-i", icon, "-t", "3000", title, msg],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+        except Exception:
+            pass
+
+    def get_target_device_objects(self):
+        """Returns dict of {address: (device_path, dev_iface, props)}"""
+        found = {}
+        objects = self.manager.GetManagedObjects()
+        for path, ifaces in objects.items():
+            if "org.bluez.Device1" in ifaces:
+                props = ifaces["org.bluez.Device1"]
+                addr = str(props.get("Address", "")).upper()
+                if addr in self.targets:
+                    dev_obj = self.bus.get_object("org.bluez", path)
+                    dev_iface = dbus.Interface(dev_obj, "org.bluez.Device1")
+                    found[addr] = (path, dev_iface, props)
+        return found
+
+    def is_any_target_connected(self):
+        targets = self.get_target_device_objects()
+        for addr, (path, dev_iface, props) in targets.items():
+            if bool(props.get("Connected", False)):
+                return addr, self.targets.get(addr, addr)
+        return None
+
+    def attempt_connect_all_disconnected(self):
+        """Asynchronously attempts connection to disconnected targets."""
+        connected = self.is_any_target_connected()
+        if connected:
+            self.log(f"Target already connected: {connected[1]} ({connected[0]}). Skipping scan.")
+            self.stop_poll_timer()
+            return False
+
+        targets = self.get_target_device_objects()
+        if not targets:
+            self.log("No configured target devices found in BlueZ database.")
+            return True
+
+        for addr, (path, dev_iface, props) in targets.items():
+            name = self.targets.get(addr, addr)
+            if addr in self.connecting_devices:
+                self.log(f"Connection already in progress for {name} ({addr})")
+                continue
+
+            self.log(f"Initiating async connect to {name} ({addr})...")
+            self.connecting_devices.add(addr)
+
+            def make_success_cb(target_addr, target_name):
+                def cb():
+                    self.log(f"Successfully connected to {target_name} ({target_addr})")
+                    self.connecting_devices.discard(target_addr)
+                    icon = "audio-speakers" if "box" in target_name.lower() or "speaker" in target_name.lower() else "audio-headphones"
+                    self.notify("Bluetooth Connected", f"{target_name} connected automatically", icon=icon)
+                    self.stop_poll_timer()
+                return cb
+
+            def make_error_cb(target_addr, target_name):
+                def cb(err):
+                    err_msg = str(err)
+                    self.connecting_devices.discard(target_addr)
+                    if "Page Timeout" in err_msg or "Host is down" in err_msg:
+                        self.log(f"{target_name} is currently offline/out of range.")
+                    elif "AlreadyConnected" in err_msg:
+                        self.log(f"{target_name} is already connected.")
+                        self.stop_poll_timer()
+                    else:
+                        self.log(f"Connect error for {target_name}: {err_msg}")
+                return cb
+
+            dev_iface.Connect(
+                reply_handler=make_success_cb(addr, name),
+                error_handler=make_error_cb(addr, name),
+                timeout=15
+            )
+
+        return True  # Keep GLib timer active if not connected
+
+    def start_poll_timer(self):
+        if self.timer_id is None:
+            self.log(f"Starting auto-connect scan cycle (interval: {POLL_INTERVAL_SEC}s)...")
+            self.timer_id = GLib.timeout_add_seconds(POLL_INTERVAL_SEC, self.attempt_connect_all_disconnected)
+
+    def stop_poll_timer(self):
+        if self.timer_id is not None:
+            self.log("Stopping scan cycle (target device connected; entering dormant state).")
+            GLib.source_remove(self.timer_id)
+            self.timer_id = None
+
+    def on_properties_changed(self, interface, changed, invalidated, path):
+        if interface == "org.bluez.Device1":
+            if "Connected" in changed:
+                is_connected = bool(changed["Connected"])
+                # Check if this device is one of our targets
+                targets = self.get_target_device_objects()
+                for addr, (target_path, dev_iface, props) in targets.items():
+                    if target_path == path:
+                        name = self.targets.get(addr, addr)
+                        self.log(f"Device event: {name} Connected={is_connected}")
+                        if is_connected:
+                            self.connecting_devices.discard(addr)
+                            self.stop_poll_timer()
+                        else:
+                            self.log(f"{name} disconnected. Resuming scan cycle.")
+                            self.start_poll_timer()
+                            # Immediate quick check for other device
+                            GLib.timeout_add_seconds(2, self.attempt_connect_all_disconnected)
+
+        elif interface == "org.bluez.Adapter1":
+            if "Powered" in changed and bool(changed["Powered"]):
+                self.log("Bluetooth adapter powered ON. Triggering auto-connect...")
+                GLib.timeout_add_seconds(1, self.attempt_connect_all_disconnected)
+
+    def on_prepare_for_sleep(self, going_to_sleep):
+        if not going_to_sleep:
+            self.log("System resumed from sleep. Triggering auto-connect in 2s...")
+            GLib.timeout_add_seconds(2, self.attempt_connect_all_disconnected)
+
+    def status(self):
+        targets = self.get_target_device_objects()
+        print("=== Bluetooth Auto-Connect Device Status ===")
+        for addr, name in self.targets.items():
+            if addr in targets:
+                path, dev_iface, props = targets[addr]
+                conn = "CONNECTED" if props.get("Connected", False) else "DISCONNECTED"
+                paired = "Paired" if props.get("Paired", False) else "Not Paired"
+                trusted = "Trusted" if props.get("Trusted", False) else "Untrusted"
+                print(f"  • {name} [{addr}]: {conn} ({paired}, {trusted})")
+            else:
+                print(f"  • {name} [{addr}]: NOT FOUND IN BLUEZ")
+
+    def run_daemon(self):
+        self.log("Starting bt-autoconnect daemon...")
+        # Initial check
+        connected = self.is_any_target_connected()
+        if connected:
+            self.log(f"Currently connected to {connected[1]}. Remaining dormant.")
+        else:
+            self.log("No target device connected. Initiating first connect attempt...")
+            self.attempt_connect_all_disconnected()
+            self.start_poll_timer()
+
+        loop = GLib.MainLoop()
+        try:
+            loop.run()
+        except (KeyboardInterrupt, SystemExit):
+            self.log("Exiting...")
+
+def main():
+    parser = argparse.ArgumentParser(description="Bluetooth Auto-Connect Daemon for Bluetooth Audio Devices")
+    parser.add_argument("-d", "--daemon", action="store_true", help="Run persistently as background daemon")
+    parser.add_argument("-s", "--status", action="store_true", help="Check live connection status of target devices")
+    parser.add_argument("-o", "--once", action="store_true", help="Attempt connection once and exit")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging")
+    parser.add_argument("-l", "--list", action="store_true", help="List configured target devices in config")
+    parser.add_argument("--add", nargs=2, metavar=("MAC", "NAME"), help="Add target device to configuration (MAC NAME)")
+    parser.add_argument("--remove", metavar="MAC", help="Remove target device from configuration (MAC)")
+    args = parser.parse_args()
+
+    if args.list:
+        devices = load_target_devices()
+        print(f"Configured devices in {CONFIG_FILE}:")
+        for mac, name in devices.items():
+            print(f"  • {name} [{mac}]")
+        sys.exit(0)
+
+    if args.add:
+        mac = args.add[0].upper()
+        name = args.add[1]
+        devices = load_target_devices()
+        devices[mac] = name
+        save_target_devices(devices)
+        print(f"Added '{name}' [{mac}] to {CONFIG_FILE}")
+        sys.exit(0)
+
+    if args.remove:
+        mac = args.remove.upper()
+        devices = load_target_devices()
+        if mac in devices:
+            name = devices.pop(mac)
+            save_target_devices(devices)
+            print(f"Removed '{name}' [{mac}] from {CONFIG_FILE}")
+        else:
+            print(f"Device [{mac}] not found in {CONFIG_FILE}")
+        sys.exit(0)
+
+    dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+    connector = BluetoothAutoConnector(verbose=args.verbose)
+
+    if args.status:
+        connector.status()
+        sys.exit(0)
+    elif args.once:
+        connector.log("Attempting one-shot connection...")
+        connector.attempt_connect_all_disconnected()
+        # Allow async events 5 seconds to complete
+        loop = GLib.MainLoop()
+        GLib.timeout_add_seconds(5, loop.quit)
+        loop.run()
+        sys.exit(0)
+    elif args.daemon:
+        connector.run_daemon()
+    else:
+        # Default to daemon mode if invoked with no args
+        connector.run_daemon()
+
+if __name__ == "__main__":
+    main()

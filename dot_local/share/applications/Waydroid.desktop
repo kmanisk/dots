@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=Waydroid
+GenericName=Android Container
+Comment=Start Waydroid session and open the full Android UI.
+Exec=/home/manisk/.local/bin/waydroid-launcher
+Icon=waydroid
+Categories=X-WayDroid-App;Utility;
+Actions=stop;
+X-Purism-FormFactor=Workstation;Mobile;
+
+[Desktop Action stop]
+Name=Stop Waydroid
+Exec=waydroid session stop
+Icon=waydroid

@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# waydroid-launcher — ensure Waydroid container + session, then open UI or app.
+# Usage:
+#   waydroid-launcher                    # full Android UI
+#   waydroid-launcher com.example.app    # single app (args -> app launch)
+# Pass-through extras: waydroid-launcher --help
+# ==============================================================================
+set -euo pipefail
+
+export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-1}"
+export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    echo "Usage: $(basename "$0") [package.name]  — ensure session, open full UI or app"
+    exit 0
+fi
+
+# 1. Container daemon (LXC + binder). Passwordless sudo is configured on this host.
+if ! systemctl is-active -q waydroid-container 2>/dev/null; then
+    sudo systemctl start waydroid-container
+    sleep 3
+fi
+
+# 2. Venus render server (NVIDIA path: drm renderD129 + venus.sock).
+if ! systemctl --user is-active -q wd-venus 2>/dev/null; then
+    systemctl --user start wd-venus
+    sleep 3
+fi
+
+# 3. User session. `session start` blocks, so detach it and wait for RUNNING.
+if ! waydroid status 2>/dev/null | grep -q 'Session:.*RUNNING'; then
+    setsid -f waydroid session start >/dev/null 2>&1 < /dev/null
+    for _ in $(seq 1 30); do
+        waydroid status 2>/dev/null | grep -q 'Session:.*RUNNING' && break
+        sleep 2
+    done
+fi
+
+if ! waydroid status 2>/dev/null | grep -q 'Session:.*RUNNING'; then
+    echo "Error: Waydroid session failed to reach RUNNING state." >&2
+    echo "Check: systemctl status waydroid-container, systemctl --user status wd-venus" >&2
+    exit 1
+fi
+
+# 4. Open UI or requested app.
+if [[ $# -gt 0 ]]; then
+    exec waydroid app launch "$@"
+else
+    exec waydroid show-full-ui
+fi
