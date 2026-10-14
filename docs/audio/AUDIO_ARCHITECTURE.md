@@ -164,7 +164,9 @@ Script: [`~/.local/share/wireplumber/scripts/gaming-audio-route.lua`](file:///ho
     * Inter-Sample Peaks: 0.0 (OFF)
 * **Automatic Game Interception**:
   * `gaming-audio-route.lua` hooks into WirePlumber stream creation and automatically routes explicitly detected games (`cs2`, `THE FINALS`, `ARC Raiders`, `Hunt: Showdown`, `PUBG`, `Apex Legends`) into `sink.peace_gaming`.
-  * Outputs automatically route to the active output (Bluetooth A2DP if connected, ALSA wired if not).
+  * Outputs automatically track the currently selected user destination sink in real time via `default.audio.sink` metadata (Soundcore Q20i Bluetooth A2DP, Boult BassBox, 3.5mm wired headphones, or ALC256 internal speakers).
+  * Seamlessly hot-reloads on `Alt + Shift + O` (`toggle-audio-sink`) with zero game disconnects or buffer interruptions.
+
 
 ### B. Device-Agnostic Dolby Enhancement & ASUS DAX3 Speaker DSP
 
@@ -198,8 +200,10 @@ WirePlumber dynamically monitors physical ALSA jack routes and Bluetooth states:
 * **Internal Laptop Speakers Active**:
   * `Dolby_Speaker` `filter.smart.disabled = false` (Targeted directly to `alsa_output.pci-0000_00_1f.3.analog-stereo`).
   * `Dolby_Headphones` `filter.smart.disabled = true` (Headphone processing bypassed).
-* **Competitive Gaming Exemption**:
+* **Competitive Gaming Exemption & Dynamic Tracking**:
   * When any competitive game (`cs2`, `THE FINALS`, `Apex Legends`, `PUBG`, `ARC Raiders`) launches, `gaming-audio-route.lua` routes it directly to `sink.peace_gaming`, entirely bypassing both Dolby filters for absolute zero-latency, unaltered binaural positioning.
+  * In turn, `playback.peace_gaming` routes directly to the physical hardware sink selected via `Alt + Shift + O` (`default.audio.sink` metadata), re-linking live and seamlessly when switching across Soundcore, Boult BassBox, or internal speakers.
+
 
 ---
 
