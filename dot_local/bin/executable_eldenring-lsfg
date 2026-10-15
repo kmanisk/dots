@@ -91,7 +91,12 @@ fi
 
 INNER_BIN="$HOME/.local/bin/eldenring-launch-inner"
 
-taskset -c 0-11 "$INNER_BIN" "$@"
+# NOTE (2026-10-16): Do NOT pin with taskset -c 0-11. Verified by A/B testing:
+# taskset 0-11 -> eldenring.exe exits early at Vulkan device creation (EXIT 0, no window);
+# taskset 0-15 / no pinning -> survives to LSFG init and renders.
+# CachyOS BORE/EEVDF + Intel HFI already prefers P-cores; pinning only starves
+# Proton/wineserver helper threads. Run unpinned.
+exec "$INNER_BIN" "$@"
 
 STATUS=$?
 exit "$STATUS"
