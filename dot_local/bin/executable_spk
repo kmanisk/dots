@@ -90,12 +90,25 @@ apply_voicing() {
     # Instantly restart standalone speaker DSP runner (does NOT touch PipeWire, PulseAudio, or Bluetooth)
     systemctl --user restart asus-speaker-dsp.service 2>/dev/null || systemctl --user start asus-speaker-dsp.service 2>/dev/null || true
 
+    # Wait for node to register and ensure output links
+    local nid=""
+    for _ in {1..10}; do
+        nid=$(get_node_id)
+        if [[ -n "$nid" ]]; then
+            break
+        fi
+        sleep 0.05
+    done
+
+    # Ensure output is connected to ALSA hardware
+    pw-link effect_output.Dolby_Speaker:output_FL alsa_output.pci-0000_00_1f.3.analog-stereo:playback_FL 2>/dev/null || true
+    pw-link effect_output.Dolby_Speaker:output_FR alsa_output.pci-0000_00_1f.3.analog-stereo:playback_FR 2>/dev/null || true
+
     # Ensure filter state matches current enabled preference
-    local nid
-    nid=$(get_node_id)
     if [[ -n "$nid" ]]; then
         if is_user_enabled; then
             pw-metadata -n filters "$nid" filter.smart.user_disabled false 2>/dev/null || true
+            pw-metadata -n filters "$nid" filter.smart.disabled false 2>/dev/null || true
         else
             pw-metadata -n filters "$nid" filter.smart.user_disabled true 2>/dev/null || true
             pw-metadata -n filters "$nid" filter.smart.disabled true 2>/dev/null || true

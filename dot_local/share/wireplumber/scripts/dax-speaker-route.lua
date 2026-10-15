@@ -209,9 +209,21 @@ alsa_device_om:connect("installed", function()
 end)
 
 speaker_node_om:connect("installed", function() syncFilterStates() end)
+speaker_node_om:connect("object-added", function() syncFilterStates() end)
+speaker_node_om:connect("object-removed", function() syncFilterStates() end)
+
 hp_node_om:connect("installed", function() syncFilterStates() end)
+hp_node_om:connect("object-added", function() syncFilterStates() end)
+hp_node_om:connect("object-removed", function() syncFilterStates() end)
+
 hp_playback_om:connect("installed", function() syncFilterStates() end)
+hp_playback_om:connect("object-added", function() syncFilterStates() end)
+hp_playback_om:connect("object-removed", function() syncFilterStates() end)
+
 spk_playback_om:connect("installed", function() syncFilterStates() end)
+spk_playback_om:connect("object-added", function() syncFilterStates() end)
+spk_playback_om:connect("object-removed", function() syncFilterStates() end)
+
 bt_sink_om:connect("installed", function() syncFilterStates() end)
 bt_sink_om:connect("object-added", function() syncFilterStates() end)
 bt_sink_om:connect("object-removed", function() syncFilterStates() end)

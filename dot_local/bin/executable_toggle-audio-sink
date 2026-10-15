@@ -42,13 +42,10 @@ add_target() {
     TARGET_PREFIXES+=("$6")
 }
 
-# Internal speakers (always available on the laptop)
+# Internal speakers & wired headphones (both always cyclable)
 if pactl list short sinks 2>/dev/null | grep -q "$ALSA_SINK"; then
     add_target "alsa:speaker" "$ALSA_SINK" "analog-output-speaker" "Laptop Speakers (Dolby DSP)" "audio-speakers" "🔊 "
-    # Smart check: only include 3.5mm headphones IF physically plugged in
-    if is_headphones_connected; then
-        add_target "alsa:headphones" "$ALSA_SINK" "analog-output-headphones" "Wired Headphones (3.5mm)" "audio-headphones" "🎧 "
-    fi
+    add_target "alsa:headphones" "$ALSA_SINK" "analog-output-headphones" "Wired Headphones (3.5mm)" "audio-headphones" "🎧 "
 fi
 
 # External devices (Bluetooth, USB, HDMI)
@@ -81,7 +78,7 @@ CURRENT_ID=""
 
 if [[ "$DEFAULT_SINK" == "$ALSA_SINK" ]]; then
     active_port=$(pactl list sinks 2>/dev/null | awk -v s="$ALSA_SINK" '$0 ~ "Name: " s {f=1} f && /Active Port:/ {print $3; exit}')
-    if [[ "$active_port" == "analog-output-headphones" ]] && is_headphones_connected; then
+    if [[ "$active_port" == "analog-output-headphones" ]]; then
         CURRENT_ID="alsa:headphones"
     else
         CURRENT_ID="alsa:speaker"
@@ -93,6 +90,15 @@ else
             break
         fi
     done
+    # If DEFAULT_SINK was a virtual/filter sink or unmatched, identify by active ALSA port
+    if [[ -z "$CURRENT_ID" ]]; then
+        active_port=$(pactl list sinks 2>/dev/null | awk -v s="$ALSA_SINK" '$0 ~ "Name: " s {f=1} f && /Active Port:/ {print $3; exit}')
+        if [[ "$active_port" == "analog-output-headphones" ]]; then
+            CURRENT_ID="alsa:headphones"
+        else
+            CURRENT_ID="alsa:speaker"
+        fi
+    fi
 fi
 
 CURRENT_INDEX=-1
