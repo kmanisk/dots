@@ -15,10 +15,18 @@ if [ "${STEAM_DGPU:-0}" != "1" ]; then
 fi
 
 # Desktop UI scaling for 16" 1920x1200 Display (scale 1.0 prevents CEF coordinate desync on XWayland)
+export GDK_SCALE=1
 if [ "${STEAM_FORCE_DESKTOPUI_SCALING:-}" = "1.35" ]; then
     export STEAM_FORCE_DESKTOPUI_SCALING=1.0
 else
     export STEAM_FORCE_DESKTOPUI_SCALING="${STEAM_FORCE_DESKTOPUI_SCALING:-1.0}"
 fi
 
-exec /usr/bin/steam "$@"
+# Disable GPU acceleration for CEF web views under Xwayland to fix
+# unresponsive mouse clicks, invisible cursor, and hit-box coordinate misalignment.
+CEF_FLAGS=()
+if ! [[ "$*" =~ "-cef-disable-gpu" ]]; then
+    CEF_FLAGS+=("-cef-disable-gpu" "-cef-disable-gpu-compositing")
+fi
+
+exec /usr/bin/steam "${CEF_FLAGS[@]}" "$@"

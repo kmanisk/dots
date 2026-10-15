@@ -22,6 +22,7 @@ has_window() {
 
 if [ -n "${SWAYSOCK:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
     export STEAM_FORCE_DESKTOPUI_SCALING="${STEAM_FORCE_DESKTOPUI_SCALING:-1}"
+    export GDK_SCALE=1
 fi
 
 # Parse arguments
