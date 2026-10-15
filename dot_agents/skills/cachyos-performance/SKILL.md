@@ -374,6 +374,24 @@ Performance-sensitive visual features should be benchmarked rather than judged p
 
 ---
 
+## Xwayland, Steam & Chromium Embedded Framework (CEF) Invariants
+
+When running Xwayland applications (notably Steam, CEF web helpers, and Wine/Proton games) under Sway / Wayland:
+
+* **Cursor Resolution Contract:**
+  * Chromium/CEF queries standard X11 cursor names (`arrow`, `top_left_arrow`, `X_cursor`, `hand`, `ibeam`, `move`).
+  * If a cursor theme lacks these aliases and omits an `Inherits=Adwaita` fallback, `libXcursor` falls back to `XCreateFontCursor(XC_arrow)` (`cursor.pcf`).
+  * Because CachyOS/Arch does not bundle legacy bitmap fonts (`xorg-fonts-misc`), Xwayland renders an invisible/transparent cursor surface.
+  * **Invariant:** Maintain core alias symlinks (`arrow -> default`, `top_left_arrow -> default`, etc.) in user cursor themes, and guarantee `Inherits=<theme>,Adwaita` in default `index.theme` and direct symlinks in `~/.icons/default/cursors`.
+  * **Root Window Pointer:** Ensure Xwayland initializes its root cursor via `xsetroot -cursor_name left_ptr` during session startup and Sway reload (`~/.local/bin/ensure-xcursor-fallbacks`).
+
+* **Scaling & Coordinate Mapping:**
+  * Mixed fractional DPI causes CEF coordinate translation desync and unresponsive mouse hitboxes.
+  * Keep integer scaling on the Xwayland root display (`GDK_SCALE=1`, `STEAM_FORCE_DESKTOPUI_SCALING=1.0`).
+  * Force primary output assignment in Xwayland (`xrandr --output eDP-1 --primary`) to avoid virtual multi-monitor bounding box desync.
+
+---
+
 ## Autologin / Session Architecture
 
 Prefer lightweight session startup over a large graphical display manager when operationally practical.
