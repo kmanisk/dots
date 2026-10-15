@@ -33,6 +33,7 @@ docs/
 - **GTA IV (`gaming/gta-iv/`)**: Complete Edition modpack, FusionFix, DXVK configuration, Gillian's Guide reference.
 
 ### 3. [System (`docs/system/`)](file:///home/manisk/docs/system)
+- [`JIO5G_YOUTUBE_STREAMING.md`](file:///home/manisk/docs/system/JIO5G_YOUTUBE_STREAMING.md) — Jio 5G cellular tethering MTU limits and YouTube QUIC/HTTP3 buffering resolution.
 - [`system-philosophy.md`](file:///home/manisk/docs/system/system-philosophy.md) — Anti-bloat, performance invariants, headless-first design principles.
 - [`SYSTEM-REPRODUCIBILITY.md`](file:///home/manisk/docs/system/SYSTEM-REPRODUCIBILITY.md) — Clean reinstall guide, Snapper snapshots, package list.
 - [`reference.md`](file:///home/manisk/docs/system/reference.md) — Fast command reference and hardware specs.

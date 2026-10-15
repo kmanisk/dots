@@ -507,6 +507,19 @@ For technical topics that can change with software releases:
 
 ---
 
+## Cellular Tethering (Jio 5G) & Browser QUIC / HTTP3 Video Streaming
+
+* **Problem:** YouTube and video platforms buffer/freeze perpetually on Chromium/Brave over Jio 5G tethering despite 100+ Mbps bandwidth.
+* **Root Cause:**
+  * Chromium streams Google/YouTube media from edge nodes via **QUIC (HTTP/3 over UDP:443)**.
+  * Jio 5G tethering path MTU is bounded at **1372 bytes**; carrier middleboxes/CGNAT drop or shape high-throughput UDP packets.
+  * Unlike TCP, UDP traffic bypasses kernel TCP MSS clamping and PMTU discovery.
+* **Invariant / Resolution:**
+  * Maintain `--disable-quic` in `~/.config/brave-flags.conf` and `~/.config/brave-origin-flags.conf`.
+  * Forcing HTTP/2 over TCP allows kernel PLPMTUD (`net.ipv4.tcp_mtu_probing = 1`), UFW TCP MSS clamping (`-j TCPMSS --clamp-mss-to-pmtu`), and BBR pacing to ensure full line-rate streaming without buffer stalls.
+
+---
+
 ## Decision Rule
 
 When choosing between two implementations with equivalent functionality:
