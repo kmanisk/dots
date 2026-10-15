@@ -101,7 +101,13 @@ fi
 [ $# -eq 0 ] && { echo "ERROR: Could not locate CS2 executable." >&2; exit 1; }
 
 # Pin to 6 physical P-cores; remove -mainthreadpriority 2 to prevent thread starvation/watchdog stalls
-CS2_FLAGS=(-vulkan -fullscreen -w "$TARGET_W" -h "$TARGET_H" -threads 6 -nojoy -novid +fps_max 0 +fps_max_ui 0)
+# Pin to 6 physical P-cores; remove -mainthreadpriority 2 to prevent thread starvation/watchdog stalls
+CS2_FLAGS=(-vulkan -fullscreen -w "$TARGET_W" -h "$TARGET_H" -threads 6 -nojoy -novid +fps_max 0 +fps_max_ui 0 +clientport "${CS2_CLIENTPORT:-27006}")
+
+# --- asusctl performance profile switching ---
+if command -v asusctl >/dev/null 2>&1; then
+    asusctl profile set Performance >/dev/null 2>&1 || true
+fi
 
 # --- ananicy-cpp conflict resolution (AGENTS.md Rule 2) ---
 ananicy_was_active=0
@@ -115,6 +121,9 @@ if [ -n "${SWAYSOCK:-}" ] && command -v swaymsg >/dev/null 2>&1; then
     swaymsg 'mode "gaming"' >/dev/null 2>&1 || true
 fi
 cleanup() {
+    if command -v asusctl >/dev/null 2>&1; then
+        asusctl profile set Balanced >/dev/null 2>&1 || true
+    fi
     if [ "$ananicy_was_active" = "1" ]; then
         sudo systemctl start ananicy-cpp.service 2>/dev/null || true
     fi

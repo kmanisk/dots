@@ -509,3 +509,38 @@ Without proper guard rails, aggressive speech spikes can either cause heavy comp
    * Users can tweak `~/.config/micstudio/presets.toml` (changing pitch semitones, EQ bands, resonance, delay times, etc.) at any time.
    * Pressing **`F5`** or **`Ctrl+R`** in the TUI or running **`mic preset reload`** re-reads the configuration file from disk into memory and applies the updated parameters live without restarting PipeWire, closing MicStudio, or disconnecting games.
 
+---
+
+## 16. Gaming Audio Zero-Tear Invariant & ALC256 Output Routing
+
+### A. The Core Invariant: Zero Stream Interruption on Output Toggle
+On ASUS TUF Gaming laptops (Realtek ALC256 codec), internal laptop speakers and wired 3.5mm headphones are exposed as two distinct routes/ports (`analog-output-speaker` and `analog-output-headphones`) on the exact same underlying hardware audio sink:
+`alsa_output.pci-0000_00_1f.3.analog-stereo`
+
+When cycling audio targets via `Alt + Shift + O` (`toggle-audio-sink`), the following invariants are strictly preserved:
+
+1. **Same-Sink Link Preservation**:
+   - Switching between `alsa:speaker` and `alsa:headphones` does **not** alter the destination hardware sink.
+   - The competitive gaming stream (`playback.peace_gaming`) **must never be unlinked or re-linked** during this transition.
+   - Brute-force `pw-link -d` operations are strictly forbidden when `NEXT_SINK == CURRENT_SINK`. This prevents broken pipe / socket teardowns in SDL3/CS2 and eliminates the need to "hard reload" games during output switching.
+
+2. **Make-Before-Break External Sink Migration**:
+   - When transitioning between the internal ALSA sink and an external sink (e.g. Bluetooth A2DP `bluez_output...`):
+     - New links (`playback.peace_gaming:output_FL/FR -> target:playback_FL/FR`) are created **first**.
+     - Old links are pruned only after the new target connection is established.
+     - Games stream continuously across audio handoffs without audio thread stalls or xruns.
+
+3. **Gaming Sink Volume Lock (100% / 1.0 Gain Ceiling)**:
+   - `sink.peace_gaming` volume is pinned to `1.0` (0 dB) upon every sink toggle.
+   - Ensures tactical game equalization (Peace PUBG EQ + LoudMax LADSPA limiter) operates with nominal digital headroom and is never inadvertently attenuated by system volume keys.
+
+4. **Strict 100% Volume Ceiling for OSD (`volume-notify`)**:
+   - Keybindings for `XF86AudioRaiseVolume` invoke `wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+`.
+   - The `-l 1.0` flag guarantees audio volume strictly clamps at 100% (0 dBFS), preventing software over-amplification, digital clipping, and hearing strain.
+
+5. **ASUS DAX3 Dolby Speaker Filter Chain Dynamic Re-attachment**:
+   - Speaker DSP filter runner configurations (`custom`, `dynamic`, `balanced`, `music`) declare `target.object = "alsa_output.pci-0000_00_1f.3.analog-stereo"` in `playback.props`.
+   - WirePlumber's `dax-speaker-route.lua` registers dynamic `object-added` and `object-removed` listeners on all filter nodes (`speaker_node_om`, `spk_playback_om`, `hp_node_om`, `hp_playback_om`).
+   - Profile switches via `spk <profile>` or `rofi-speaker-dsp` re-attach instantly with zero silence or need to cycle devices.
+
+

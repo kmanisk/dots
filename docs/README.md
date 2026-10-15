@@ -45,3 +45,8 @@ docs/
 ### 5. [Virtualization (`docs/virtualization/`)](file:///home/manisk/docs/virtualization)
 - [`waydroid-guide.md`](file:///home/manisk/docs/virtualization/waydroid-guide.md) — Magisk Delta overlay root, hybrid GPU power handling, recovery.
 - [`windows-vfio-setup.md`](file:///home/manisk/docs/virtualization/windows-vfio-setup.md) — KVM/QEMU GPU passthrough setup and IOMMU configuration.
+
+### 6. [Audio (`docs/audio/`)](file:///home/manisk/docs/audio)
+- [`AUDIO_ARCHITECTURE.md`](file:///home/manisk/docs/audio/AUDIO_ARCHITECTURE.md) — Complete PipeWire 1.6.9 + WirePlumber 0.5 headless DSP & smart filter architecture.
+- [`2026-10-16_GAMING_AUDIO_BASELINE.md`](file:///home/manisk/docs/audio/2026-10-16_GAMING_AUDIO_BASELINE.md) — Zero-tear gaming pipeline baseline, volume ceiling clamp, and ALC256 port switching invariants.
+
