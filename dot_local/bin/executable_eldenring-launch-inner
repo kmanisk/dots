@@ -50,6 +50,11 @@ if [ -f "$ME2_DIR/modengine2_launcher.exe" ]; then
     if [ -f "$ME2_DIR/config_eldenringrandomizer.toml" ]; then
         CONFIG_NAME="config_eldenringrandomizer.toml"
     fi
+    # Hand-managed stack (randomizer + hud, optionally imco). Preferred when present;
+    # the randomizer GUI only regenerates config_eldenringrandomizer.toml.
+    if [ -f "$ME2_DIR/config_custom.toml" ]; then
+        CONFIG_NAME="config_custom.toml"
+    fi
     # IMCO stack (hand-managed, includes randomizer path + imco with IMCO priority).
     # Preferred when present; the randomizer GUI only regenerates the file above.
     if [ -f "$ME2_DIR/config_imco.toml" ]; then

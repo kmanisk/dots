@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # eldenring-lsfg: Elden Ring Launcher with ModEngine2, EldenModLoader, CameraFix,
-# LSFG-VK (2x frame generation -> 120 FPS), RTX 5050 Mobile dGPU offload,
+# LSFG-VK (4x frame generation -> 165 FPS), RTX 5050 Mobile dGPU offload,
 # and MangoHud hardware monitoring.
 set -e
 
@@ -56,7 +56,7 @@ export WINEDLLOVERRIDES="dinput8=b"
 unset MANGOHUD
 unset MANGOHUD_CONFIG
 
-# LSFG-VK 2.0: Enable the "Elden Ring" profile (2x multiplier: 60 base x 2 -> 120 FPS)
+# LSFG-VK 2.0: Enable the "Elden Ring" profile (4x multiplier: 60 base x 4 -> 165 FPS panel cap, vsync pacing)
 if [ "${ENABLE_LSFG:-1}" = "1" ] && [ "${DISABLE_LSFGVK:-0}" != "1" ]; then
     export LSFGVK_PROFILE="Elden Ring"
     unset DISABLE_LSFGVK
@@ -71,7 +71,7 @@ trap 'asusctl profile set Balanced >/dev/null 2>&1 || true' EXIT INT TERM
 trap '' HUP
 
 # Focus Workspace 4 automatically (Sway or i3 IPC)
-notify-send -i input-gaming "ELDEN RING" "Launching Elden Ring (120 FPS Locked)..." 2>/dev/null || true
+notify-send -i input-gaming "ELDEN RING" "Launching Elden Ring (165 FPS Locked)..." 2>/dev/null || true
 if [ -n "$SWAYSOCK" ] || [ -n "$WAYLAND_DISPLAY" ]; then
     swaymsg "workspace number 4" >/dev/null 2>&1 || true
 else
