@@ -65,6 +65,19 @@ else
     unset LSFGVK_PROFILE
 fi
 
+# Single-instance guard: a repeat Alt+g pick (or key-repeat double-fire) while the
+# game is up must NOT spawn a second copy — that races the prefix lock and the
+# loser dies silently after the "Launching" notification (the double-pick bug).
+if pgrep -f "^Z:.*eldenring\.exe" >/dev/null 2>&1; then
+    notify-send -i input-gaming "ELDEN RING" "Already running — switching to Workspace 4..." 2>/dev/null || true
+    if [ -n "$SWAYSOCK" ] || [ -n "$WAYLAND_DISPLAY" ]; then
+        swaymsg "workspace number 4" >/dev/null 2>&1 || true
+    else
+        i3-msg "workspace 4" >/dev/null 2>&1 || true
+    fi
+    exit 0
+fi
+
 # Auto power profile: Set Performance mode while playing, restore Balanced on exit
 asusctl profile set Performance >/dev/null 2>&1 || true
 trap 'asusctl profile set Balanced >/dev/null 2>&1 || true' EXIT INT TERM
@@ -92,6 +105,20 @@ else
 fi
 
 INNER_BIN="$HOME/.local/bin/eldenring-launch-inner"
+
+# Stale-prefix cleanup: if a previous session was SIGKILLed, its wineserver can
+# linger with no game behind it. A fresh proton then attaches to the dead
+# server and exits early (notification, no game). Reap it first. The guard
+# above already returned when a real game is running, so this only fires when
+# the prefix is truly abandoned.
+if ! pgrep -f "^Z:.*eldenring\.exe" >/dev/null 2>&1; then
+    for _ws in "$HOME/.local/share/Steam/compatibilitytools.d/proton-cachyos-slr/files/bin/wineserver" \
+               "$HOME/.local/share/Steam/compatibilitytools.d/GE-Proton11-7-x86_64/files/bin/wineserver"; do
+        if [ -x "$_ws" ]; then
+            WINEPREFIX="$STEAM_COMPAT_DATA_PATH/pfx" "$_ws" -k >/dev/null 2>&1 || true
+        fi
+    done
+fi
 
 # NOTE (2026-10-16): Do NOT pin with taskset -c 0-11. Verified by A/B testing:
 # taskset 0-11 -> eldenring.exe exits early at Vulkan device creation (EXIT 0, no window);
