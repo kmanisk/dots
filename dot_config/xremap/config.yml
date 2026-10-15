@@ -32,14 +32,16 @@ keymap:
       # Fullscreen Screenshot (Workspace 3 & 4 save to Screenshots/Gaming; other workspaces save to Screenshots + clipboard)
       CapsLock-Space:
         launch: ["/home/manisk/.local/bin/screenshot-fullscreen"]
-      # Emergency kill game (requires Shift to avoid accidental reload collision in FPS games)
+      # Emergency kill game
+      CapsLock-r:
+        launch: ["/home/manisk/.local/bin/killgame"]
       CapsLock-Shift-r:
         launch: ["/home/manisk/.local/bin/killgame"]
 
   # --- General Universal Copy / Paste / Cut (All GUI Applications) ---
   - name: Universal Copy Paste
     application:
-      not: ["Alacritty", "kitty", "scratch-term", "scratch-notes", "cs2", "gamescope", "eldenring.exe", "GTAIV.exe", "steam_app_.*", "steam_app_1245620", "steam_app_12210"]
+      not: ["Alacritty", "kitty", "scratch-term", "scratch-notes", "cs2", "gamescope", "eldenring.exe", "GTAIV.exe", "^steam_app_.*"]
     exact_match: true
     remap:
       Super-c: C-c # Win+C -> Ctrl+C (Universal Copy)
@@ -49,7 +51,7 @@ keymap:
   # --- CapsLock layer ---
   - name: CapsLock layer
     application:
-      not: ["cs2", "gamescope", "eldenring.exe", "GTAIV.exe", "steam_app_.*", "steam_app_1245620", "steam_app_12210"]
+      not: ["cs2", "gamescope", "eldenring.exe", "GTAIV.exe", "^steam_app_.*"]
     remap:
       # Navigation
       CapsLock-h: Left

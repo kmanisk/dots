@@ -56,12 +56,12 @@ if [ -n "${WAYLAND_DISPLAY:-}" ] || [ -n "${SWAYSOCK:-}" ]; then
     GEOM=$(slurp -b "$BG_COL" -c "$BORDER_COL" -s "$SEL_COL" 2>/dev/null)
     [ -z "$GEOM" ] && exit 0
     if grim -g "$GEOM" "$FILE" 2>/dev/null && [ -s "$FILE" ]; then
-        ( nohup wl-copy -t image/png < "$FILE" </dev/null >/dev/null 2>&1 & )
+        wl-copy -t image/png < "$FILE"
         if [ "$SAVE" = 1 ]; then
             notify-send -a "Screenshot" -t 1500 -i camera-photo "Screenshot" "Region saved to Screenshots + clipboard"
         else
-            notify-send -a "Screenshot" -t 1500 -i camera-photo "Screenshot" "Region copied to clipboard"
             rm -f "$FILE"
+            notify-send -a "Screenshot" -t 1500 -i camera-photo "Screenshot" "Region copied to clipboard"
         fi
     fi
 else
