@@ -50,6 +50,11 @@ if [ -f "$ME2_DIR/modengine2_launcher.exe" ]; then
     if [ -f "$ME2_DIR/config_eldenringrandomizer.toml" ]; then
         CONFIG_NAME="config_eldenringrandomizer.toml"
     fi
+    # IMCO stack (hand-managed, includes randomizer path + imco with IMCO priority).
+    # Preferred when present; the randomizer GUI only regenerates the file above.
+    if [ -f "$ME2_DIR/config_imco.toml" ]; then
+        CONFIG_NAME="config_imco.toml"
+    fi
     "$PROTON_BIN" run "$ME2_DIR/modengine2_launcher.exe" -t er -c "$CONFIG_NAME" -p "Z:\\mnt\\Games\\NonSteamGames\\ELDEN RING\\Game\\eldenring.exe"
 
     # Ensure all wineserver processes in prefix have exited cleanly
