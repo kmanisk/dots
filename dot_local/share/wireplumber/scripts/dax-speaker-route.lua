@@ -59,6 +59,13 @@ local hp_playback_om = ObjectManager {
   }
 }
 
+local spk_playback_om = ObjectManager {
+  Interest {
+    type = "node",
+    Constraint { "node.name", "=", "effect_output.Dolby_Speaker" },
+  }
+}
+
 local alsa_device_om = ObjectManager {
   Interest {
     type = "device",
@@ -136,6 +143,14 @@ local function syncFilterStates()
         meta_filters:set(bound_id, "filter.smart.disabled", "Spa:String:JSON", tostring(should_disable_spk))
       end
     end
+
+    local spk_pb = spk_playback_om:lookup()
+    if spk_pb and meta_default then
+      local pb_id = spk_pb["bound-id"]
+      if pb_id then
+        meta_default:set(pb_id, "target.object", "Spa:String", ALSA_SINK_NAME)
+      end
+    end
   end
 
   -- 2. Sync Dolby Headphones filter
@@ -196,6 +211,7 @@ end)
 speaker_node_om:connect("installed", function() syncFilterStates() end)
 hp_node_om:connect("installed", function() syncFilterStates() end)
 hp_playback_om:connect("installed", function() syncFilterStates() end)
+spk_playback_om:connect("installed", function() syncFilterStates() end)
 bt_sink_om:connect("installed", function() syncFilterStates() end)
 bt_sink_om:connect("object-added", function() syncFilterStates() end)
 bt_sink_om:connect("object-removed", function() syncFilterStates() end)
@@ -217,6 +233,7 @@ alsa_device_om:activate()
 speaker_node_om:activate()
 hp_node_om:activate()
 hp_playback_om:activate()
+spk_playback_om:activate()
 bt_sink_om:activate()
 metadata_filters_om:activate()
 metadata_default_om:activate()

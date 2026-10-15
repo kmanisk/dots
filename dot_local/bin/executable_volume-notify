@@ -4,13 +4,13 @@
 # ==============================================================================
 case "${1:-status}" in
     up)
-        pamixer -ui 5
+        wpctl set-volume -l 1.5 @DEFAULT_AUDIO_SINK@ 5%+
         ;;
     down)
-        pamixer -ud 5
+        wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-
         ;;
     mute)
-        pamixer -t
+        wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle
         ;;
 esac
 
@@ -26,8 +26,10 @@ if [ "$CURRENT_WS" = "4" ]; then
     exit 0
 fi
 
-VOL=$(pamixer --get-volume 2>/dev/null || echo "0")
-MUTE=$(pamixer --get-mute 2>/dev/null || echo "false")
+VOL_LINE=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null || echo "Volume: 0.00")
+VOL=$(echo "$VOL_LINE" | awk '{print int($2 * 100)}')
+MUTE="false"
+echo "$VOL_LINE" | grep -q "\[MUTED\]" && MUTE="true"
 
 # Fast dismiss: 800ms regular, 500ms in fullscreen
 TIMEOUT=800
