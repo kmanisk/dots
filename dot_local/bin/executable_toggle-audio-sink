@@ -109,6 +109,11 @@ for i in "${!TARGET_IDS[@]}"; do
     fi
 done
 
+CURRENT_SINK=""
+if [[ $CURRENT_INDEX -ge 0 ]]; then
+    CURRENT_SINK="${TARGET_SINKS[$CURRENT_INDEX]}"
+fi
+
 # 3. Cycle to next target
 NEXT_INDEX=$(( (CURRENT_INDEX + 1) % TOTAL_TARGETS ))
 NEXT_ID="${TARGET_IDS[$NEXT_INDEX]}"
@@ -120,34 +125,46 @@ NEXT_PREFIX="${TARGET_PREFIXES[$NEXT_INDEX]}"
 
 # 4. Apply target switch
 if [[ "$NEXT_ID" == "alsa:speaker" ]]; then
-    amixer -c 0 sset Speaker 100% unmute >/dev/null 2>&1 || true
     pactl set-sink-port "$ALSA_SINK" "analog-output-speaker" 2>/dev/null || true
+    amixer -c 0 sset Speaker 100% unmute >/dev/null 2>&1 || true
+    amixer -c 0 sset Master unmute >/dev/null 2>&1 || true
     pactl set-default-sink "$ALSA_SINK" 2>/dev/null || true
     pw-metadata -n default 0 default.audio.sink "{\"name\":\"$ALSA_SINK\"}" 2>/dev/null || true
     pw-metadata -n default 0 default.configured.audio.sink "{\"name\":\"$ALSA_SINK\"}" 2>/dev/null || true
     wp_id=$(pw-dump Node 2>/dev/null | jq -r --arg n "$ALSA_SINK" '.[] | select(.info.props["node.name"] == $n and .info.props["media.class"] == "Audio/Sink") | .id' | head -n 1)
-    [[ -n "$wp_id" ]] && wpctl set-default "$wp_id" 2>/dev/null || true
+    if [[ -n "$wp_id" ]]; then
+        wpctl set-default "$wp_id" 2>/dev/null || true
+        wpctl set-mute "$wp_id" 0 2>/dev/null || true
+    fi
     # Clear user_disabled quietly; dax-speaker-route.lua auto-enables DSP
     dax_id=$(pw-dump Node 2>/dev/null | jq -r '.[] | select(.info.props["node.name"] == "effect_input.Dolby_Speaker") | .id' 2>/dev/null | head -n 1 || true)
     [[ -n "$dax_id" && "$dax_id" != "null" ]] && pw-metadata -n filters "$dax_id" filter.smart.user_disabled false 2>/dev/null || true
 elif [[ "$NEXT_ID" == "alsa:headphones" ]]; then
-    amixer -c 0 sset Headphone 100% unmute >/dev/null 2>&1 || true
     pactl set-sink-port "$ALSA_SINK" "analog-output-headphones" 2>/dev/null || true
+    amixer -c 0 sset Headphone 100% unmute >/dev/null 2>&1 || true
+    amixer -c 0 sset Master unmute >/dev/null 2>&1 || true
     pactl set-default-sink "$ALSA_SINK" 2>/dev/null || true
     pw-metadata -n default 0 default.audio.sink "{\"name\":\"$ALSA_SINK\"}" 2>/dev/null || true
     pw-metadata -n default 0 default.configured.audio.sink "{\"name\":\"$ALSA_SINK\"}" 2>/dev/null || true
     wp_id=$(pw-dump Node 2>/dev/null | jq -r --arg n "$ALSA_SINK" '.[] | select(.info.props["node.name"] == $n and .info.props["media.class"] == "Audio/Sink") | .id' | head -n 1)
-    [[ -n "$wp_id" ]] && wpctl set-default "$wp_id" 2>/dev/null || true
+    if [[ -n "$wp_id" ]]; then
+        wpctl set-default "$wp_id" 2>/dev/null || true
+        wpctl set-mute "$wp_id" 0 2>/dev/null || true
+    fi
 else
     pactl set-default-sink "$NEXT_SINK" 2>/dev/null || true
     pw-metadata -n default 0 default.audio.sink "{\"name\":\"$NEXT_SINK\"}" 2>/dev/null || true
     pw-metadata -n default 0 default.configured.audio.sink "{\"name\":\"$NEXT_SINK\"}" 2>/dev/null || true
     wp_id=$(pw-dump Node 2>/dev/null | jq -r --arg n "$NEXT_SINK" '.[] | select(.info.props["node.name"] == $n and .info.props["media.class"] == "Audio/Sink") | .id' | head -n 1)
-    [[ -n "$wp_id" ]] && wpctl set-default "$wp_id" 2>/dev/null || true
+    if [[ -n "$wp_id" ]]; then
+        wpctl set-default "$wp_id" 2>/dev/null || true
+        wpctl set-mute "$wp_id" 0 2>/dev/null || true
+    fi
 fi
 
-# 4. Move all active application playback streams to the selected destination sink
-python3 -c "
+# 4. Move all active application playback streams ONLY if the physical sink changed
+if [[ -n "$CURRENT_SINK" && "$NEXT_SINK" != "$CURRENT_SINK" ]]; then
+    python3 -c "
 import subprocess, sys
 target_sink = sys.argv[1]
 
@@ -180,22 +197,28 @@ try:
 except Exception:
     pass
 " "$NEXT_SINK" 2>/dev/null || true
+fi
 
-# 4b. Hot-reload Gaming Audio (playback.peace_gaming) to track selected target sink
-if pw-link -l 2>/dev/null | grep -q "playback.peace_gaming"; then
-    for p in $(pw-link -l 2>/dev/null | grep -A 2 "playback.peace_gaming:output_FL" | grep "|->" | awk '{print $2}'); do
-        [[ -n "$p" ]] && pw-link -d "playback.peace_gaming:output_FL" "$p" 2>/dev/null || true
-    done
-    for p in $(pw-link -l 2>/dev/null | grep -A 2 "playback.peace_gaming:output_FR" | grep "|->" | awk '{print $2}'); do
-        [[ -n "$p" ]] && pw-link -d "playback.peace_gaming:output_FR" "$p" 2>/dev/null || true
-    done
+# 4b. Hot-reload Gaming Audio (playback.peace_gaming) ONLY when physical sink actually changes
+# This prevents audio drops/broken pipes in CS2 when cycling between internal speakers and 3.5mm jack
+if [[ -n "$CURRENT_SINK" && "$NEXT_SINK" != "$CURRENT_SINK" ]] && pw-link -l 2>/dev/null | grep -q "playback.peace_gaming"; then
     fl_port=$(pw-link -i 2>/dev/null | grep -E "^${NEXT_SINK}:(playback_FL|playback_1)" | head -n 1 || true)
     fr_port=$(pw-link -i 2>/dev/null | grep -E "^${NEXT_SINK}:(playback_FR|playback_2)" | head -n 1 || true)
     if [[ -n "$fl_port" && -n "$fr_port" ]]; then
         pw-link "playback.peace_gaming:output_FL" "$fl_port" 2>/dev/null || true
         pw-link "playback.peace_gaming:output_FR" "$fr_port" 2>/dev/null || true
+        for p in $(pw-link -l 2>/dev/null | grep -A 2 "playback.peace_gaming:output_FL" | grep "|->" | awk '{print $2}'); do
+            [[ -n "$p" && "$p" != "$fl_port" ]] && pw-link -d "playback.peace_gaming:output_FL" "$p" 2>/dev/null || true
+        done
+        for p in $(pw-link -l 2>/dev/null | grep -A 2 "playback.peace_gaming:output_FR" | grep "|->" | awk '{print $2}'); do
+            [[ -n "$p" && "$p" != "$fr_port" ]] && pw-link -d "playback.peace_gaming:output_FR" "$p" 2>/dev/null || true
+        done
     fi
 fi
+
+# 4c. Lock Gaming Audio volume at 100% so games never become quiet
+peace_id=$(pw-dump Node 2>/dev/null | jq -r '.[] | select(.info.props["node.name"] == "sink.peace_gaming") | .id' 2>/dev/null | head -n 1 || true)
+[[ -n "$peace_id" ]] && wpctl set-volume "$peace_id" 1.0 2>/dev/null || true
 
 # 5. Live sidetone reload for MicStudio (keeps sidetone cleanly synced across sink toggles)
 if [[ -f "$HOME/.config/micstudio/settings.toml" ]] && grep -q '^hear_voice = true' "$HOME/.config/micstudio/settings.toml"; then
