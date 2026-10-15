@@ -39,9 +39,11 @@ case "$GPU_MODE" in
         ;;
 esac
 
-# Audio routing to tactical gaming sink
-export PIPEWIRE_NODE="sink.peace_gaming"
-export PULSE_SINK="sink.peace_gaming"
+# Audio: follow the system default output (whatever Alt+Shift+o selected).
+# Do NOT force sink.peace_gaming here — forced routing bypasses the default
+# device and goes silent when the gaming chain is idle-suspended.
+unset PIPEWIRE_NODE
+unset PULSE_SINK
 
 # Blackwell (RTX 50-series) VKD3D memory alignment & stability fixes
 export VKD3D_CONFIG="no_upload_hvv,force_host_cached"
