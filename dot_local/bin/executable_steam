@@ -14,6 +14,9 @@ if [ "${STEAM_DGPU:-0}" != "1" ]; then
     unset NVD_BACKEND
 fi
 
+# Ensure all X11/Xwayland cursor aliases, fallback index.theme, and root cursor exist
+"$HOME/.local/bin/ensure-xcursor-fallbacks" >/dev/null 2>&1 || true
+
 # Desktop UI scaling for 16" 1920x1200 Display (scale 1.0 prevents CEF coordinate desync on XWayland)
 export GDK_SCALE=1
 if [ "${STEAM_FORCE_DESKTOPUI_SCALING:-}" = "1.35" ]; then

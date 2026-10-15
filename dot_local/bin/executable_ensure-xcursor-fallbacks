@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# ensure-xcursor-fallbacks: Self-healing X11/Xwayland & CEF Cursor Safeguard
+# ==============================================================================
+# Invariants enforced:
+# 1. User cursor themes in ~/.local/share/icons and ~/.icons have all standard X11
+#    cursor aliases (arrow, top_left_arrow, move, hand, X_cursor, ibeam, etc.)
+# 2. User cursor themes define 'Inherits=Adwaita' to prevent font-cursor fallback.
+# 3. Default cursor themes (~/.icons/default and ~/.local/share/icons/default)
+#    inherit active theme + Adwaita and have direct cursors symlinks.
+# 4. X11 root window has left_ptr set via xsetroot when DISPLAY is active.
+# ==============================================================================
+set -euo pipefail
+
+# 1. Enforce aliases and Adwaita inheritance on user cursor themes
+THEME_DIRS=(
+    "$HOME/.local/share/icons/phinger-cursors-gruvbox-material"
+    "$HOME/.local/share/icons/phinger-cursors-gruvbox-material-light"
+    "$HOME/.local/share/icons/Bibata-Modern-Classic"
+)
+
+# Standard alias map (alias:canonical)
+ALIASES=(
+    "arrow:default"
+    "top_left_arrow:default"
+    "X_cursor:default"
+    "move:default"
+    "hand:pointer"
+    "ibeam:xterm"
+    "all-resize:all-scroll"
+    "e-resize:right_side"
+    "w-resize:left_side"
+    "n-resize:top_side"
+    "s-resize:bottom_side"
+    "ne-resize:top_right_corner"
+    "nw-resize:top_left_corner"
+    "se-resize:bottom_right_corner"
+    "sw-resize:bottom_left_corner"
+    "grabbing:closedhand"
+    "grab:openhand"
+)
+
+for tdir in "${THEME_DIRS[@]}"; do
+    if [ -d "$tdir/cursors" ]; then
+        for entry in "${ALIASES[@]}"; do
+            alias_name="${entry%%:*}"
+            target_name="${entry##*:}"
+            if [ -e "$tdir/cursors/$target_name" ] && [ ! -e "$tdir/cursors/$alias_name" ]; then
+                ln -sf "$target_name" "$tdir/cursors/$alias_name"
+            fi
+        done
+
+        # Ensure Inherits=Adwaita in index.theme
+        idx="$tdir/index.theme"
+        if [ -f "$idx" ]; then
+            if grep -qE '^Inherits=' "$idx"; then
+                if ! grep -q 'Adwaita' "$idx"; then
+                    sed -i -E 's/^(Inherits=.*)$/\1,Adwaita/' "$idx"
+                fi
+            else
+                echo "Inherits=Adwaita" >> "$idx"
+            fi
+        fi
+    fi
+done
+
+# 2. Determine active cursor theme
+CURRENT_THEME="phinger-cursors-gruvbox-material-light"
+if [ -f "$HOME/.Xresources" ]; then
+    XR_THEME=$(grep -E '^Xcursor\.theme:' "$HOME/.Xresources" 2>/dev/null | awk '{print $2}' || true)
+    if [ -n "$XR_THEME" ]; then
+        CURRENT_THEME="$XR_THEME"
+    fi
+fi
+
+# 3. Maintain ~/.icons/default and ~/.local/share/icons/default
+for def_dir in "$HOME/.icons/default" "$HOME/.local/share/icons/default"; do
+    mkdir -p "$def_dir"
+    idx="$def_dir/index.theme"
+    cat <<EOF > "$idx"
+[Icon Theme]
+Inherits=$CURRENT_THEME,Adwaita
+EOF
+    # Symlink cursors directory directly to active theme cursors
+    if [ -d "$HOME/.local/share/icons/$CURRENT_THEME/cursors" ]; then
+        ln -sfn "../$CURRENT_THEME/cursors" "$def_dir/cursors"
+    fi
+done
+
+# 4. Initialize Xwayland root cursor
+if [ -n "${DISPLAY:-}" ] && command -v xsetroot >/dev/null 2>&1; then
+    xsetroot -cursor_name left_ptr 2>/dev/null || true
+fi
