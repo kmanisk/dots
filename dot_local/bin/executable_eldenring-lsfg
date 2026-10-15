@@ -50,12 +50,11 @@ export PROTON_USE_XALIA=0
 export PROTON_NO_XALIA=1
 export WINEDLLOVERRIDES="dinput8=b"
 
-# MangoHud overlay: Position at top-right with custom layout (i5 Blue -> RTX 5050 Green -> Memory -> FPS)
-export MANGOHUD=1
-export MANGOHUD_CONFIGFILE="/mnt/Games/NonSteamGames/ELDEN RING/Game/MangoHud.conf"
+# Keep outer MangoHud unset so python/runtime wrappers never load it; inner script passes it via user_settings.py
+unset MANGOHUD
 unset MANGOHUD_CONFIG
 
-# LSFG-VK 2.0: Enable the "Elden Ring" profile (2x multiplier -> 120 FPS)
+# LSFG-VK 2.0: Enable the "Elden Ring" profile (2x multiplier: 60 base x 2 -> 120 FPS)
 if [ "${ENABLE_LSFG:-1}" = "1" ] && [ "${DISABLE_LSFGVK:-0}" != "1" ]; then
     export LSFGVK_PROFILE="Elden Ring"
     unset DISABLE_LSFGVK
@@ -67,6 +66,7 @@ fi
 # Auto power profile: Set Performance mode while playing, restore Balanced on exit
 asusctl profile set Performance >/dev/null 2>&1 || true
 trap 'asusctl profile set Balanced >/dev/null 2>&1 || true' EXIT INT TERM
+trap '' HUP
 
 # Focus Workspace 4 automatically (Sway or i3 IPC)
 notify-send -i input-gaming "ELDEN RING" "Launching Elden Ring (120 FPS Locked)..." 2>/dev/null || true

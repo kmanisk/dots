@@ -25,12 +25,12 @@ if [ -f "$REG" ]; then
 fi
 
 case "$chosen" in
-    *"ELDEN RING + LSFG"*) ( eldenring-lsfg >/dev/null 2>&1 & ) ;;
-    *"Grand Theft Auto IV"*) ( env STEAM_DGPU=1 steam steam://rungameid/12210 >/dev/null 2>&1 & ) ;;
-    *"ER Randomizer"*)  ( eldenring-randomizer-gui >/dev/null 2>&1 & ) ;;
-    *"DARK SOULS III + LSFG"*) ( mangohud darksouls3-run >/dev/null 2>&1 & ) ;;
-    *"DS3 Randomizer"*) ( ds3-randomizer-gui >/dev/null 2>&1 & ) ;;
-    *"Steam"*)          ( env STEAM_DGPU=1 steam-workspace >/dev/null 2>&1 & ) ;;
-    *"Configure LSFG"*) ( ~/.local/bin/lsfg-vk-ui >/dev/null 2>&1 & ) ;;
+    *"ELDEN RING + LSFG"*) ( nohup eldenring-lsfg >/dev/null 2>&1 & ) ;;
+    *"Grand Theft Auto IV"*) ( nohup env STEAM_DGPU=1 steam steam://rungameid/12210 >/dev/null 2>&1 & ) ;;
+    *"ER Randomizer"*)  ( nohup eldenring-randomizer-gui >/dev/null 2>&1 & ) ;;
+    *"DARK SOULS III + LSFG"*) ( nohup mangohud darksouls3-run >/dev/null 2>&1 & ) ;;
+    *"DS3 Randomizer"*) ( nohup ds3-randomizer-gui >/dev/null 2>&1 & ) ;;
+    *"Steam"*)          ( nohup env STEAM_DGPU=1 steam-workspace >/dev/null 2>&1 & ) ;;
+    *"Configure LSFG"*) ( nohup ~/.local/bin/lsfg-vk-ui >/dev/null 2>&1 & ) ;;
     *"Kill"*)           killgame ;;
 esac

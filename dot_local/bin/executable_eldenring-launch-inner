@@ -10,8 +10,16 @@ export SteamGameId="1245620"
 export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_COMPAT_CLIENT_INSTALL_PATH:-$HOME/.local/share/Steam}"
 export STEAM_COMPAT_DATA_PATH="${STEAM_COMPAT_DATA_PATH:-$HOME/.local/share/Steam/steamapps/compatdata/2703476723}"
 
-export MANGOHUD=1
-export MANGOHUD_CONFIGFILE="/mnt/Games/NonSteamGames/ELDEN RING/Game/MangoHud.conf"
+# Ensure MangoHud is passed cleanly to Wine via Proton's user_settings.py
+# rather than exported in outer bash, so python3 never hooks MangoHud or dumps core on exit.
+mkdir -p "$STEAM_COMPAT_DATA_PATH"
+cat << 'EOF' > "$STEAM_COMPAT_DATA_PATH/user_settings.py"
+user_settings = {
+    "MANGOHUD": "1",
+    "MANGOHUD_CONFIGFILE": "/mnt/Games/NonSteamGames/ELDEN RING/Game/MangoHud.conf",
+}
+EOF
+unset MANGOHUD
 unset MANGOHUD_CONFIG
 export VKD3D_CONFIG="no_upload_hvv,force_host_cached"
 export PROTON_ENABLE_NVAPI=0
@@ -21,6 +29,7 @@ export WINEDLLOVERRIDES="dinput8=b"
 # Auto power profile: Set Performance mode while playing Elden Ring, restore Balanced on exit
 asusctl profile set Performance >/dev/null 2>&1 || true
 trap 'asusctl profile set Balanced >/dev/null 2>&1 || true' EXIT INT TERM
+trap '' HUP
 
 ME2_DIR="/mnt/Games/NonSteamGames/ELDEN RING/ModEngine2/ModEngine-2.1.0.0-win64"
 GAME_DIR="/mnt/Games/NonSteamGames/ELDEN RING/Game"
@@ -41,7 +50,14 @@ if [ -f "$ME2_DIR/modengine2_launcher.exe" ]; then
     if [ -f "$ME2_DIR/config_eldenringrandomizer.toml" ]; then
         CONFIG_NAME="config_eldenringrandomizer.toml"
     fi
-    exec "$PROTON_BIN" run "$ME2_DIR/modengine2_launcher.exe" -t er -c "$CONFIG_NAME" -p "Z:\\mnt\\Games\\NonSteamGames\\ELDEN RING\\Game\\eldenring.exe"
+    "$PROTON_BIN" run "$ME2_DIR/modengine2_launcher.exe" -t er -c "$CONFIG_NAME" -p "Z:\\mnt\\Games\\NonSteamGames\\ELDEN RING\\Game\\eldenring.exe"
+
+    # Ensure all wineserver processes in prefix have exited cleanly
+    WINESERVER="$(dirname "$PROTON_BIN")/files/bin/wineserver"
+    [ ! -x "$WINESERVER" ] && WINESERVER="$(dirname "$PROTON_BIN")/bin/wineserver"
+    if [ -x "$WINESERVER" ]; then
+        WINEPREFIX="$STEAM_COMPAT_DATA_PATH/pfx" "$WINESERVER" -w 2>/dev/null || true
+    fi
 else
     cd "$GAME_DIR"
     exec "$PROTON_BIN" run "$GAME_EXE" "$@"
