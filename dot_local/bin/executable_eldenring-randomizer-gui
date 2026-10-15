@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# eldenring-randomizer-gui: Launch Elden Ring Item & Enemy Randomizer GUI under Proton
+set -e
+
+unset SteamAppId
+unset SteamGameId
+
+export STEAM_COMPAT_CLIENT_INSTALL_PATH="$HOME/.local/share/Steam"
+export STEAM_COMPAT_DATA_PATH="$HOME/.local/share/Steam/steamapps/compatdata/2703476723"
+
+RAND_DIR="/mnt/Games/NonSteamGames/ELDEN RING/randomizer"
+if [ ! -d "$RAND_DIR" ]; then
+    echo "Error: Randomizer directory not found at $RAND_DIR" >&2
+    exit 1
+fi
+
+if [ -f "$HOME/.local/share/Steam/compatibilitytools.d/proton-cachyos-slr/proton" ]; then
+    PROTON_BIN="$HOME/.local/share/Steam/compatibilitytools.d/proton-cachyos-slr/proton"
+elif [ -f "$HOME/.local/share/Steam/compatibilitytools.d/GE-Proton11-7-x86_64/proton" ]; then
+    PROTON_BIN="$HOME/.local/share/Steam/compatibilitytools.d/GE-Proton11-7-x86_64/proton"
+else
+    PROTON_BIN="$HOME/.local/share/Steam/steamapps/common/Proton - Experimental/proton"
+fi
+
+notify-send -i input-gaming "Elden Ring Randomizer" "Launching Randomizer GUI..." 2>/dev/null || true
+
+# The game launcher writes MANGOHUD=1 into this prefix's user_settings.py.
+# That leaks into this .NET GUI: MangoHud hooks its Vulkan present path and
+# SIGABRTs it (free(): corrupted unsorted chunks). Park the file while the
+# GUI runs; the game launcher regenerates it on next boot anyway.
+USER_SETTINGS="$STEAM_COMPAT_DATA_PATH/user_settings.py"
+USER_SETTINGS_BAK="$STEAM_COMPAT_DATA_PATH/user_settings.py.gui-bak"
+if [ -f "$USER_SETTINGS" ]; then
+    cp "$USER_SETTINGS" "$USER_SETTINGS_BAK"
+    printf 'user_settings = {\n}\n' > "$USER_SETTINGS"
+fi
+restore_user_settings() {
+    if [ -f "$USER_SETTINGS_BAK" ]; then
+        mv "$USER_SETTINGS_BAK" "$USER_SETTINGS"
+    fi
+}
+trap restore_user_settings EXIT INT TERM
+
+cd "$RAND_DIR"
+"$PROTON_BIN" run "$RAND_DIR/EldenRingRandomizer.exe" "$@" &
+PID=$!
+
+(
+    for i in {1..30}; do
+        if [ -n "$SWAYSOCK" ] || [ -n "$WAYLAND_DISPLAY" ]; then
+            if swaymsg '[title="(?i).*randomizer.*"] focus' >/dev/null 2>&1; then
+                break
+            fi
+        fi
+        sleep 0.2
+    done
+) &
+
+wait "$PID" || true
