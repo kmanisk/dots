@@ -3,6 +3,35 @@
 # Interactive Region Screenshot -> Clipboard (X11 & Wayland)
 # Keybind: Win+S (clipboard only) / Win+Ctrl+S --save (file + clipboard)
 # ==============================================================================
+# Ensure Wayland / Sway / X11 environment is present (e.g. when spawned from xremap)
+if [ -z "${SWAYSOCK:-}" ] || [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    if command -v systemctl >/dev/null 2>&1; then
+        while IFS='=' read -r k v; do
+            case "$k" in
+                SWAYSOCK|WAYLAND_DISPLAY|DISPLAY|XDG_CURRENT_DESKTOP)
+                    [ -n "$v" ] && export "$k"="$v"
+                    ;;
+            esac
+        done < <(systemctl --user show-environment 2>/dev/null || true)
+    fi
+fi
+if [ -z "${SWAYSOCK:-}" ]; then
+    for s in /run/user/"$UID"/sway-ipc.*.sock /tmp/sway-ipc.*.sock; do
+        if [ -S "$s" ]; then
+            export SWAYSOCK="$s"
+            break
+        fi
+    done
+fi
+if [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    for w in "${XDG_RUNTIME_DIR:-/run/user/$UID}"/wayland-*; do
+        if [ -S "$w" ]; then
+            export WAYLAND_DISPLAY="$(basename "$w")"
+            break
+        fi
+    done
+fi
+
 export LD_LIBRARY_PATH="$HOME/.local/lib:${LD_LIBRARY_PATH:-}"
 export PATH="$HOME/.gemini/antigravity-cli/bin:$HOME/.local/bin:$PATH"
 export DISPLAY="${DISPLAY:-:0}"
@@ -27,7 +56,7 @@ if [ -n "${WAYLAND_DISPLAY:-}" ] || [ -n "${SWAYSOCK:-}" ]; then
     GEOM=$(slurp -b "$BG_COL" -c "$BORDER_COL" -s "$SEL_COL" 2>/dev/null)
     [ -z "$GEOM" ] && exit 0
     if grim -g "$GEOM" "$FILE" 2>/dev/null && [ -s "$FILE" ]; then
-        wl-copy -t image/png < "$FILE"
+        ( nohup wl-copy -t image/png < "$FILE" </dev/null >/dev/null 2>&1 & )
         if [ "$SAVE" = 1 ]; then
             notify-send -a "Screenshot" -t 1500 -i camera-photo "Screenshot" "Region saved to Screenshots + clipboard"
         else

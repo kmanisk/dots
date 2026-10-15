@@ -14,6 +14,35 @@ if ! flock -n 200; then
     exit 0
 fi
 
+# Ensure Wayland / Sway / X11 environment is present (e.g. when spawned from xremap)
+if [ -z "${SWAYSOCK:-}" ] || [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    if command -v systemctl >/dev/null 2>&1; then
+        while IFS='=' read -r k v; do
+            case "$k" in
+                SWAYSOCK|WAYLAND_DISPLAY|DISPLAY|XDG_CURRENT_DESKTOP)
+                    [ -n "$v" ] && export "$k"="$v"
+                    ;;
+            esac
+        done < <(systemctl --user show-environment 2>/dev/null || true)
+    fi
+fi
+if [ -z "${SWAYSOCK:-}" ]; then
+    for s in /run/user/"$UID"/sway-ipc.*.sock /tmp/sway-ipc.*.sock; do
+        if [ -S "$s" ]; then
+            export SWAYSOCK="$s"
+            break
+        fi
+    done
+fi
+if [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    for w in "${XDG_RUNTIME_DIR:-/run/user/$UID}"/wayland-*; do
+        if [ -S "$w" ]; then
+            export WAYLAND_DISPLAY="$(basename "$w")"
+            break
+        fi
+    done
+fi
+
 export LD_LIBRARY_PATH="$HOME/.local/lib:${LD_LIBRARY_PATH:-}"
 export PATH="$HOME/.gemini/antigravity-cli/bin:$HOME/.local/bin:$PATH"
 export DISPLAY="${DISPLAY:-:0}"
@@ -21,16 +50,19 @@ export DISPLAY="${DISPLAY:-:0}"
 SAVE=1
 [ "${1:-}" = "--clipboard-only" ] && SAVE=0
 
-# Detect workspace: Workspace 4 is strictly reserved for gaming
+# Detect workspace: Workspace 3 (Steam/Games) and Workspace 4 (Active Game) or active game window
 IS_GAMING=0
 CURRENT_WS=""
+FOCUSED_APP=""
 if [ -n "${SWAYSOCK:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
     CURRENT_WS="$(swaymsg -t get_workspaces 2>/dev/null | jq -r '.[] | select(.focused) | .name' 2>/dev/null || true)"
+    FOCUSED_APP="$(swaymsg -t get_tree 2>/dev/null | jq -r '.. | select(.focused? == true) | (.app_id // .window_properties.class // "")' 2>/dev/null || true)"
 else
     CURRENT_WS="$(i3-msg -t get_workspaces 2>/dev/null | jq -r '.[] | select(.focused) | .name' 2>/dev/null || true)"
+    FOCUSED_APP="$(i3-msg -t get_tree 2>/dev/null | jq -r '.. | select(.focused? == true) | (.window_properties.class // "")' 2>/dev/null || true)"
 fi
 
-if [ "$CURRENT_WS" = "4" ]; then
+if [ "$CURRENT_WS" = "4" ] || [ "$CURRENT_WS" = "3" ] || [[ "$FOCUSED_APP" =~ (steam_app|eldenring|cs2|gamescope|darksouls|GTAIV) ]]; then
     IS_GAMING=1
     SAVE=1
 fi
@@ -51,7 +83,7 @@ if [ -n "${WAYLAND_DISPLAY:-}" ] || [ -n "${SWAYSOCK:-}" ]; then
     if grim "$FILE" 2>/dev/null && [ -s "$FILE" ]; then
         flock -u 200 2>/dev/null || true
         exec 200>&-
-        wl-copy -t image/png < "$FILE"
+        ( nohup wl-copy -t image/png < "$FILE" </dev/null >/dev/null 2>&1 & )
         if [ "$SAVE" = 1 ]; then
             if [ "$IS_GAMING" = 1 ]; then
                 notify-send -a "Gaming Screenshot" -t 1500 -i camera-photo "Gaming Screenshot" "Saved to Screenshots/Gaming + clipboard"
@@ -63,6 +95,8 @@ if [ -n "${WAYLAND_DISPLAY:-}" ] || [ -n "${SWAYSOCK:-}" ]; then
             rm -f "$FILE"
         fi
     else
+        flock -u 200 2>/dev/null || true
+        exec 200>&-
         notify-send -a "Screenshot" -t 1500 -i dialog-error "Screenshot Failed"
         rm -f "$FILE"
     fi
@@ -70,7 +104,7 @@ else
     if maim "$FILE" 2>/dev/null && [ -s "$FILE" ]; then
         flock -u 200 2>/dev/null || true
         exec 200>&-
-        xclip -selection clipboard -t image/png -i "$FILE"
+        timeout 2s xclip -selection clipboard -t image/png -i "$FILE" 2>/dev/null || true
         if [ "$SAVE" = 1 ]; then
             if [ "$IS_GAMING" = 1 ]; then
                 notify-send -a "Gaming Screenshot" -t 1500 -i camera-photo "Gaming Screenshot" "Saved to Screenshots/Gaming + clipboard"
@@ -82,6 +116,8 @@ else
             rm -f "$FILE"
         fi
     else
+        flock -u 200 2>/dev/null || true
+        exec 200>&-
         notify-send -a "Screenshot" -t 1500 -i dialog-error "Screenshot Failed"
         rm -f "$FILE"
     fi

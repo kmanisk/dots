@@ -29,9 +29,9 @@ keymap:
         launch: ["/home/manisk/.local/bin/nvibrant-ctl", "up"]
       CapsLock-z:
         launch: ["/home/manisk/.local/bin/nvibrant-ctl", "down"]
-      # Fullscreen Screenshot (Workspace 4 saves to Screenshots/Gaming; Desktop copies to clipboard)
+      # Fullscreen Screenshot (Workspace 3 & 4 save to Screenshots/Gaming; other workspaces save to Screenshots + clipboard)
       CapsLock-Space:
-        launch: ["/home/manisk/.local/bin/screenshot-fullscreen", "--clipboard-only"]
+        launch: ["/home/manisk/.local/bin/screenshot-fullscreen"]
       # Emergency kill game (requires Shift to avoid accidental reload collision in FPS games)
       CapsLock-Shift-r:
         launch: ["/home/manisk/.local/bin/killgame"]
