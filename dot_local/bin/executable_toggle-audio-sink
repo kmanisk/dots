@@ -184,6 +184,7 @@ try:
             node_name = ""
             media_name = ""
             app_name = ""
+            bin_name = ""
             is_virtual = False
         elif "node.name =" in line_s:
             node_name = line_s.split("=")[1].strip(" \"")
@@ -191,6 +192,8 @@ try:
             media_name = line_s.split("=")[1].strip(" \"")
         elif "application.name =" in line_s:
             app_name = line_s.split("=")[1].strip(" \"")
+        elif "application.process.binary =" in line_s:
+            bin_name = line_s.split("=")[1].strip(" \"")
         elif "node.virtual = \"true\"" in line_s:
             is_virtual = True
         elif not line_s and current_id:
@@ -200,7 +203,9 @@ try:
                 or node_name.startswith(("effect_output.", "playback."))
                 or any(x in node_name for x in ["ghelper", "dusky", "rnnoise", "peace_gaming"])
             )
-            if not is_internal and "cs2" not in app_name:
+            combo_name = (app_name + " " + bin_name + " " + media_name + " " + node_name).lower()
+            is_comp_game = any(g in combo_name for g in ["cs2", "counter-strike", "tslgame", "pubg", "r5apex", "apex legends", "discovery.exe", "the finals", "huntgame"])
+            if not is_internal and not is_comp_game:
                 subprocess.run(["pactl", "move-sink-input", current_id, target_sink], stderr=subprocess.DEVNULL)
             current_id = None
 except Exception:

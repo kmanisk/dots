@@ -39,6 +39,53 @@ get_node_id() {
     pw-dump Node 2>/dev/null | jq -r '.[] | select(.info.props["node.name"] == "effect_input.Dolby_Speaker") | .id' 2>/dev/null | head -n 1
 }
 
+ALSA_SINK="alsa_output.pci-0000_00_1f.3.analog-stereo"
+
+get_active_physical_target() {
+    local def_sink
+    def_sink=$(pactl get-default-sink 2>/dev/null || echo "")
+
+    if [[ "$def_sink" =~ ^bluez_output ]]; then
+        echo "bluetooth:$def_sink"
+        return
+    fi
+
+    if [[ "$def_sink" == "$ALSA_SINK" ]]; then
+        local active_port
+        active_port=$(pactl list sinks 2>/dev/null | awk -v s="$ALSA_SINK" '$0 ~ "Name: " s {f=1} f && /Active Port:/ {print $3; exit}' || echo "analog-output-speaker")
+        if [[ "$active_port" == "analog-output-headphones" ]]; then
+            echo "headphones:$ALSA_SINK"
+        else
+            echo "speaker:$ALSA_SINK"
+        fi
+        return
+    fi
+
+    local meta_sink
+    meta_sink=$(pw-metadata -n default 0 default.audio.sink 2>/dev/null | grep -o '"name": "[^"]*"' | cut -d'"' -f4 || echo "")
+    if [[ "$meta_sink" =~ ^bluez_output ]]; then
+        echo "bluetooth:$meta_sink"
+        return
+    fi
+
+    local bt_sink
+    bt_sink=$(pactl list short sinks 2>/dev/null | awk '{print $2}' | grep '^bluez_output' | head -n 1 || echo "")
+    if [[ -n "$bt_sink" ]]; then
+        if pw-link -l 2>/dev/null | grep -q "$bt_sink"; then
+            echo "bluetooth:$bt_sink"
+            return
+        fi
+    fi
+
+    local alsa_port
+    alsa_port=$(pactl list sinks 2>/dev/null | awk -v s="$ALSA_SINK" '$0 ~ "Name: " s {f=1} f && /Active Port:/ {print $3; exit}' || echo "analog-output-speaker")
+    if [[ "$alsa_port" == "analog-output-headphones" ]]; then
+        echo "headphones:$ALSA_SINK"
+    else
+        echo "speaker:$ALSA_SINK"
+    fi
+}
+
 apply_voicing() {
     local voicing="$1"
     local title=""
@@ -86,6 +133,12 @@ apply_voicing() {
         exit 1
     fi
 
+    # Capture active physical target BEFORE restarting service
+    local active_info
+    active_info=$(get_active_physical_target)
+    local active_type="${active_info%%:*}"
+    local active_sink="${active_info#*:}"
+
     # Deploy active runner profile
     ln -sf "$CONF_BASE/$voicing/runner.conf" "$CONF_BASE/active-runner.conf"
     cp "$src_conf" "$CONF_BASE/active.conf"
@@ -112,27 +165,163 @@ apply_voicing() {
     pw-link effect_output.Dolby_Speaker:output_FL alsa_output.pci-0000_00_1f.3.analog-stereo:playback_FL 2>/dev/null || true
     pw-link effect_output.Dolby_Speaker:output_FR alsa_output.pci-0000_00_1f.3.analog-stereo:playback_FR 2>/dev/null || true
 
-    # Ensure filter state matches current enabled preference
+    # Pin DSP filter input volumes at 100% unmute so filter headrooms never clip or attenuate
     if [[ -n "$nid" ]]; then
         wpctl set-volume "$nid" 1.0 2>/dev/null || true
         wpctl set-mute "$nid" 0 2>/dev/null || true
+    fi
+    local hp_id
+    hp_id=$(pw-dump Node 2>/dev/null | jq -r '.[] | select(.info.props["node.name"] == "effect_input.Dolby_Headphones") | .id' 2>/dev/null | head -n 1 || true)
+    if [[ -n "$hp_id" && "$hp_id" != "null" ]]; then
+        wpctl set-volume "$hp_id" 1.0 2>/dev/null || true
+        wpctl set-mute "$hp_id" 0 2>/dev/null || true
+    fi
+    local peace_id
+    peace_id=$(pw-dump Node 2>/dev/null | jq -r '.[] | select(.info.props["node.name"] == "sink.peace_gaming") | .id' 2>/dev/null | head -n 1 || true)
+    if [[ -n "$peace_id" && "$peace_id" != "null" ]]; then
+        wpctl set-volume "$peace_id" 1.0 2>/dev/null || true
+        wpctl set-mute "$peace_id" 0 2>/dev/null || true
+    fi
+
+    # Set user enabled preference in metadata
+    if [[ -n "$nid" ]]; then
         if is_user_enabled; then
             pw-metadata -n filters "$nid" filter.smart.user_disabled false 2>/dev/null || true
-            pw-metadata -n filters "$nid" filter.smart.disabled false 2>/dev/null || true
         else
             pw-metadata -n filters "$nid" filter.smart.user_disabled true 2>/dev/null || true
-            pw-metadata -n filters "$nid" filter.smart.disabled true 2>/dev/null || true
         fi
     fi
 
-    # Ensure default sink is not captured by virtual or gaming sinks
-    local cur_sink
-    cur_sink=$(pactl get-default-sink 2>/dev/null || echo "")
-    if [[ "$cur_sink" == "sink.peace_gaming" || "$cur_sink" =~ effect_input ]]; then
-        local alsa_dev="alsa_output.pci-0000_00_1f.3.analog-stereo"
-        pactl set-default-sink "$alsa_dev" 2>/dev/null || true
-        pw-metadata -n default 0 default.audio.sink "{\"name\":\"$alsa_dev\"}" 2>/dev/null || true
-        pw-metadata -n default 0 default.configured.audio.sink "{\"name\":\"$alsa_dev\"}" 2>/dev/null || true
+    # Dynamically preserve active target routing (Never hijack Bluetooth or Wired Headphones!)
+    case "$active_type" in
+        bluetooth)
+            pactl set-default-sink "$active_sink" 2>/dev/null || true
+            pw-metadata -n default 0 default.audio.sink "{\"name\":\"$active_sink\"}" 2>/dev/null || true
+            pw-metadata -n default 0 default.configured.audio.sink "{\"name\":\"$active_sink\"}" 2>/dev/null || true
+
+            # Strictly disable Dolby_Speaker FIR on Bluetooth
+            [[ -n "$nid" ]] && pw-metadata -n filters "$nid" filter.smart.disabled true 2>/dev/null || true
+            # Enable Dolby_Headphones targeting Bluetooth
+            [[ -n "$hp_id" && "$hp_id" != "null" ]] && pw-metadata -n filters "$hp_id" filter.smart.disabled false 2>/dev/null || true
+
+            # Keep application streams on Bluetooth (skip competitive games & internal nodes)
+            python3 -c '
+import subprocess, sys
+target_sink = sys.argv[1]
+try:
+    pactl_inputs = subprocess.check_output(["pactl", "list", "sink-inputs"], text=True)
+    current_id = None
+    node_name, media_name, app_name, bin_name = "", "", "", ""
+    is_virtual = False
+    for line in pactl_inputs.split("\n") + [""]:
+        line_s = line.strip()
+        if line_s.startswith("Sink Input #"):
+            current_id = line_s.split("#")[1].strip()
+            node_name, media_name, app_name, bin_name = "", "", "", ""
+            is_virtual = False
+        elif "node.name =" in line_s:
+            node_name = line_s.split("=")[1].strip(" \"")
+        elif "media.name =" in line_s:
+            media_name = line_s.split("=")[1].strip(" \"")
+        elif "application.name =" in line_s:
+            app_name = line_s.split("=")[1].strip(" \"")
+        elif "application.process.binary =" in line_s:
+            bin_name = line_s.split("=")[1].strip(" \"")
+        elif "node.virtual = \"true\"" in line_s:
+            is_virtual = True
+        elif not line_s and current_id:
+            is_internal = is_virtual or node_name.startswith(("effect_output.", "playback.")) or any(x in node_name for x in ["ghelper", "dusky", "rnnoise", "peace_gaming"])
+            combo_name = (app_name + " " + bin_name + " " + media_name + " " + node_name).lower()
+            is_comp_game = any(g in combo_name for g in ["cs2", "counter-strike", "tslgame", "pubg", "r5apex", "apex legends", "discovery.exe", "the finals", "huntgame"])
+            if not is_internal and not is_comp_game:
+                subprocess.run(["pactl", "move-sink-input", current_id, target_sink], stderr=subprocess.DEVNULL)
+            current_id = None
+except Exception:
+    pass
+' "$active_sink" 2>/dev/null || true
+            ;;
+
+        headphones)
+            pactl set-sink-port "$ALSA_SINK" "analog-output-headphones" 2>/dev/null || true
+            pactl set-default-sink "$ALSA_SINK" 2>/dev/null || true
+            pw-metadata -n default 0 default.audio.sink "{\"name\":\"$ALSA_SINK\"}" 2>/dev/null || true
+            pw-metadata -n default 0 default.configured.audio.sink "{\"name\":\"$ALSA_SINK\"}" 2>/dev/null || true
+
+            # Strictly disable Dolby_Speaker FIR on Wired Headphones
+            [[ -n "$nid" ]] && pw-metadata -n filters "$nid" filter.smart.disabled true 2>/dev/null || true
+            # Enable Dolby_Headphones targeting ALSA
+            [[ -n "$hp_id" && "$hp_id" != "null" ]] && pw-metadata -n filters "$hp_id" filter.smart.disabled false 2>/dev/null || true
+            ;;
+
+        speaker|*)
+            pactl set-sink-port "$ALSA_SINK" "analog-output-speaker" 2>/dev/null || true
+            pactl set-default-sink "$ALSA_SINK" 2>/dev/null || true
+            pw-metadata -n default 0 default.audio.sink "{\"name\":\"$ALSA_SINK\"}" 2>/dev/null || true
+            pw-metadata -n default 0 default.configured.audio.sink "{\"name\":\"$ALSA_SINK\"}" 2>/dev/null || true
+
+            if is_user_enabled; then
+                [[ -n "$nid" ]] && pw-metadata -n filters "$nid" filter.smart.disabled false 2>/dev/null || true
+            else
+                [[ -n "$nid" ]] && pw-metadata -n filters "$nid" filter.smart.disabled true 2>/dev/null || true
+            fi
+            # Disable Dolby_Headphones on Internal Speakers
+            [[ -n "$hp_id" && "$hp_id" != "null" ]] && pw-metadata -n filters "$hp_id" filter.smart.disabled true 2>/dev/null || true
+
+            # Move application streams to speaker (skip competitive games & internal nodes)
+            python3 -c '
+import subprocess, sys
+target_sink = sys.argv[1]
+try:
+    pactl_inputs = subprocess.check_output(["pactl", "list", "sink-inputs"], text=True)
+    current_id = None
+    node_name, media_name, app_name, bin_name = "", "", "", ""
+    is_virtual = False
+    for line in pactl_inputs.split("\n") + [""]:
+        line_s = line.strip()
+        if line_s.startswith("Sink Input #"):
+            current_id = line_s.split("#")[1].strip()
+            node_name, media_name, app_name, bin_name = "", "", "", ""
+            is_virtual = False
+        elif "node.name =" in line_s:
+            node_name = line_s.split("=")[1].strip(" \"")
+        elif "media.name =" in line_s:
+            media_name = line_s.split("=")[1].strip(" \"")
+        elif "application.name =" in line_s:
+            app_name = line_s.split("=")[1].strip(" \"")
+        elif "application.process.binary =" in line_s:
+            bin_name = line_s.split("=")[1].strip(" \"")
+        elif "node.virtual = \"true\"" in line_s:
+            is_virtual = True
+        elif not line_s and current_id:
+            is_internal = is_virtual or node_name.startswith(("effect_output.", "playback.")) or any(x in node_name for x in ["ghelper", "dusky", "rnnoise", "peace_gaming"])
+            combo_name = (app_name + " " + bin_name + " " + media_name + " " + node_name).lower()
+            is_comp_game = any(g in combo_name for g in ["cs2", "counter-strike", "tslgame", "pubg", "r5apex", "apex legends", "discovery.exe", "the finals", "huntgame"])
+            if not is_internal and not is_comp_game:
+                subprocess.run(["pactl", "move-sink-input", current_id, target_sink], stderr=subprocess.DEVNULL)
+            current_id = None
+except Exception:
+    pass
+' "$ALSA_SINK" 2>/dev/null || true
+            ;;
+    esac
+
+    # Ensure playback.peace_gaming links to active physical target
+    if pw-link -l 2>/dev/null | grep -q "playback.peace_gaming"; then
+        local peace_target="$active_sink"
+        [[ -z "$peace_target" ]] && peace_target="$ALSA_SINK"
+        local fl_port fr_port
+        fl_port=$(pw-link -i 2>/dev/null | grep -E "^${peace_target}:(playback_FL|playback_1)" | head -n 1 || true)
+        fr_port=$(pw-link -i 2>/dev/null | grep -E "^${peace_target}:(playback_FR|playback_2)" | head -n 1 || true)
+        if [[ -n "$fl_port" && -n "$fr_port" ]]; then
+            pw-link "playback.peace_gaming:output_FL" "$fl_port" 2>/dev/null || true
+            pw-link "playback.peace_gaming:output_FR" "$fr_port" 2>/dev/null || true
+            for p in $(pw-link -l 2>/dev/null | grep -A 2 "playback.peace_gaming:output_FL" | grep "|->" | awk '{print $2}'); do
+                [[ -n "$p" && "$p" != "$fl_port" ]] && pw-link -d "playback.peace_gaming:output_FL" "$p" 2>/dev/null || true
+            done
+            for p in $(pw-link -l 2>/dev/null | grep -A 2 "playback.peace_gaming:output_FR" | grep "|->" | awk '{print $2}'); do
+                [[ -n "$p" && "$p" != "$fr_port" ]] && pw-link -d "playback.peace_gaming:output_FR" "$p" 2>/dev/null || true
+            done
+        fi
     fi
 
     echo -e "\033[1;32m[spk]\033[0m Switched to \033[1m$title\033[0m profile (transparent on internal speakers)."
@@ -162,6 +351,12 @@ dsp_on() {
     nid=$(get_node_id)
     if [[ -n "$nid" ]]; then
         pw-metadata -n filters "$nid" filter.smart.user_disabled false 2>/dev/null || true
+        local active_info active_type
+        active_info=$(get_active_physical_target)
+        active_type="${active_info%%:*}"
+        if [[ "$active_type" == "speaker" ]]; then
+            pw-metadata -n filters "$nid" filter.smart.disabled false 2>/dev/null || true
+        fi
     fi
     sed -i '/^ENABLED=/d' "$STATE_FILE"
     echo "ENABLED=true" >> "$STATE_FILE"

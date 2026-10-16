@@ -63,49 +63,13 @@ fi
 apply_preset() {
     local voicing="$1"
 
-    # 1. Ensure DSP is enabled
+    # Ensure DSP is enabled if previously bypassed
     if [[ -f "$STATE_FILE" ]] && grep -q "^ENABLED=false" "$STATE_FILE" 2>/dev/null; then
         "$SPK_BIN" on >/dev/null 2>&1 || true
     fi
 
-    # 2. Switch the active profile via spk
+    # Switch the active profile via spk (spk handles dynamic target preservation, competitive games, and routing)
     "$SPK_BIN" "$voicing"
-
-    # 3. Ensure default sink is set to internal speakers
-    pactl set-default-sink "$ALSA_SINK" 2>/dev/null || true
-    pw-metadata -n default 0 default.audio.sink "{\"name\":\"$ALSA_SINK\"}" 2>/dev/null || true
-    pw-metadata -n default 0 default.configured.audio.sink "{\"name\":\"$ALSA_SINK\"}" 2>/dev/null || true
-
-    # 4. Seamlessly re-link active playback streams into newly restarted DSP node
-    python3 -c "
-import subprocess
-try:
-    pactl_inputs = subprocess.check_output(['pactl', 'list', 'sink-inputs'], text=True)
-    current_id = None
-    node_name = ''
-    app_name = ''
-    is_virtual = False
-    for line in pactl_inputs.split('\n') + ['']:
-        line_s = line.strip()
-        if line_s.startswith('Sink Input #'):
-            current_id = line_s.split('#')[1].strip()
-            node_name = ''
-            app_name = ''
-            is_virtual = False
-        elif 'node.name =' in line_s:
-            node_name = line_s.split('=')[1].strip(' \"')
-        elif 'application.name =' in line_s:
-            app_name = line_s.split('=')[1].strip(' \"')
-        elif 'node.virtual = \"true\"' in line_s:
-            is_virtual = True
-        elif not line_s and current_id:
-            is_internal = is_virtual or node_name.startswith(('effect_output.', 'playback.')) or any(x in node_name for x in ['ghelper', 'dusky', 'rnnoise', 'peace_gaming'])
-            if not is_internal and 'cs2' not in app_name:
-                subprocess.run(['pactl', 'move-sink-input', current_id, '$ALSA_SINK'], stderr=subprocess.DEVNULL)
-            current_id = None
-except Exception:
-    pass
-" 2>/dev/null || true
 }
 
 case "$chosen" in

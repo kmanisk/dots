@@ -6,17 +6,43 @@
 set -euo pipefail
 
 ALSA_SINK="alsa_output.pci-0000_00_1f.3.analog-stereo"
-DEF_SINK=$(pactl get-default-sink 2>/dev/null || echo "")
-TARGET_SINK="$DEF_SINK"
 
-# Guardrail: Never allow volume controls to target virtual filter or gaming sinks
-if [[ -z "$TARGET_SINK" || "$TARGET_SINK" == "sink.peace_gaming" || "$TARGET_SINK" =~ effect_input ]]; then
-    BT_SINK=$(pactl list short sinks 2>/dev/null | awk '$2 ~ /^bluez_output/ {print $2; exit}' || true)
-    if [[ -n "$BT_SINK" && "$DEF_SINK" =~ bluez ]]; then
-        TARGET_SINK="$BT_SINK"
-    else
-        TARGET_SINK="$ALSA_SINK"
+resolve_physical_sink() {
+    local def_sink
+    def_sink=$(pactl get-default-sink 2>/dev/null || echo "")
+
+    if [[ "$def_sink" =~ ^bluez_output ]]; then
+        echo "$def_sink"
+        return
     fi
+
+    if [[ "$def_sink" == "$ALSA_SINK" ]]; then
+        echo "$def_sink"
+        return
+    fi
+
+    local meta_sink
+    meta_sink=$(pw-metadata -n default 0 default.audio.sink 2>/dev/null | grep -o '"name": "[^"]*"' | cut -d'"' -f4 || echo "")
+    if [[ "$meta_sink" =~ ^bluez_output || "$meta_sink" == "$ALSA_SINK" ]]; then
+        echo "$meta_sink"
+        return
+    fi
+
+    local bt_sink
+    bt_sink=$(pactl list short sinks 2>/dev/null | awk '$2 ~ /^bluez_output/ {print $2; exit}' || true)
+    if [[ -n "$bt_sink" ]] && pw-link -l 2>/dev/null | grep -q "$bt_sink"; then
+        echo "$bt_sink"
+        return
+    fi
+
+    echo "$ALSA_SINK"
+}
+
+TARGET_SINK=$(resolve_physical_sink)
+CUR_DEF_SINK=$(pactl get-default-sink 2>/dev/null || echo "")
+
+# If default sink was erroneously captured by a virtual sink, heal it immediately
+if [[ "$CUR_DEF_SINK" != "$TARGET_SINK" && ("$CUR_DEF_SINK" == "sink.peace_gaming" || "$CUR_DEF_SINK" =~ effect_input || -z "$CUR_DEF_SINK") ]]; then
     pactl set-default-sink "$TARGET_SINK" 2>/dev/null || true
     pw-metadata -n default 0 default.audio.sink "{\"name\":\"$TARGET_SINK\"}" 2>/dev/null || true
     pw-metadata -n default 0 default.configured.audio.sink "{\"name\":\"$TARGET_SINK\"}" 2>/dev/null || true
@@ -38,12 +64,14 @@ case "${1:-status}" in
         ;;
 esac
 
-# Guardrail: Pin DSP filter input at 100% volume so DSP never attenuates or boosts prematurely
-dsp_id=$(pw-dump Node 2>/dev/null | jq -r '.[] | select(.info.props["node.name"] == "effect_input.Dolby_Speaker") | .id' 2>/dev/null | head -n 1 || true)
-if [[ -n "$dsp_id" && "$dsp_id" != "null" ]]; then
-    wpctl set-volume "$dsp_id" 1.0 2>/dev/null || true
-    wpctl set-mute "$dsp_id" 0 2>/dev/null || true
-fi
+# Guardrail: Pin all DSP filter inputs at 100% volume so DSP never attenuates or boosts prematurely
+for node_name in "effect_input.Dolby_Speaker" "effect_input.Dolby_Headphones" "sink.peace_gaming"; do
+    nid=$(pw-dump Node 2>/dev/null | jq -r --arg n "$node_name" '.[] | select(.info.props["node.name"] == $n) | .id' 2>/dev/null | head -n 1 || true)
+    if [[ -n "$nid" && "$nid" != "null" ]]; then
+        wpctl set-volume "$nid" 1.0 2>/dev/null || true
+        wpctl set-mute "$nid" 0 2>/dev/null || true
+    fi
+done
 
 # Suppress OSD notification completely on Workspace 4 (Gaming workspace) to prevent FPS drops
 CURRENT_WS=""

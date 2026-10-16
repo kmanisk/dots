@@ -129,7 +129,14 @@ local function syncFilterStates()
   if spk_node then
     local bound_id = spk_node["bound-id"]
     if bound_id then
-      local should_disable_spk = not is_internal_speaker
+      local user_val = meta_filters:find(bound_id, "filter.smart.user_disabled")
+      local is_user_disabled = false
+      if user_val ~= nil then
+        local ju = Json.Raw(user_val)
+        if ju:is_boolean() then is_user_disabled = ju:parse() end
+      end
+
+      local should_disable_spk = (not is_internal_speaker) or is_user_disabled
       local cur_val = meta_filters:find(bound_id, "filter.smart.disabled")
       local cur_disabled = false
       if cur_val ~= nil then
@@ -228,7 +235,17 @@ bt_sink_om:connect("installed", function() syncFilterStates() end)
 bt_sink_om:connect("object-added", function() syncFilterStates() end)
 bt_sink_om:connect("object-removed", function() syncFilterStates() end)
 
-metadata_filters_om:connect("installed", function() syncFilterStates() end)
+metadata_filters_om:connect("installed", function()
+  local meta = metadata_filters_om:lookup()
+  if meta then
+    meta:connect("changed", function(m, subject, key, type, value)
+      if key == "filter.smart.user_disabled" then
+        syncFilterStates()
+      end
+    end)
+    syncFilterStates()
+  end
+end)
 metadata_default_om:connect("installed", function()
   local meta = metadata_default_om:lookup()
   if meta then
