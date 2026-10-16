@@ -45,13 +45,7 @@ case "$GPU_MODE" in
         ;;
 esac
 
-# Audio routing to tactical gaming sink
-export PIPEWIRE_NODE="sink.peace_gaming"
-export PULSE_SINK="sink.peace_gaming"
-
-# Native explicit sync (linux-drm-syncobj-v1) enabled by default on NVIDIA 555+ / wlroots 0.18.
-# Forcing __NV_DISABLE_EXPLICIT_SYNC=1 causes Vulkan swapchain timeouts (VK_TIMEOUT) and NVRM NV_ERR_NO_MEMORY leaks.
-[ "${CS2_DISABLE_EXPLICIT_SYNC:-0}" = "1" ] && export __NV_DISABLE_EXPLICIT_SYNC=1
+export __NV_DISABLE_EXPLICIT_SYNC=1
 export ENABLE_VKBASALT=0
 
 if [ -z "${WAYLAND_DISPLAY:-}" ]; then
@@ -77,15 +71,10 @@ case "$CS2_MODE" in
         export SDL_VIDEO_DRIVER=wayland SDL_VIDEODRIVER=wayland
         export SDL_VIDEO_WAYLAND_SCALE_TO_DISPLAY=1
         export SDL_VIDEO_WAYLAND_MODE_SCALING=stretch
-        unset SDL_VIDEO_WAYLAND_ALLOW_TEARING
-        # Strip gameoverlayrenderer.so to prevent Steam CEF overlay crash loop on Wayland/NVIDIA
-        if [ -n "${LD_PRELOAD:-}" ]; then
-            export LD_PRELOAD="$(echo "$LD_PRELOAD" | tr ':' '\n' | grep -v 'gameoverlayrenderer' | paste -sd ':' -)"
-        fi
         ;;
     x11|gamescope)
         export SDL_VIDEO_DRIVER=x11 SDL_VIDEODRIVER=x11
-        unset SDL_VIDEO_WAYLAND_SCALE_TO_DISPLAY SDL_VIDEO_WAYLAND_MODE_SCALING SDL_VIDEO_WAYLAND_ALLOW_TEARING
+        unset SDL_VIDEO_WAYLAND_SCALE_TO_DISPLAY SDL_VIDEO_WAYLAND_MODE_SCALING
         ;;
     *) echo "Unknown CS2_MODE=$CS2_MODE" >&2; exit 1 ;;
 esac
@@ -99,32 +88,13 @@ if [ $# -eq 0 ] || [[ "$1" == -* ]]; then
 fi
 [ $# -eq 0 ] && { echo "ERROR: Could not locate CS2 executable." >&2; exit 1; }
 
-# Pin to P-cores with elevated main thread priority
-CS2_FLAGS=(-vulkan -fullscreen -w "$TARGET_W" -h "$TARGET_H" -threads 7 -mainthreadpriority 2 -nojoy -novid +fps_max 0 +fps_max_ui 0 +clientport "${CS2_CLIENTPORT:-27006}")
-
-# --- asusctl performance profile switching ---
-if command -v asusctl >/dev/null 2>&1; then
-    asusctl profile set Performance >/dev/null 2>&1 || true
-fi
-
-# --- ananicy-cpp conflict resolution (AGENTS.md Rule 2) ---
-ananicy_was_active=0
-if systemctl is-active --quiet ananicy-cpp.service 2>/dev/null; then
-    ananicy_was_active=1
-    sudo systemctl stop ananicy-cpp.service 2>/dev/null || true
-fi
+CS2_FLAGS=(-vulkan -fullscreen -w "$TARGET_W" -h "$TARGET_H" -threads 7 -mainthreadpriority 2 -nojoy -novid +fps_max 0 +fps_max_ui 0)
 
 # --- sway gaming mode ---
 if [ -n "${SWAYSOCK:-}" ] && command -v swaymsg >/dev/null 2>&1; then
     swaymsg 'mode "gaming"' >/dev/null 2>&1 || true
 fi
 cleanup() {
-    if command -v asusctl >/dev/null 2>&1; then
-        asusctl profile set Balanced >/dev/null 2>&1 || true
-    fi
-    if [ "$ananicy_was_active" = "1" ]; then
-        sudo systemctl start ananicy-cpp.service 2>/dev/null || true
-    fi
     if [ -n "${SWAYSOCK:-}" ] && command -v swaymsg >/dev/null 2>&1; then
         swaymsg 'mode "default"' >/dev/null 2>&1 || true
     fi
