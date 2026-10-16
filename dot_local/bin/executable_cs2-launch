@@ -90,11 +90,20 @@ fi
 
 CS2_FLAGS=(-vulkan -fullscreen -w "$TARGET_W" -h "$TARGET_H" -threads 7 -mainthreadpriority 2 -nojoy -novid +fps_max 0 +fps_max_ui 0)
 
+# --- asusctl performance profile switching ---
+if command -v asusctl >/dev/null 2>&1; then
+    PREV_ASUS_PROFILE="$(asusctl profile get 2>/dev/null | awk '/Active profile:/ {print $3}' || echo "Balanced")"
+    asusctl profile set Performance >/dev/null 2>&1 || true
+fi
+
 # --- sway gaming mode ---
 if [ -n "${SWAYSOCK:-}" ] && command -v swaymsg >/dev/null 2>&1; then
     swaymsg 'mode "gaming"' >/dev/null 2>&1 || true
 fi
 cleanup() {
+    if command -v asusctl >/dev/null 2>&1 && [ -n "${PREV_ASUS_PROFILE:-}" ]; then
+        asusctl profile set "${PREV_ASUS_PROFILE}" >/dev/null 2>&1 || true
+    fi
     if [ -n "${SWAYSOCK:-}" ] && command -v swaymsg >/dev/null 2>&1; then
         swaymsg 'mode "default"' >/dev/null 2>&1 || true
     fi
