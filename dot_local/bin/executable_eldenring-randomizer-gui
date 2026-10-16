@@ -41,19 +41,30 @@ restore_user_settings() {
 }
 trap restore_user_settings EXIT INT TERM
 
+# Ensure any conflicting regulation.bin merge path is sanitized before GUI starts
+USER_CONFIG="$STEAM_COMPAT_DATA_PATH/pfx/drive_c/users/steamuser/AppData/Local/EldenRingRandomizer.Avalo/EldenRingRandomizer.Avalo_Path_5df4s1zegbqq0bsjmcnsfjevs5vnljjp/1.0.0.0/user.config"
+if [ -f "$USER_CONFIG" ]; then
+    sed -i 's|<setting name="Mod" serializeAs="String"><value>[^<]*</value></setting>|<setting name="Mod" serializeAs="String"><value></value></setting>|' "$USER_CONFIG"
+fi
+
 cd "$RAND_DIR"
 "$PROTON_BIN" run "$RAND_DIR/EldenRingRandomizer.exe" "$@" &
 PID=$!
 
 (
-    for i in {1..30}; do
+    for i in {1..60}; do
         if [ -n "$SWAYSOCK" ] || [ -n "$WAYLAND_DISPLAY" ]; then
             if swaymsg '[title="(?i).*randomizer.*"] move position center, floating enable, focus' >/dev/null 2>&1; then
                 break
             fi
         fi
-        sleep 0.2
+        sleep 0.25
     done
 ) &
 
 wait "$PID" || true
+
+ME2_DIR="/mnt/Games/NonSteamGames/ELDEN RING/ModEngine2/ModEngine-2.1.0.0-win64"
+if [ -f "$RAND_DIR/config_eldenringrandomizer.toml" ] && [ -d "$ME2_DIR" ]; then
+    ln -sf "$RAND_DIR/config_eldenringrandomizer.toml" "$ME2_DIR/config_eldenringrandomizer.toml"
+fi
