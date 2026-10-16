@@ -51,6 +51,10 @@ apply_voicing() {
             voicing="tuned"
             title="Tuned (Focused & Natural)"
             ;;
+        tuned-old|tuned_old|old-tuned|old_tuned|to)
+            voicing="tuned-old"
+            title="Tuned (Old / Wide)"
+            ;;
         dynamic|dyn)
             voicing="dynamic"
             title="Dynamic (DAX3 Default)"
@@ -69,7 +73,7 @@ apply_voicing() {
             ;;
         *)
             echo "Error: Unknown profile '$voicing'." >&2
-            echo "Available Profiles: tuned (t), custom (c), dynamic (dyn), music (mu), balanced (b), experimental (exp)" >&2
+            echo "Available Profiles: tuned (t), tuned-old (to), custom (c), dynamic (dyn), music (mu), balanced (b), experimental (exp)" >&2
             exit 1
             ;;
     esac
@@ -213,7 +217,8 @@ show_help() {
     echo ""
     echo "Core Speaker Profiles:"
     echo "  tuned, t       Switch to Tuned mode (Refined slev 1.30, max_amp 2.5, -2dB preamp)"
-    echo "  custom, c, old Switch to Custom 2 mode (Dolby Access user preset / Old Tuned, +11.6dB presence)"
+    echo "  tuned-old, to  Switch to Tuned (Old) mode (Wide slev 1.82, max_amp 2.5, -2dB preamp)"
+    echo "  custom, c      Switch to Custom 2 mode (Dolby Access user preset, +11.6dB presence)"
     echo "  dynamic, dyn   Switch to Dynamic mode (Windows DAX3 default, Leveler + Spatial)"
     echo "  music, mu      Switch to Music mode (DAX3 Audiophile, uncompressed dynamics)"
     echo "  balanced, b    Switch to Balanced voicing (reference DAX3 baseline)"
@@ -230,11 +235,14 @@ show_help() {
 
 # Subcommand dispatch
 case "${1:-}" in
-    custom|c|old|old-tuned|old_tuned)
+    custom|c)
         apply_voicing "custom"
         ;;
     tuned|t)
         apply_voicing "tuned"
+        ;;
+    tuned-old|tuned_old|old-tuned|old_tuned|to)
+        apply_voicing "tuned-old"
         ;;
     dynamic|dyn)
         apply_voicing "dynamic"

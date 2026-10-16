@@ -95,11 +95,11 @@ keymap:
       # Window Close & Kill (Sway native integration):
       # - CapsLock + q: Graceful close (without reaching down to physical Super)
       # - CapsLock + BackSpace: Graceful close (two-handed)
-      # - CapsLock + Shift + q / CapsLock + Shift + BackSpace: Force kill (= Win+Space)
+      # - CapsLock + Shift + q / CapsLock + Shift + BackSpace: Force kill
       CapsLock-q: Super-q
       CapsLock-BackSpace: Super-BackSpace
-      CapsLock-Shift-q: Super-Space
-      CapsLock-Shift-BackSpace: Super-Space
+      CapsLock-Shift-q: Super-Shift-q
+      CapsLock-Shift-BackSpace: Super-Shift-BackSpace
 
       # Process Killer Menu (formerly Win+Shift+e):
       CapsLock-w:

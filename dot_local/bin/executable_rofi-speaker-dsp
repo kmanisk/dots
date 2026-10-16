@@ -23,7 +23,8 @@ fi
 
 options=(
     "Tuned (Focused & Natural)"
-    "Custom 2 (Dolby Access / Old Tuned)"
+    "Tuned (Old / Wide)"
+    "Custom 2 (Dolby Access)"
     "Dynamic (DAX3 Default)"
     "Music (DAX3 Audiophile)"
     "Balanced (Linux)"
@@ -34,12 +35,13 @@ selected_label="Tuned (Focused & Natural)"
 selected_index=0
 
 case "$ACTIVE_VOICING" in
-    tuned)        selected_label="Tuned (Focused & Natural)";           selected_index=0 ;;
-    custom)       selected_label="Custom 2 (Dolby Access / Old Tuned)"; selected_index=1 ;;
-    dynamic)      selected_label="Dynamic (DAX3 Default)";              selected_index=2 ;;
-    music)        selected_label="Music (DAX3 Audiophile)";              selected_index=3 ;;
-    balanced)     selected_label="Balanced (Linux)";                    selected_index=4 ;;
-    experimental) selected_label="Experimental (Harmonic Bass)";        selected_index=5 ;;
+    tuned)        selected_label="Tuned (Focused & Natural)";   selected_index=0 ;;
+    tuned-old)    selected_label="Tuned (Old / Wide)";          selected_index=1 ;;
+    custom)       selected_label="Custom 2 (Dolby Access)";     selected_index=2 ;;
+    dynamic)      selected_label="Dynamic (DAX3 Default)";      selected_index=3 ;;
+    music)        selected_label="Music (DAX3 Audiophile)";      selected_index=4 ;;
+    balanced)     selected_label="Balanced (Linux)";            selected_index=5 ;;
+    experimental) selected_label="Experimental (Harmonic Bass)";selected_index=6 ;;
 esac
 
 # Launch minimal selector (fuzzel on Wayland/Sway, clean rofi on X11)
@@ -85,11 +87,14 @@ apply_preset() {
 }
 
 case "$chosen" in
+    *"Tuned (Focused"*)
+        apply_preset "tuned"
+        ;;
+    *"Tuned (Old"*)
+        apply_preset "tuned-old"
+        ;;
     *"Custom 2"*)
         apply_preset "custom"
-        ;;
-    *"Tuned"*)
-        apply_preset "tuned"
         ;;
     *"Dynamic"*)
         apply_preset "dynamic"
