@@ -44,8 +44,8 @@ add_target() {
 
 # Internal speakers & wired headphones (both always cyclable)
 if pactl list short sinks 2>/dev/null | grep -q "$ALSA_SINK"; then
-    add_target "alsa:speaker" "$ALSA_SINK" "analog-output-speaker" "Laptop Speakers (Dolby DSP)" "audio-speakers" "🔊 "
-    add_target "alsa:headphones" "$ALSA_SINK" "analog-output-headphones" "Wired Headphones (3.5mm)" "audio-headphones" "🎧 "
+    add_target "alsa:speaker" "$ALSA_SINK" "analog-output-speaker" "Laptop Speakers (Dolby DSP)" "audio-speakers" ""
+    add_target "alsa:headphones" "$ALSA_SINK" "analog-output-headphones" "Wired Headphones (3.5mm)" "audio-headphones" ""
 fi
 
 # External devices (Bluetooth, USB, HDMI)
@@ -54,14 +54,14 @@ while read -r sink_name; do
     desc=$(pactl list sinks 2>/dev/null | grep -A 25 "Name: $sink_name" | grep -m 1 "Description:" | sed 's/^[ \t]*Description:[ \t]*//' || echo "$sink_name")
     if [[ "$sink_name" == bluez_output* ]]; then
         if [[ "$desc" =~ [Ss]peaker|[Bb]ox|[Bb]ar ]]; then
-            add_target "$sink_name" "$sink_name" "" "$desc" "audio-speakers" "🔊 "
+            add_target "$sink_name" "$sink_name" "" "$desc" "audio-speakers" ""
         else
-            add_target "$sink_name" "$sink_name" "" "$desc" "audio-headphones" "🎧 "
+            add_target "$sink_name" "$sink_name" "" "$desc" "audio-headphones" ""
         fi
     elif [[ "$sink_name" == *hdmi* || "$sink_name" == *displayport* ]]; then
-        add_target "$sink_name" "$sink_name" "" "$desc" "video-display" "🖥️ "
+        add_target "$sink_name" "$sink_name" "" "$desc" "video-display" ""
     elif [[ "$sink_name" == *usb* ]]; then
-        add_target "$sink_name" "$sink_name" "" "$desc" "audio-card" "🔌 "
+        add_target "$sink_name" "$sink_name" "" "$desc" "audio-card" ""
     fi
 done < <(pactl list short sinks 2>/dev/null | awk '{print $2}' | grep -v -E "ghelper|dusky|dolby|rnnoise|null|dummy|peace|effect_")
 
@@ -164,39 +164,48 @@ fi
 
 # 4. Move all active application playback streams ONLY if the physical sink changed
 if [[ -n "$CURRENT_SINK" && "$NEXT_SINK" != "$CURRENT_SINK" ]]; then
-    python3 -c "
+    python3 -c '
 import subprocess, sys
 target_sink = sys.argv[1]
 
 try:
-    pactl_inputs = subprocess.check_output(['pactl', 'list', 'sink-inputs'], text=True)
+    pactl_inputs = subprocess.check_output(["pactl", "list", "sink-inputs"], text=True)
     current_id = None
-    node_name = ''
-    media_name = ''
-    app_name = ''
+    node_name = ""
+    media_name = ""
+    app_name = ""
+    is_virtual = False
     
-    lines = pactl_inputs.split('\n') + ['']
+    lines = pactl_inputs.split("\n") + [""]
     for line in lines:
         line_s = line.strip()
-        if line_s.startswith('Sink Input #'):
-            current_id = line_s.split('#')[1].strip()
-            node_name = ''
-            media_name = ''
-            app_name = ''
-        elif 'node.name =' in line_s:
-            node_name = line_s.split('=')[1].strip(' \"')
-        elif 'media.name =' in line_s:
-            media_name = line_s.split('=')[1].strip(' \"')
-        elif 'application.name =' in line_s:
-            app_name = line_s.split('=')[1].strip(' \"')
+        if line_s.startswith("Sink Input #"):
+            current_id = line_s.split("#")[1].strip()
+            node_name = ""
+            media_name = ""
+            app_name = ""
+            is_virtual = False
+        elif "node.name =" in line_s:
+            node_name = line_s.split("=")[1].strip(" \"")
+        elif "media.name =" in line_s:
+            media_name = line_s.split("=")[1].strip(" \"")
+        elif "application.name =" in line_s:
+            app_name = line_s.split("=")[1].strip(" \"")
+        elif "node.virtual = \"true\"" in line_s:
+            is_virtual = True
         elif not line_s and current_id:
-            skip = any(x in (node_name + media_name) for x in ['ghelper', 'dusky', 'dolby', 'Dolby', 'rnnoise', 'effect_', 'peace'])
-            if not skip and 'cs2' not in app_name:
-                subprocess.run(['pactl', 'move-sink-input', current_id, target_sink], stderr=subprocess.DEVNULL)
+            # Skip internal virtual sinks and PipeWire DSP nodes
+            is_internal = (
+                is_virtual
+                or node_name.startswith(("effect_output.", "playback."))
+                or any(x in node_name for x in ["ghelper", "dusky", "rnnoise", "peace_gaming"])
+            )
+            if not is_internal and "cs2" not in app_name:
+                subprocess.run(["pactl", "move-sink-input", current_id, target_sink], stderr=subprocess.DEVNULL)
             current_id = None
 except Exception:
     pass
-" "$NEXT_SINK" 2>/dev/null || true
+' "$NEXT_SINK" 2>/dev/null || true
 fi
 
 # 4b. Hot-reload Gaming Audio (playback.peace_gaming) ONLY when physical sink actually changes
@@ -227,4 +236,4 @@ elif pw-link -l 2>/dev/null | grep -A 2 "ghelper-audio:capture_MONO" | grep -q "
     mic hear on >/dev/null 2>&1 || true
 fi
 
-notify-send -t 2000 -i "$NEXT_ICON" "Audio Output Switched" "${NEXT_PREFIX}${NEXT_DESC}" 2>/dev/null &
+notify-send -t 2000 -i "$NEXT_ICON" "Audio Output Switched" "$NEXT_DESC" 2>/dev/null &

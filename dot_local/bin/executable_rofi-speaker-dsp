@@ -77,9 +77,35 @@ apply_preset() {
     pw-metadata -n default 0 default.configured.audio.sink "{\"name\":\"$ALSA_SINK\"}" 2>/dev/null || true
 
     # 4. Seamlessly re-link active playback streams into newly restarted DSP node
-    for input_id in $(pactl list short sink-inputs 2>/dev/null | awk '{print $1}'); do
-        pactl move-sink-input "$input_id" "$ALSA_SINK" 2>/dev/null || true
-    done
+    python3 -c "
+import subprocess
+try:
+    pactl_inputs = subprocess.check_output(['pactl', 'list', 'sink-inputs'], text=True)
+    current_id = None
+    node_name = ''
+    app_name = ''
+    is_virtual = False
+    for line in pactl_inputs.split('\n') + ['']:
+        line_s = line.strip()
+        if line_s.startswith('Sink Input #'):
+            current_id = line_s.split('#')[1].strip()
+            node_name = ''
+            app_name = ''
+            is_virtual = False
+        elif 'node.name =' in line_s:
+            node_name = line_s.split('=')[1].strip(' \"')
+        elif 'application.name =' in line_s:
+            app_name = line_s.split('=')[1].strip(' \"')
+        elif 'node.virtual = \"true\"' in line_s:
+            is_virtual = True
+        elif not line_s and current_id:
+            is_internal = is_virtual or node_name.startswith(('effect_output.', 'playback.')) or any(x in node_name for x in ['ghelper', 'dusky', 'rnnoise', 'peace_gaming'])
+            if not is_internal and 'cs2' not in app_name:
+                subprocess.run(['pactl', 'move-sink-input', current_id, '$ALSA_SINK'], stderr=subprocess.DEVNULL)
+            current_id = None
+except Exception:
+    pass
+" 2>/dev/null || true
 }
 
 case "$chosen" in
