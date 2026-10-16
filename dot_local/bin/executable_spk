@@ -12,12 +12,12 @@ STATE_FILE="$STATE_DIR/state.conf"
 
 mkdir -p "$STATE_DIR"
 if [[ ! -f "$STATE_FILE" ]]; then
-    echo "ACTIVE_VOICING=dynamic" > "$STATE_FILE"
+    echo "ACTIVE_VOICING=tuned" > "$STATE_FILE"
     echo "ENABLED=true" >> "$STATE_FILE"
 fi
 
 get_active_voicing() {
-    grep "^ACTIVE_VOICING=" "$STATE_FILE" 2>/dev/null | cut -d'=' -f2 || echo "dynamic"
+    grep "^ACTIVE_VOICING=" "$STATE_FILE" 2>/dev/null | cut -d'=' -f2 || echo "tuned"
 }
 
 is_user_enabled() {
@@ -65,11 +65,11 @@ apply_voicing() {
             ;;
         experimental|exp|e)
             voicing="experimental"
-            title="Experimental (Calf Bypassed)"
+            title="Experimental (Harmonic Bass & Tuned)"
             ;;
         *)
             echo "Error: Unknown profile '$voicing'." >&2
-            echo "Available Profiles: custom (c), dynamic (dyn), music (mu), balanced (b)" >&2
+            echo "Available Profiles: tuned (t), custom (c), dynamic (dyn), music (mu), balanced (b), experimental (exp)" >&2
             exit 1
             ;;
     esac

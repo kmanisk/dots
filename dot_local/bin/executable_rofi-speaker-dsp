@@ -16,28 +16,30 @@ if [[ ! -x "$SPK_BIN" ]]; then
 fi
 
 # Determine current active voicing to pre-select
-ACTIVE_VOICING="dynamic"
+ACTIVE_VOICING="tuned"
 if [[ -f "$STATE_FILE" ]]; then
-    ACTIVE_VOICING=$(grep "^ACTIVE_VOICING=" "$STATE_FILE" 2>/dev/null | cut -d'=' -f2 || echo "dynamic")
+    ACTIVE_VOICING=$(grep "^ACTIVE_VOICING=" "$STATE_FILE" 2>/dev/null | cut -d'=' -f2 || echo "tuned")
 fi
 
 options=(
-    "Custom 2 (Dolby Access)"
     "Tuned (Focused & Natural)"
+    "Custom 2 (Dolby Access)"
     "Dynamic (DAX3 Default)"
     "Music (DAX3 Audiophile)"
     "Balanced (Linux)"
+    "Experimental (Harmonic Bass)"
 )
 
-selected_label="Custom 2 (Dolby Access)"
+selected_label="Tuned (Focused & Natural)"
 selected_index=0
 
 case "$ACTIVE_VOICING" in
-    custom)   selected_label="Custom 2 (Dolby Access)";    selected_index=0 ;;
-    tuned)    selected_label="Tuned (Focused & Natural)";  selected_index=1 ;;
-    dynamic)  selected_label="Dynamic (DAX3 Default)";     selected_index=2 ;;
-    music)    selected_label="Music (DAX3 Audiophile)";     selected_index=3 ;;
-    balanced) selected_label="Balanced (Linux)";           selected_index=4 ;;
+    tuned)        selected_label="Tuned (Focused & Natural)";     selected_index=0 ;;
+    custom)       selected_label="Custom 2 (Dolby Access)";       selected_index=1 ;;
+    dynamic)      selected_label="Dynamic (DAX3 Default)";        selected_index=2 ;;
+    music)        selected_label="Music (DAX3 Audiophile)";        selected_index=3 ;;
+    balanced)     selected_label="Balanced (Linux)";              selected_index=4 ;;
+    experimental) selected_label="Experimental (Harmonic Bass)";  selected_index=5 ;;
 esac
 
 # Launch minimal selector (fuzzel on Wayland/Sway, clean rofi on X11)
@@ -97,5 +99,8 @@ case "$chosen" in
         ;;
     *"Balanced"*)
         apply_preset "balanced"
+        ;;
+    *"Experimental"*)
+        apply_preset "experimental"
         ;;
 esac
