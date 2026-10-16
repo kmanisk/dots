@@ -48,7 +48,7 @@ PID=$!
 (
     for i in {1..30}; do
         if [ -n "$SWAYSOCK" ] || [ -n "$WAYLAND_DISPLAY" ]; then
-            if swaymsg '[title="(?i).*randomizer.*"] focus' >/dev/null 2>&1; then
+            if swaymsg '[title="(?i).*randomizer.*"] move position center, floating enable, focus' >/dev/null 2>&1; then
                 break
             fi
         fi
