@@ -212,11 +212,12 @@ show_help() {
     echo "Usage: spk [command]"
     echo ""
     echo "Core Speaker Profiles:"
-    echo "  custom, c      Switch to Custom 2 mode (Dolby Access user preset, +11.6dB presence)"
     echo "  tuned, t       Switch to Tuned mode (Refined slev 1.30, max_amp 2.5, -2dB preamp)"
+    echo "  custom, c, old Switch to Custom 2 mode (Dolby Access user preset / Old Tuned, +11.6dB presence)"
     echo "  dynamic, dyn   Switch to Dynamic mode (Windows DAX3 default, Leveler + Spatial)"
     echo "  music, mu      Switch to Music mode (DAX3 Audiophile, uncompressed dynamics)"
     echo "  balanced, b    Switch to Balanced voicing (reference DAX3 baseline)"
+    echo "  experimental, exp Switch to Experimental mode (Harmonic Bass & Tuned)"
     echo ""
     echo "Controls:"
     echo "  status         Display detailed DSP telemetry, routing & filter state"
@@ -229,7 +230,7 @@ show_help() {
 
 # Subcommand dispatch
 case "${1:-}" in
-    custom|c)
+    custom|c|old|old-tuned|old_tuned)
         apply_voicing "custom"
         ;;
     tuned|t)

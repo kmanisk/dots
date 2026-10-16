@@ -1,24 +1,33 @@
 #!/usr/bin/env bash
-# ==============================================================================
-# force-kill-window: Force terminate the currently focused window
-# ==============================================================================
-export DISPLAY="${DISPLAY:-:0}"
-export PATH="$HOME/.local/bin:$PATH"
+# force-kill-window: Force terminate the currently focused window (Win+Space)
+# 1. SIGKILL the focused client's PID (no mercy for frozen games)
+# 2. sway kill to drop the container even if PID lookup fails
+export SWAYSOCK="${SWAYSOCK:-$(ls /run/user/$UID/sway-ipc.*.sock 2>/dev/null | head -n1)}"
 
-# Send immediate kill via WM IPC (Sway or i3)
-if [ -n "$SWAYSOCK" ]; then
-    swaymsg -q 'kill' 2>/dev/null
+if command -v swaymsg >/dev/null 2>&1; then
+    # Focused PID via sway tree (works for Wayland + XWayland)
+    PID=$(swaymsg -t get_tree 2>/dev/null | python3 -c '
+import json,sys
+try:
+    tree=json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+def find(n):
+    if n.get("focused"):
+        return n
+    for c in n.get("nodes",[])+n.get("floating_nodes",[]):
+        r=find(c)
+        if r: return r
+    return None
+n=find(tree)
+if n and n.get("pid"):
+    print(n["pid"])
+')
+    if [ -n "$PID" ] && [ "$PID" -gt 1 ] 2>/dev/null; then
+        kill -KILL "$PID" 2>/dev/null || true
+    fi
+    swaymsg -q 'kill' 2>/dev/null || true
     exit 0
 fi
 
-i3-msg -q 'kill' 2>/dev/null
-
-# Also fallback to xdotool windowkill for stubborn/frozen clients
-WID=$(xdotool getwindowfocus 2>/dev/null)
-if [ -n "$WID" ] && [ "$WID" -ne 0 ]; then
-    # Double check it's not the desktop/root window
-    ROOT=$(xdotool getactivewindow 2>/dev/null)
-    if [ -n "$ROOT" ]; then
-        xdotool windowkill "$WID" 2>/dev/null || true
-    fi
-fi
+i3-msg -q 'kill' 2>/dev/null || true
