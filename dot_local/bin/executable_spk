@@ -47,6 +47,10 @@ apply_voicing() {
             voicing="custom"
             title="Custom 2 (Dolby Access)"
             ;;
+        tuned|t)
+            voicing="tuned"
+            title="Tuned (Focused & Natural)"
+            ;;
         dynamic|dyn)
             voicing="dynamic"
             title="Dynamic (DAX3 Default)"
@@ -200,6 +204,7 @@ show_help() {
     echo ""
     echo "Core Speaker Profiles:"
     echo "  custom, c      Switch to Custom 2 mode (Dolby Access user preset, +11.6dB presence)"
+    echo "  tuned, t       Switch to Tuned mode (Refined slev 1.30, max_amp 2.5, -2dB preamp)"
     echo "  dynamic, dyn   Switch to Dynamic mode (Windows DAX3 default, Leveler + Spatial)"
     echo "  music, mu      Switch to Music mode (DAX3 Audiophile, uncompressed dynamics)"
     echo "  balanced, b    Switch to Balanced voicing (reference DAX3 baseline)"
@@ -217,6 +222,9 @@ show_help() {
 case "${1:-}" in
     custom|c)
         apply_voicing "custom"
+        ;;
+    tuned|t)
+        apply_voicing "tuned"
         ;;
     dynamic|dyn)
         apply_voicing "dynamic"
