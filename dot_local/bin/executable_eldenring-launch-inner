@@ -47,7 +47,9 @@ fi
 if [ -f "$ME2_DIR/modengine2_launcher.exe" ]; then
     cd "$ME2_DIR"
     CONFIG_NAME="config_eldenring.toml"
-    if [ -f "$ME2_DIR/config_eldenringrandomizer.toml" ]; then
+    if [ -f "$ME2_DIR/config_eldenringfogrando.toml" ]; then
+        CONFIG_NAME="config_eldenringfogrando.toml"
+    elif [ -f "$ME2_DIR/config_eldenringrandomizer.toml" ]; then
         CONFIG_NAME="config_eldenringrandomizer.toml"
     fi
     # Hand-managed stack (randomizer + hud, optionally imco). Preferred when present;
