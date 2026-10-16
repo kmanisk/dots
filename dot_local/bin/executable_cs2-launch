@@ -26,8 +26,7 @@ case "$GPU_MODE" in
     AsusMuxDgpu)
         unset __NV_PRIME_RENDER_OFFLOAD
         unset __GLX_VENDOR_LIBRARY_NAME
-        unset __VK_LAYER_NV_optimus
-        unset __VK_LAYER_NV_OPTIMUS
+        export __VK_LAYER_NV_optimus=NVIDIA_only
         export LIBVA_DRIVER_NAME=nvidia
         ;;
     Integrated)
@@ -78,7 +77,7 @@ case "$CS2_MODE" in
         export SDL_VIDEO_DRIVER=wayland SDL_VIDEODRIVER=wayland
         export SDL_VIDEO_WAYLAND_SCALE_TO_DISPLAY=1
         export SDL_VIDEO_WAYLAND_MODE_SCALING=stretch
-        export SDL_VIDEO_WAYLAND_ALLOW_TEARING=1
+        unset SDL_VIDEO_WAYLAND_ALLOW_TEARING
         # Strip gameoverlayrenderer.so to prevent Steam CEF overlay crash loop on Wayland/NVIDIA
         if [ -n "${LD_PRELOAD:-}" ]; then
             export LD_PRELOAD="$(echo "$LD_PRELOAD" | tr ':' '\n' | grep -v 'gameoverlayrenderer' | paste -sd ':' -)"
@@ -100,9 +99,8 @@ if [ $# -eq 0 ] || [[ "$1" == -* ]]; then
 fi
 [ $# -eq 0 ] && { echo "ERROR: Could not locate CS2 executable." >&2; exit 1; }
 
-# Pin to 6 physical P-cores; remove -mainthreadpriority 2 to prevent thread starvation/watchdog stalls
-# Pin to 6 physical P-cores; remove -mainthreadpriority 2 to prevent thread starvation/watchdog stalls
-CS2_FLAGS=(-vulkan -fullscreen -w "$TARGET_W" -h "$TARGET_H" -threads 6 -nojoy -novid +fps_max 0 +fps_max_ui 0 +clientport "${CS2_CLIENTPORT:-27006}")
+# Pin to P-cores with elevated main thread priority
+CS2_FLAGS=(-vulkan -fullscreen -w "$TARGET_W" -h "$TARGET_H" -threads 7 -mainthreadpriority 2 -nojoy -novid +fps_max 0 +fps_max_ui 0 +clientport "${CS2_CLIENTPORT:-27006}")
 
 # --- asusctl performance profile switching ---
 if command -v asusctl >/dev/null 2>&1; then
