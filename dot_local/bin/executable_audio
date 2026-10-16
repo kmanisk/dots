@@ -210,7 +210,7 @@ cmd_doctor() {
     echo -n ":: 5. Double Processing:      "
     local double_proc=0
     # Check if peace_gaming links into Dolby_Speaker
-    if pw-link -l 2>/dev/null | grep -A 2 "playback.peace_gaming" | grep -q "effect_input.Dolby_Speaker"; then
+    if pw-link -l 2>/dev/null | grep -A 2 "^playback\.peace_gaming:" | grep -q "effect_input\.Dolby_Speaker"; then
         echo -e "\n   ${RED}[FAIL]${RESET} Double processing detected: sink.peace_gaming is feeding Dolby_Speaker!"
         double_proc=1
         ((errors++))

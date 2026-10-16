@@ -100,9 +100,9 @@ apply_voicing() {
 
     # Wait for node to register and ensure output links
     local nid=""
-    for _ in {1..10}; do
+    for _ in {1..20}; do
         nid=$(get_node_id)
-        if [[ -n "$nid" ]]; then
+        if [[ -n "$nid" ]] && pw-link -o 2>/dev/null | grep -q "effect_output.Dolby_Speaker:output_FL"; then
             break
         fi
         sleep 0.05

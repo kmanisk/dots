@@ -71,14 +71,10 @@ apply_preset() {
     # 2. Switch the active profile via spk
     "$SPK_BIN" "$voicing"
 
-    # 3. If default sink was on Gaming Audio (raw bypass), return to internal speakers
-    local def_sink
-    def_sink=$(pactl get-default-sink 2>/dev/null || echo "")
-    if [[ "$def_sink" == "sink.peace_gaming" ]]; then
-        pactl set-default-sink "$ALSA_SINK" 2>/dev/null || true
-        pw-metadata -n default 0 default.audio.sink "{\"name\":\"$ALSA_SINK\"}" 2>/dev/null || true
-        pw-metadata -n default 0 default.configured.audio.sink "{\"name\":\"$ALSA_SINK\"}" 2>/dev/null || true
-    fi
+    # 3. Ensure default sink is set to internal speakers
+    pactl set-default-sink "$ALSA_SINK" 2>/dev/null || true
+    pw-metadata -n default 0 default.audio.sink "{\"name\":\"$ALSA_SINK\"}" 2>/dev/null || true
+    pw-metadata -n default 0 default.configured.audio.sink "{\"name\":\"$ALSA_SINK\"}" 2>/dev/null || true
 
     # 4. Seamlessly re-link active playback streams into newly restarted DSP node
     for input_id in $(pactl list short sink-inputs 2>/dev/null | awk '{print $1}'); do
