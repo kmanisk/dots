@@ -16,6 +16,8 @@ xdg-desktop-portal-wlr
 xdg-terminal-exec
 brave-origin-bin
 alacritty
+foot
+swayimg
 pamixer
 brightnessctl
 pavucontrol
