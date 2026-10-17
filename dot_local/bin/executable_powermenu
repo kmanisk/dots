@@ -14,11 +14,11 @@ save_session() {
 }
 
 # Options with icons
-shutdown='⏻   Shutdown'
-reboot='   Restart'
-lock='󰌾   Lock Screen'
-suspend='󰤄   Suspend'
-logout='󰍃   Logout'
+shutdown='⏻ Shutdown'
+reboot=' Restart'
+lock='󰌾 Lock Screen'
+suspend='󰤄 Suspend'
+logout='󰍃 Logout'
 
 # Prompt via Rofi
 chosen=$(printf "%s\n%s\n%s\n%s\n%s" "$shutdown" "$reboot" "$lock" "$suspend" "$logout" | rofi \
@@ -27,7 +27,6 @@ chosen=$(printf "%s\n%s\n%s\n%s\n%s" "$shutdown" "$reboot" "$lock" "$suspend" "$
     -sort \
     -sorting-method "fzf" \
     -matching "fuzzy" \
-    -p "Power Menu" \
     -theme ~/.config/rofi/powermenu.rasi \
     -selected-row 0)
 
