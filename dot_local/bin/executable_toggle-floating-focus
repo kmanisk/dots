@@ -14,7 +14,7 @@ floating_focused=$(swaymsg -t get_tree --raw 2>/dev/null \
     | jq -r '[.. | objects | select(.type? == "floating_con" and .focused? == true)] | length')
 
 if [ "${floating_focused:-0}" -gt 0 ]; then
-    swaymsg focus tiling >/dev/null 2>&1
+    swaymsg focus tiling >/dev/null 2>&1 || true
 else
-    swaymsg focus floating >/dev/null 2>&1
+    swaymsg focus floating >/dev/null 2>&1 || true
 fi
