@@ -1,119 +1,64 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# volume-notify: Fast volume adjustment with native Dunst OSD notification
-# Guardrailed: Always controls physical sink, never virtual DSP or gaming sinks
+# volume-notify: Ultra-fast volume adjustment with native Dunst OSD notification
+# Optimized for zero-latency response on Bluetooth and internal speakers
 # ==============================================================================
 set -euo pipefail
 
-ALSA_SINK="alsa_output.pci-0000_00_1f.3.analog-stereo"
-
-resolve_physical_sink() {
-    local def_sink
-    def_sink=$(pactl get-default-sink 2>/dev/null || echo "")
-
-    if [[ "$def_sink" =~ ^bluez_output ]]; then
-        echo "$def_sink"
-        return
-    fi
-
-    if [[ "$def_sink" == "$ALSA_SINK" ]]; then
-        echo "$def_sink"
-        return
-    fi
-
-    local meta_sink
-    meta_sink=$(pw-metadata -n default 0 default.audio.sink 2>/dev/null | grep -o '"name": "[^"]*"' | cut -d'"' -f4 || echo "")
-    if [[ "$meta_sink" =~ ^bluez_output || "$meta_sink" == "$ALSA_SINK" ]]; then
-        echo "$meta_sink"
-        return
-    fi
-
-    local bt_sink
-    bt_sink=$(pactl list short sinks 2>/dev/null | awk '$2 ~ /^bluez_output/ {print $2; exit}' || true)
-    if [[ -n "$bt_sink" ]] && pw-link -l 2>/dev/null | grep -q "$bt_sink"; then
-        echo "$bt_sink"
-        return
-    fi
-
-    echo "$ALSA_SINK"
-}
-
-TARGET_SINK=$(resolve_physical_sink)
-CUR_DEF_SINK=$(pactl get-default-sink 2>/dev/null || echo "")
-
-# If default sink was erroneously captured by a virtual sink, heal it immediately
-if [[ "$CUR_DEF_SINK" != "$TARGET_SINK" && ("$CUR_DEF_SINK" == "sink.peace_gaming" || "$CUR_DEF_SINK" =~ effect_input || -z "$CUR_DEF_SINK") ]]; then
-    pactl set-default-sink "$TARGET_SINK" 2>/dev/null || true
-    pw-metadata -n default 0 default.audio.sink "{\"name\":\"$TARGET_SINK\"}" 2>/dev/null || true
-    pw-metadata -n default 0 default.configured.audio.sink "{\"name\":\"$TARGET_SINK\"}" 2>/dev/null || true
+# 1. Fast heal if default sink was captured by an isolated gaming or filter sink
+DEF_SINK=$(pactl get-default-sink 2>/dev/null || echo "")
+if [[ "$DEF_SINK" == "sink.peace_gaming" || "$DEF_SINK" =~ effect_input || -z "$DEF_SINK" ]]; then
+    BT_SINK=$(pactl list short sinks 2>/dev/null | awk '$2 ~ /^bluez_output/ {print $2; exit}' || true)
+    TARGET="${BT_SINK:-alsa_output.pci-0000_00_1f.3.analog-stereo}"
+    pactl set-default-sink "$TARGET" 2>/dev/null || true
 fi
 
+# 2. Native PipeWire instant volume adjustment (capped at 100%)
 case "${1:-status}" in
     up)
-        pactl set-sink-volume "$TARGET_SINK" +5% 2>/dev/null || true
-        CUR_VOL=$(pactl get-sink-volume "$TARGET_SINK" 2>/dev/null | grep -m 1 -oE '[0-9]+%' | head -n 1 | tr -d '%' || echo "")
-        if [[ -n "$CUR_VOL" && "$CUR_VOL" -gt 100 ]]; then
-            pactl set-sink-volume "$TARGET_SINK" 100% 2>/dev/null || true
-        fi
+        wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+
         ;;
     down)
-        pactl set-sink-volume "$TARGET_SINK" -5% 2>/dev/null || true
+        wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-
         ;;
     mute)
-        pactl set-sink-mute "$TARGET_SINK" toggle 2>/dev/null || true
+        wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle
         ;;
 esac
 
-# Guardrail: Pin all DSP filter inputs at 100% volume so DSP never attenuates or boosts prematurely
-for node_name in "effect_input.Dolby_Speaker" "effect_input.Dolby_Headphones" "sink.peace_gaming"; do
-    nid=$(pw-dump Node 2>/dev/null | jq -r --arg n "$node_name" '.[] | select(.info.props["node.name"] == $n) | .id' 2>/dev/null | head -n 1 || true)
-    if [[ -n "$nid" && "$nid" != "null" ]]; then
-        wpctl set-volume "$nid" 1.0 2>/dev/null || true
-        wpctl set-mute "$nid" 0 2>/dev/null || true
-    fi
-done
-
-# Suppress OSD notification completely on Workspace 4 (Gaming workspace) to prevent FPS drops
+# 3. Suppress OSD notification completely on Workspace 4 (Gaming workspace)
 CURRENT_WS=""
 if [[ -n "${SWAYSOCK:-}" ]] && command -v swaymsg >/dev/null 2>&1; then
     CURRENT_WS=$(swaymsg -t get_workspaces --raw 2>/dev/null | jq -r '.[] | select(.focused).name' 2>/dev/null || echo "")
-elif [[ -n "${I3SOCK:-}" ]] && command -v i3-msg >/dev/null 2>&1; then
-    CURRENT_WS=$(i3-msg -t get_workspaces 2>/dev/null | jq -r '.[] | select(.focused).name' 2>/dev/null || echo "")
 fi
 
 if [[ "$CURRENT_WS" == "4" ]]; then
     exit 0
 fi
 
-VOL_LINE=$(pactl get-sink-volume "$TARGET_SINK" 2>/dev/null || echo "Volume: 0%")
-VOL=$(echo "$VOL_LINE" | grep -m 1 -oE '[0-9]+%' | head -n 1 | tr -d '%' || echo "0")
+# 4. Instant volume & mute query in a single atomic call
+VOL_INFO=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null || echo "Volume: 0.00")
+VOL=$(echo "$VOL_INFO" | awk '{print int($2 * 100)}')
 VOL="${VOL:-0}"
 
 MUTE="false"
-pactl get-sink-mute "$TARGET_SINK" 2>/dev/null | grep -q "yes" && MUTE="true"
+[[ "$VOL_INFO" =~ \[MUTED\] ]] && MUTE="true"
 
-# Fast dismiss: 800ms regular, 500ms in fullscreen
-TIMEOUT=800
-if command -v swaymsg >/dev/null 2>&1 && [[ -n "${SWAYSOCK:-}" ]]; then
-    IS_FS=$(swaymsg -t get_tree 2>/dev/null | jq -r '.. | select(.focused? == true) | .fullscreen_mode' 2>/dev/null || echo 0)
-    [[ "$IS_FS" == "1" ]] && TIMEOUT=500
-elif command -v i3-msg >/dev/null 2>&1 && [[ -n "${I3SOCK:-}" ]]; then
-    IS_FS=$(i3-msg -t get_tree 2>/dev/null | jq -r '.. | select(.focused? == true) | .fullscreen_mode' 2>/dev/null || echo 0)
-    [[ "$IS_FS" == "1" ]] && TIMEOUT=500
-fi
+# 5. Fast OSD notification with stack-tag to prevent queuing
+TIMEOUT=600
 
 if [[ "$MUTE" == "true" ]]; then
+    dunstify -a "Volume" -t "$TIMEOUT" -u low -i audio-volume-muted \
+        -h string:x-dunst-stack-tag:volume "Volume: Muted" 2>/dev/null || \
     notify-send -a "Volume" -t "$TIMEOUT" -u low -i audio-volume-muted \
         -h string:x-canonical-private-synchronous:volume \
-        -h string:x-dunst-stack-tag:volume "Volume: Muted" 2>/dev/null || \
-    dunstify -a "Volume" -t "$TIMEOUT" -u low -i audio-volume-muted \
         -h string:x-dunst-stack-tag:volume "Volume: Muted" 2>/dev/null || true
 else
-    notify-send -a "Volume" -t "$TIMEOUT" -u low -i audio-volume-high \
-        -h string:x-canonical-private-synchronous:volume \
+    dunstify -a "Volume" -t "$TIMEOUT" -u low -i audio-volume-high \
         -h string:x-dunst-stack-tag:volume \
         -h int:value:"$VOL" "Volume: ${VOL}%" 2>/dev/null || \
-    dunstify -a "Volume" -t "$TIMEOUT" -u low -i audio-volume-high \
+    notify-send -a "Volume" -t "$TIMEOUT" -u low -i audio-volume-high \
+        -h string:x-canonical-private-synchronous:volume \
         -h string:x-dunst-stack-tag:volume \
         -h int:value:"$VOL" "Volume: ${VOL}%" 2>/dev/null || true
 fi
