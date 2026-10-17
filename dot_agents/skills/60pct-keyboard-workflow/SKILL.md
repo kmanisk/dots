@@ -37,6 +37,8 @@ All future keybinding modifications across **i3**, **xremap**, **Zed**, **Alacri
   - Process Killer Menu: `Caps + w` (App Aggregator & Terminator; formerly `Win + Shift + e` / `Win + x`)
   - Persistent Clip: `Win + y` (Cliphist + Rofi Gruvbox)
   - Cheatsheet Modal: `Win + ?` (`Shift + /`)
+  - Region Screenshot (Clipboard): `Win + S`
+  - OCR Snip: `Win + Shift + S` (fullscreen screenshot in gaming mode)
   - Cursor Theme Toggle: `Alt + Shift + c` (Dark / Light)
   - Cursor Size Adjust: `Alt + Shift + =` (+4px) / `Alt + Shift + -` (-4px) (Persistent)
 
