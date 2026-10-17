@@ -371,7 +371,7 @@ Every package, shared library, and neural model utilized across the audio subsys
 | **`alsa-lib` & `alsa-utils`** | `1.2.16.1-1.1` / `1.2.16-1.1` | Native Arch/CachyOS | ALSA kernel userspace interface, mixer tools (`amixer`, `alsamixer`). |
 | **`bluez` & `bluez-utils`** | `5.87-2.1` | Native Arch/CachyOS | Linux Bluetooth protocol stack daemon (`bluetoothd`) and CLI (`bluetoothctl`). |
 | **`bluetui`** | `0.8.1-2.1` | Native Rust CLI / AUR | Interactive TUI for Bluetooth device scanning, pairing, and connection. |
-| **`hushmic-bin`** | `0.10.3-1` | Pre-built binary package | Supplies `/usr/lib/ladspa/libdpdfnet_ladspa.so`, `/usr/lib/hushmic/libonnxruntime.so.1.27.0`, and DPDFNet ONNX models (`dpdfnet2_48khz_hr.onnx`, `dpdfnet8_48khz_hr.onnx`). *(App/GUI disabled; purely used as shared LADSPA plugin)*. |
+| **`hushmic-bin`** | `0.10.3-1` | Pre-built binary package | Supplies `/usr/lib/ladspa/libdpdfnet_ladspa.so` and `/usr/lib/hushmic/libonnxruntime.so.1.27.0`. DPDFNet ONNX models live at `/usr/share/hushmic/models/` (`dpdfnet2_48khz_hr.onnx` — the variant the filter chain loads — and `dpdfnet8_48khz_hr.onnx`, available). *(App/GUI disabled; purely used as shared LADSPA plugin)*. |
 | **`lsp-plugins-ladspa`** | `1.2.35-1.1` | Native Arch/CachyOS | Linux Studio Plugins LADSPA bundle: Vocal Compressor Mono, True-Peak Limiter Mono. |
 | **`lsp-plugins-lv2`** | `1.2.35-1.1` | Native Arch/CachyOS | Linux Studio Plugins LV2 bundle: Parametric EQ 16-band, AutoGain Stereo, Multiband Dynamics. |
 | **`la_LoudMax64.so`** | `LoudMax v1.44` | LADSPA Shared Library | Thomas Mundt's lookahead brickwall peak limiter/maximizer for gaming footstep curve (`~/.ladspa/`, `/usr/lib/ladspa/`). |
