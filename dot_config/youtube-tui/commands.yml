@@ -1,0 +1,57 @@
+launch_command: loadpage library ;; flush ;; history clear ;; key Esc 0 ;; key Up 0 ;; key Up 0 ;; key Left 0 ;; key Enter 0
+video:
+- Reload updated video: rmcache ${id} ;; video ${id}
+- Play video: parrun ${video-player} '${embed-url}'
+- Play audio: mpv stop ;; resume ;; mpv sprop loop-file no ;; mpv loadfile '${embed-url}' ;; echo mpv Player started
+- Play audio (loop): mpv stop ;; resume ;; mpv sprop loop-file inf ;; mpv loadfile '${embed-url}' ;; echo mpv Player started
+- View channel: channel ${channel-id}
+- Subscribe to channel: sync ${channel-id}
+- Open in browser: parrun ${browser} '${url}'
+- Toggle bookmark: togglemark ${id}
+- Save video to library: bookmark ${id} ;; run rm -rf '${save-path}${id}.*' ;; parrun ${terminal-emulator} ${youtube-downloader} '${embed-url}' -o '${save-path}%(title)s[%(id)s].%(ext)s'
+- Save audio to library: bookmark ${id} ;; parrun rm -rf '${save-path}${id}.*' ;; parrun ${terminal-emulator} ${youtube-downloader} '${embed-url}' -x -o '${save-path}%(title)s[%(id)s].%(ext)s'
+- 'Mode: ${provider}': switchprovider
+saved_video:
+- Reload updated video: rmcache ${id} ;; video ${id}
+- '[Offline] Play saved file': parrun ${video-player} '${offline-path}' --force-window
+- '[Offline] Play saved file (audio)': mpv stop ;; resume ;; mpv sprop loop-file no ;; mpv loadfile '${offline-path}' ;; echo mpv Player started
+- '[Offline] Play saved file (audio loop)': mpv stop ;; resume ;; mpv sprop loop-file inf ;; mpv loadfile '${offline-path}' ;; echo mpv Player started
+- View channel: channel ${channel-id}
+- Subscribe to channel: sync ${channel-id}
+- Open in browser: parrun ${browser} '${url}'
+- Toggle bookmark: togglemark ${id}
+- Redownload video to library: bookmark ${id} ;; run rm ${save-path}*${id}*.* ;; parrun ${terminal-emulator} ${youtube-downloader} ${embed-url} -o '${save-path}%(title)s[%(id)s].%(ext)s'
+- Redownload audio to library: bookmark ${id} ;; run rm ${save-path}*${id}*.* ;; parrun ${terminal-emulator} ${youtube-downloader} ${embed-url} -x -o '${save-path}%(title)s[%(id)s].%(ext)s'
+- Delete saved file: run rm ${save-path}*${id}*.*
+playlist:
+- Switch view: '%switch-view%'
+- Reload updated playlist: rmcache ${id} ;; playlist ${id}
+- Play all (videos): parrun ${video-player} ${url}
+- Play all (audio): mpv stop ;; resume ;; ${mpv-queuelist} ;; mpv sprop loop-playlist no ;; mpv playlist-play-index 0 ;; echo mpv Player started
+- Shuffle play all (audio loop): mpv stop ;; resume ;; ${mpv-queuelist} ;; mpv sprop loop-playlist yes ;; mpv playlist-shuffle ;; mpv playlist-play-index 0 ;; echo mpv Player started
+- View channel: channel ${channel-id}
+- Subscribe to channel: sync ${channel-id}
+- Open in browser: parrun ${browser} '${url}'
+- Toggle bookmark: togglemark ${id}
+- Save playlist videos to library: bookmark ${id} ;; run rm -rf '${save-path}*${id}*' ;; parrun ${terminal-emulator} bash -c "${youtube-downloader} ${all-videos} -o '"'${save-path}${title}[${id}]/%(title)s[%(id)s].%(ext)s'"'"
+- Save playlist audio to library: bookmark ${id} ;; run rm -rf '${save-path}*${id}*' ;; parrun ${terminal-emulator} bash -c "${youtube-downloader} ${all-videos} -x -o '"'${save-path}${title}[${id}]/%(title)s[%(id)s].%(ext)s'"'"
+- 'Mode: ${provider}': switchprovider
+saved_playlist:
+- Switch view: '%switch-view%'
+- Reload updated playlist: rmcache ${id} ;; playlist ${id}
+- '[Offline] Play all (videos)': parrun ${video-player} ${save-path}*${id}*/* --force-window
+- '[Offline] Play all (audio)': mpv stop ;; resume ;; ${offline-queuelist} ;; mpv sprop loop-playlist no ;; mpv playlist-play-index 0 ;; echo mpv Player started
+- '[Offline] Shuffle play all (audio loop)': mpv stop ;; resume ;; ${offline-queuelist} ;; mpv sprop loop-playlist yes ;; mpv playlist-shuffle ;; mpv playlist-play-index 0 ;; echo mpv Player started
+- View channel: channel ${channel-id}
+- Subscribe to channel: sync ${channel-id}
+- Open in browser: parrun ${browser} '${url}'
+- Toggle bookmark: togglemark ${id}
+- Redownload playlist videos to library: bookmark ${id} ;; run rm -rf ${save-path}*${id}* ;; parrun ${terminal-emulator} bash -c "${youtube-downloader} ${all-videos} -o '"'${save-path}${title}[${id}]/%(title)s[%(id)s].%(ext)s'"'"
+- Redownload playlist audio to library: bookmark ${id} ;; run rm -rf ${save-path}*${id}* ;; parrun ${terminal-emulator} bash -c "${youtube-downloader} ${all-videos} -x -o '"'${save-path}${title}[${id}]/%(title)s[%(id)s].%(ext)s'"'"
+- Delete saved files: run rm -rf ${save-path}*${id}*
+channel:
+- Reload updated channel: rmcache ${id} ;; channel ${id}
+- Subscribe to channel: sync ${id}
+- Play all (videos): parrun ${video-player} ${url}
+- Play all (audio): mpv stop ;; resume ;; mpv loadfile ${url} ;; mpv sprop loop-playlist no ;; mpv playlist-play-index 0 ;; echo mpv Player started
+- Shuffle play all (audio loop): mpv stop ;; resume ;; mpv loadfile ${url} ;; mpv sprop loop-playlist yes ;; mpv playlist-shuffle ;; mpv playlist-play-index 0 ;; echo mpv Player started

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=YouTube TUI
+GenericName=YouTube Client
+Comment=Aesthetically pleasing terminal YouTube client
+Icon=youtube
+Exec=foot --app-id=youtube-tui --title="YouTube TUI" youtube-tui
+Terminal=false
+Categories=AudioVideo;Video;Audio;Player;
+Keywords=youtube;video;audio;streaming;tui;
