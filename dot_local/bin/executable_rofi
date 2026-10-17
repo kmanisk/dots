@@ -1,0 +1,20 @@
+#!/bin/bash
+# ==============================================================================
+# rofi: Gaming workspace guard wrapper
+# Prevents intrusive menu overlays while on gaming workspace ($ws4).
+# Allowed on all other workspaces (1, 2, 3, 5-10).
+# ==============================================================================
+
+if [ -n "${SWAYSOCK:-}" ]; then
+    focused_ws=$(swaymsg -t get_workspaces -r 2>/dev/null | jq -r '.[] | select(.focused).name' 2>/dev/null)
+    if [ "$focused_ws" = "4" ]; then
+        exit 0
+    fi
+elif [ -n "${I3SOCK:-}" ]; then
+    focused_ws=$(i3-msg -t get_workspaces 2>/dev/null | jq -r '.[] | select(.focused).name' 2>/dev/null)
+    if [ "$focused_ws" = "4" ]; then
+        exit 0
+    fi
+fi
+
+exec /usr/bin/rofi "$@"
