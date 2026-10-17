@@ -1,0 +1,103 @@
+/**
+ * Network Route menu — minimal flat style (2026-10-18).
+ * Same visual language as the theme picker: single thin border, flat search
+ * row (accent-bright prompt), muted status banner, tight rows.
+ * Backend contract: opens after ONE nmcli round-trip + kernel-only probes.
+ */
+@import "~/.config/rofi/system.rasi"
+
+configuration {
+    show-icons:     false;
+    sort:           false;
+    matching:       "fuzzy";
+}
+
+window {
+    background-color:    @background;
+    text-color:          @foreground;
+    border:              1px;
+    border-color:        @border-focus;
+    border-radius:       0px;
+    width:               640px;
+    location:            center;
+    anchor:              center;
+    padding:             12px 14px;
+}
+
+mainbox {
+    background-color:    transparent;
+    children:            [ inputbar, message, listview ];
+    spacing:             8px;
+}
+
+inputbar {
+    background-color:    transparent;
+    border:              0px;
+    padding:             2px 6px 8px;
+    children:            [ prompt, entry ];
+    spacing:             12px;
+}
+
+prompt {
+    background-color:    transparent;
+    text-color:          @accent-bright;
+    font:                "VictorMono Nerd Font Mono Bold 15";
+}
+
+entry {
+    background-color:    transparent;
+    text-color:          @foreground;
+    placeholder:         "Filter...";
+    placeholder-color:   @foreground-alt;
+    font:                "VictorMono Nerd Font Mono 14";
+}
+
+message {
+    background-color:    transparent;
+    border:              0px;
+    padding:             0px 6px 2px;
+}
+
+textbox {
+    background-color:    transparent;
+    text-color:          @foreground-alt;
+    font:                "VictorMono Nerd Font Mono 10";
+}
+
+listview {
+    background-color:    transparent;
+    columns:             1;
+    lines:               6;
+    spacing:             3px;
+    cycle:               true;
+    dynamic:             true;
+    layout:              vertical;
+    scrollbar:           false;
+    border:              0px;
+    padding:             0px;
+}
+
+element {
+    orientation:         horizontal;
+    background-color:    transparent;
+    text-color:          @foreground;
+    padding:             9px 10px;
+    border-radius:       0px;
+    border:              0px;
+    children:            [ element-text ];
+}
+
+element selected {
+    background-color:    @accent;
+    text-color:          @selected-foreground;
+    border:              0px;
+    border-radius:       0px;
+}
+
+element-text {
+    background-color:    transparent;
+    text-color:          inherit;
+    font:                "VictorMono Nerd Font Mono 14";
+    highlight:           bold;
+    vertical-align:      0.5;
+}
