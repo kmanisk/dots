@@ -1,0 +1,52 @@
+# ==============================================================================
+# w3m Configuration File
+# Managed by Chezmoi
+# ==============================================================================
+
+# Display & Layout (Pure Text, Clean Pager Mode)
+display_image 0
+auto_image 0
+pseudo_inlines 0
+display_borders 0
+frame 1
+target_self 1
+open_tab_blank 1
+display_link 1
+decode_url 1
+show_srch_str 1
+display_lineinfo 1
+color 1
+
+# Vi & Search Behavior
+vi_prec_num 1
+smartcase_search 1
+ignorecase_search 1
+wrap_search 1
+mark_all_pages 1
+
+# Mouse & Navigation
+use_mouse 1
+reverse_mouse 0
+clear_buffer 1
+
+# Network & URLs
+argv_is_url 1
+retry_http 1
+default_url 1
+follow_redirection 10
+meta_refresh 1
+
+# Character Encodings & System
+display_charset UTF-8
+document_charset UTF-8
+auto_detect 2
+follow_locale 1
+use_wide 1
+use_combining 1
+editor nvim
+
+# Cookies & SSL
+use_cookie 1
+show_cookie 0
+accept_cookie 1
+ssl_verify_server 1

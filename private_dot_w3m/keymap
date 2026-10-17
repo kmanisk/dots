@@ -1,0 +1,70 @@
+# ==============================================================================
+# w3m Vim Keybindings
+# Managed by Chezmoi
+# ==============================================================================
+
+# 1. Navigation & Scrolling (Vim hjkl, half-page, full-page, document start/end)
+keymap	j	MOVE_DOWN
+keymap	k	MOVE_UP
+keymap	h	MOVE_LEFT
+keymap	l	MOVE_RIGHT
+keymap	C-d	NEXT_HALF_PAGE
+keymap	C-u	PREV_HALF_PAGE
+keymap	C-f	NEXT_PAGE
+keymap	C-b	PREV_PAGE
+keymap	SPC	NEXT_PAGE
+keymap	g	BEGIN
+keymap	G	END
+keymap	0	LINE_BEGIN
+keymap	$	LINE_END
+
+# 2. Links & Following
+keymap	TAB	NEXT_LINK
+keymap	C-n	NEXT_LINK
+keymap	C-p	PREV_LINK
+keymap	RET	GOTO_LINK
+keymap	C-j	GOTO_LINK
+keymap	C-m	GOTO_LINK
+keymap	y	PEEK_LINK
+keymap	u	PEEK_LINK
+keymap	a	SAVE_LINK
+
+# 3. URL, History & Page Control
+keymap	o	GOTO
+keymap	O	GOTO
+keymap	U	GOTO
+keymap	H	BACK
+keymap	B	BACK
+keymap	L	NEXT
+keymap	r	RELOAD
+keymap	R	RESHAPE
+keymap	=	INFO
+
+# 4. Search
+keymap	/	SEARCH
+keymap	?	SEARCH_BACK
+keymap	n	SEARCH_NEXT
+keymap	N	SEARCH_PREV
+
+# 5. Tab Management
+keymap	t	TAB_LINK
+keymap	T	NEW_TAB
+keymap	x	CLOSE_TAB
+keymap	d	CLOSE_TAB
+keymap	C-q	CLOSE_TAB
+keymap	J	NEXT_TAB
+keymap	K	PREV_TAB
+keymap	}	NEXT_TAB
+keymap	{	PREV_TAB
+
+# 6. Bookmarks & Menus
+keymap	b	BOOKMARK
+keymap	M-a	ADD_BOOKMARK
+keymap	m	MOUSE_TOGGLE
+keymap	s	SELECT_MENU
+keymap	M-t	TAB_MENU
+keymap	M-l	LIST_MENU
+
+# 7. Quit
+keymap	q	QUIT
+keymap	Q	EXIT
