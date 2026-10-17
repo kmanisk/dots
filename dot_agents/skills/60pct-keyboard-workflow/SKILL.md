@@ -52,7 +52,7 @@ All future keybinding modifications across **i3**, **xremap**, **Zed**, **Alacri
     - Paste: `Caps + .` (`Ctrl+V`)
     - Brightness Control: `Caps + [` (BrightnessUp), `Caps + '` (BrightnessDown)
     - Volume Control: `Caps + ]` (VolumeUp), `Caps + \` (VolumeDown)
-    - Fullscreen Screenshot (Clipboard ONLY): `Caps + Space`
+    - Fullscreen Screenshot: `Caps + Space` (file + clipboard; WS 3/4 save to `Screenshots/Gaming`, 2026-10-18)
     - Region Screenshot (Saved to File + Clipboard): `Caps + s`
     - Window Close (Graceful): `Caps + q` or `Caps + BackSpace` (Two-Handed)
     - Window Force Kill: `Caps + Shift + q` or `Caps + Shift + BackSpace`
