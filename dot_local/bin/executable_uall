@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# uall — full-system updater (shell-agnostic; works from fish/zsh/bash).
+# Replaces the old fish-only alias `paru && sudo pacman -Syu`.
+# Phases:
+#   1. pacman repos + AUR via one paru -Syu pass
+#   2. npm globals (prettier etc.)
+#   3. fish plugins (fisher)
+# Snapshot safety: snap-pac hooks (05-pre / zz-post) fire inside the pacman
+# transaction itself — every -Syu gets its pre-update snapshot automatically.
+# Extra args are forwarded to paru (e.g. `uall --noconfirm`).
+set -euo pipefail
+
+echo "==> [1/3] Repos + AUR (paru; snap-pac pre/post snapshots fire inside)"
+paru -Syu "$@"
+echo "==> [2/3] npm globals"
+npm update -g 2>/dev/null || echo "    (npm globals skipped)"
+echo "==> [3/3] fish plugins"
+fisher update 2>&1 | grep -E "Updating|Installed|Removed" | tail -n 4 || echo "    (fisher skipped)"
+echo "uall complete."

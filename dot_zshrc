@@ -130,6 +130,9 @@ alias ncdu='gdu'
 alias diff='delta --side-by-side'
 alias grep='grep --color=auto'
 
+# System Updates (paru + AUR + npm + fisher; snap-pac snapshots inside pacman txn)
+alias uall='~/.local/bin/uall'
+
 
 # Eza Integration (Replaces standard ls)
 if command -v eza >/dev/null; then

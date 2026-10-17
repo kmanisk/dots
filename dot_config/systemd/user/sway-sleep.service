@@ -1,0 +1,18 @@
+[Unit]
+Description=Lock sway session before sleep and restore displays on resume
+Documentation=man:systemd.special(7)
+Before=sleep.target
+StopWhenUnneeded=yes
+PartOf=sleep.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+KillMode=process
+ExecStart=%h/.local/bin/sway-pre-sleep
+ExecStop=%h/.local/bin/sway-post-resume
+TimeoutStartSec=15
+TimeoutStopSec=20
+
+[Install]
+WantedBy=sleep.target
