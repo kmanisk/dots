@@ -1,0 +1,30 @@
+playback.peace_gaming:output_FL
+  |-> alsa_output.pci-0000_00_1f.3.analog-stereo:playback_FL
+playback.peace_gaming:output_FR
+  |-> alsa_output.pci-0000_00_1f.3.analog-stereo:playback_FR
+capture.ghelper-audio:input_FL
+  |<- alsa_input.pci-0000_00_1f.3.analog-stereo:capture_FL
+capture.ghelper-audio:input_FR
+  |<- alsa_input.pci-0000_00_1f.3.analog-stereo:capture_FR
+effect_output.Dolby_Speaker:output_FL
+  |-> alsa_output.pci-0000_00_1f.3.analog-stereo:playback_FL
+effect_output.Dolby_Speaker:output_FR
+  |-> alsa_output.pci-0000_00_1f.3.analog-stereo:playback_FR
+alsa_output.pci-0000_00_1f.3.analog-stereo:playback_FL
+  |<- playback.peace_gaming:output_FL
+  |<- effect_output.Dolby_Speaker:output_FL
+alsa_output.pci-0000_00_1f.3.analog-stereo:playback_FR
+  |<- playback.peace_gaming:output_FR
+  |<- effect_output.Dolby_Speaker:output_FR
+alsa_input.pci-0000_00_1f.3.analog-stereo:capture_FL
+  |-> capture.ghelper-audio:input_FL
+alsa_input.pci-0000_00_1f.3.analog-stereo:capture_FR
+  |-> capture.ghelper-audio:input_FR
+bluez_output.B0_38_E2_78_9B_FE.1:playback_FL
+  |<- Brave:output_FL
+bluez_output.B0_38_E2_78_9B_FE.1:playback_FR
+  |<- Brave:output_FR
+Brave:output_FL
+  |-> bluez_output.B0_38_E2_78_9B_FE.1:playback_FL
+Brave:output_FR
+  |-> bluez_output.B0_38_E2_78_9B_FE.1:playback_FR

@@ -1,0 +1,15 @@
+Server String: /run/user/1000/pulse/native
+Library Protocol Version: 35
+Server Protocol Version: 35
+Is Local: yes
+Client Index: 24178
+Tile Size: 65472
+User Name: manisk
+Host Name: maniskg
+Server Name: PulseAudio (on PipeWire 1.6.9)
+Server Version: 15.0.0
+Default Sample Specification: float32le 2ch 48000Hz
+Default Channel Map: front-left,front-right
+Default Sink: bluez_output.B0_38_E2_78_9B_FE.1
+Default Source: ghelper-audio-fx
+Cookie: 1ea2:e4b0

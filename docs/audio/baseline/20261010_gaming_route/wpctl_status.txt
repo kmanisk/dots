@@ -1,0 +1,67 @@
+PipeWire 'pipewire-0' [1.6.9, manisk@maniskg, cookie:48344141]
+ └─ Clients:
+        34. WirePlumber                         [1.6.9, manisk@maniskg, pid:1056]
+        35. pipewire                            [1.6.9, manisk@maniskg, pid:1052]
+        36. pipewire                            [1.6.9, manisk@maniskg, pid:1052]
+        48. pipewire                            [1.6.9, manisk@maniskg, pid:1054]
+        56. WirePlumber [client]                [1.6.9, manisk@maniskg, pid:1056]
+       100. xdg-desktop-portal                  [1.6.9, manisk@maniskg, pid:1316]
+       101. xdg-desktop-portal-wlr              [1.6.9, manisk@maniskg, pid:1370]
+       102. pipewire                            [1.6.9, manisk@maniskg, pid:1856]
+       103. pipewire                            [1.6.9, manisk@maniskg, pid:1856]
+       104. Brave input                         [1.6.9, manisk@maniskg, pid:1842]
+       111. Steam Voice Settings                [1.6.9, manisk@maniskg, pid:15930]
+       116. Steam                               [1.6.9, manisk@maniskg, pid:15930]
+       121. wpctl                               [1.6.9, manisk@maniskg, pid:30420]
+       127. Brave                               [1.6.9, manisk@maniskg, pid:1842]
+
+Audio
+ ├─ Devices:
+ │      57. GB207 High Definition Audio Controller [alsa]
+ │      58. Built-in Audio                      [alsa]
+ │     105. soundcore Q20i                      [bluez5]
+ │  
+ ├─ Sinks:
+ │      66. Built-in Audio Analog Stereo        [vol: 1.00]
+ │  *  106. soundcore Q20i                      [vol: 0.65]
+ │  
+ ├─ Sources:
+ │      67. Built-in Audio Analog Stereo        [vol: 0.15]
+ │  
+ ├─ Filters:
+ │    - filter-chain-1052-29                                        
+ │      37. sink.peace_gaming                                            [Audio/Sink]
+ │    - Dolby_Speaker_smart_filter                                  
+ │      38. playback.peace_gaming                                        [Stream/Output/Audio]
+ │      50. effect_input.Dolby_Speaker                                   [Audio/Sink]
+ │      51. effect_output.Dolby_Speaker                                  [Stream/Output/Audio]
+ │    - filter-chain-1052-30                                        
+ │      39. capture.ghelper-audio                                        [Stream/Input/Audio]
+ │  *   40. ghelper-audio                                                [Audio/Source]
+ │  
+ └─ Streams:
+       126. Brave                                                       
+            128. output_FR       > soundcore Q20i:playback_FR	[active]
+            129. output_FL       > soundcore Q20i:playback_FL	[active]
+
+Video
+ ├─ Devices:
+ │      71. ASUS FHD webcam                     [v4l2]
+ │      72. ASUS FHD webcam                     [v4l2]
+ │      73. ASUS FHD webcam                     [v4l2]
+ │      74. ASUS FHD webcam                     [v4l2]
+ │  
+ ├─ Sinks:
+ │  
+ ├─ Sources:
+ │  *   96. ASUS FHD webcam (V4L2)             
+ │      98. ASUS FHD webcam (V4L2)             
+ │  
+ ├─ Filters:
+ │  
+ └─ Streams:
+
+Settings
+ └─ Default Configured Devices:
+         0. Audio/Sink    bluez_output.B0_38_E2_78_9B_FE.1
+         1. Audio/Source  ghelper-audio

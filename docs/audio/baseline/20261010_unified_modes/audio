@@ -1,0 +1,383 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# audio — Unified Control & Diagnostic Interface for CachyOS PipeWire Audio Stack
+# Target Hardware: ASUS TUF Gaming F16 (ALC256 / 1043:1084)
+# Zero always-running background daemons or polling loops.
+# ==============================================================================
+set -euo pipefail
+
+BACKUP_DIR="${HOME}/.config/pipewire/backup/20261010_unified_audit"
+CONF_DIR="${HOME}/.config/pipewire"
+SPK_CONF_DIR="${HOME}/.config/pipewire/asus-tuf-dax"
+WP_CONF_DIR="${HOME}/.config/wireplumber"
+
+# Color helpers
+BOLD="\033[1m"
+GREEN="\033[1;32m"
+YELLOW="\033[1;33m"
+RED="\033[1;31m"
+CYAN="\033[1;36m"
+GRAY="\033[0;90m"
+RESET="\033[0m"
+
+cmd_status() {
+    echo -e "${BOLD}${CYAN}================================================================${RESET}"
+    echo -e "${BOLD}${CYAN}                 Unified Audio Stack Status                     ${RESET}"
+    echo -e "${BOLD}${CYAN}================================================================${RESET}"
+
+    # 1. Server Core
+    local pw_ver clock_rate clock_quantum
+    pw_ver=$(pipewire --version 2>&1 | grep -i "Compiled with" | awk '{print $NF}' || echo "1.6.9")
+    clock_rate=$(pw-metadata -n settings 0 2>/dev/null | grep -E "key:'clock\.rate'" | sed -n "s/.*value:'\([^']*\)'.*/\1/p" || echo "48000")
+    clock_quantum=$(pw-metadata -n settings 0 2>/dev/null | grep -E "key:'clock\.quantum'" | sed -n "s/.*value:'\([^']*\)'.*/\1/p" || echo "512")
+    echo -e " ${BOLD}Core Engine:${RESET}       PipeWire ${pw_ver} | Rate: ${clock_rate} Hz | Quantum: ${clock_quantum}"
+
+    # 2. Hardware
+    local dmi_prod
+    dmi_prod=$(cat /sys/class/dmi/id/product_name 2>/dev/null || echo "Unknown")
+    echo -e " ${BOLD}Hardware:${RESET}          ${dmi_prod} (Realtek ALC256 / 1043:1084)"
+
+    # 3. Default Sink & Physical Target
+    local default_sink sink_vol sink_mute sink_desc
+    default_sink=$(pactl get-default-sink 2>/dev/null || echo "unknown")
+    sink_vol=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null || echo "unknown")
+    sink_desc=$(pw-dump Node 2>/dev/null | jq -r --arg s "$default_sink" '.[] | select(.info.props["node.name"] == $s) | .info.props["node.description"]' 2>/dev/null | head -n 1 || echo "")
+    [[ -z "$sink_desc" ]] && sink_desc="$default_sink"
+    echo -e " ${BOLD}Default Sink:${RESET}      ${GREEN}${sink_desc}${RESET} [${sink_vol}]"
+    echo -e "   └─ Endpoint:     ${GRAY}${default_sink}${RESET}"
+
+    # 4. Default Source / Mic
+    local default_source source_vol source_desc
+    default_source=$(pactl get-default-source 2>/dev/null || echo "unknown")
+    source_vol=$(wpctl get-volume @DEFAULT_AUDIO_SOURCE@ 2>/dev/null || echo "unknown")
+    source_desc=$(pw-dump Node 2>/dev/null | jq -r --arg s "$default_source" '.[] | select(.info.props["node.name"] == $s) | .info.props["node.description"]' 2>/dev/null | head -n 1 || echo "")
+    [[ -z "$source_desc" ]] && source_desc="$default_source"
+    echo -e " ${BOLD}Default Source:${RESET}    ${GREEN}${source_desc}${RESET} [${source_vol}]"
+    echo -e "   └─ Endpoint:     ${GRAY}${default_source}${RESET}"
+
+    # 5. Microphone Processing (ghelper-audio)
+    local mic_settings="${HOME}/.config/micstudio/settings.toml"
+    local rn_state="OFF" gate_state="OFF" mic_gain="+0.0 dB"
+    if [[ -f "$mic_settings" ]]; then
+        local rn_en rn_blend gate_en gate_aggro gate_att gate_hang
+        rn_en=$(grep "rnnoise_enabled" "$mic_settings" | awk '{print $3}' || echo "false")
+        rn_blend=$(grep "rnnoise_blend" "$mic_settings" | awk '{print $3}' || echo "1.0")
+        gate_en=$(grep "gate_enabled" "$mic_settings" | awk '{print $3}' || echo "false")
+        gate_aggro=$(grep "gate_aggressiveness" "$mic_settings" | awk '{print $3}' || echo "90")
+        gate_att=$(grep "gate_attenuation_db" "$mic_settings" | awk '{print $3}' || echo "-24")
+        gate_hang=$(grep "gate_hangover_ms" "$mic_settings" | awk '{print $3}' || echo "250")
+        mic_gain=$(grep "output_gain_db" "$mic_settings" | awk '{print $3}' || echo "0.0")
+
+        [[ "$rn_en" == "true" ]] && rn_state="${GREEN}ON${RESET} ($(awk "BEGIN {print int($rn_blend * 100)}")%)" || rn_state="${GRAY}OFF${RESET}"
+        [[ "$gate_en" == "true" ]] && gate_state="${GREEN}ON${RESET} (${gate_aggro}%, ${gate_att} dB, ${gate_hang}ms)" || gate_state="${GRAY}OFF${RESET}"
+    fi
+    echo -e " ${BOLD}Mic Processing:${RESET}    Clean (ghelper-audio) | RNNoise: ${rn_state} | Gate: ${gate_state} | Gain: ${mic_gain} dB"
+
+    # 6. Speaker DSP
+    local spk_state="ACTIVE" spk_color="$GREEN" spk_profile="dynamic"
+    if systemctl --user is-active --quiet asus-speaker-dsp.service; then
+        local spk_state_file="${HOME}/.config/asus-speakers/state.conf"
+        if [[ -f "$spk_state_file" ]]; then
+            spk_profile=$(grep "^ACTIVE_VOICING=" "$spk_state_file" | cut -d'=' -f2 || echo "dynamic")
+            local en_val
+            en_val=$(grep "^ENABLED=" "$spk_state_file" | cut -d'=' -f2 || echo "true")
+            if [[ "$en_val" != "true" ]]; then
+                spk_state="BYPASSED (flat)"
+                spk_color="$YELLOW"
+            fi
+        fi
+    else
+        spk_state="STOPPED"
+        spk_color="$RED"
+    fi
+    echo -e " ${BOLD}ASUS Speaker DSP:${RESET}  ${spk_color}${spk_state}${RESET} | Profile: ${BOLD}${spk_profile}${RESET} (Isolated & pinned)"
+
+    # 7. Gaming Pipeline
+    local gaming_links peace_target="unknown" peace_target_type="Unknown"
+    gaming_links=$(pw-link -l 2>/dev/null | grep -E "sink\.peace_gaming|playback\.peace_gaming" | wc -l || echo "0")
+    local gaming_active="${GRAY}IDLE${RESET}"
+    if [[ "$gaming_links" -gt 0 ]]; then
+        gaming_active="${GREEN}ACTIVE (${gaming_links} links)${RESET}"
+    fi
+    local raw_target
+    raw_target=$(pw-link -l 2>/dev/null | grep -A 2 "playback.peace_gaming:output_FL" | grep -v "output_FL" | sed -n 's/.*|-> \([^:]*\):.*/\1/p' | head -n 1)
+    if [[ "$raw_target" =~ bluez_output ]]; then
+        peace_target="$raw_target"
+        peace_target_type="${CYAN}Bluetooth A2DP (Soundcore Q20i)${RESET}"
+    elif [[ "$raw_target" =~ alsa_output ]]; then
+        peace_target="$raw_target"
+        peace_target_type="${GREEN}Analog 3.5mm Output${RESET}"
+    elif [[ -n "$raw_target" ]]; then
+        peace_target="$raw_target"
+        peace_target_type="$raw_target"
+    fi
+    echo -e " ${BOLD}Gaming Pipeline:${RESET}   sink.peace_gaming | Status: ${gaming_active}"
+    echo -e "   └─ Output Target: ${peace_target_type} (${GRAY}${peace_target}${RESET})"
+
+    # 8. Active Streams
+    echo -e "${BOLD}${CYAN}----------------------------------------------------------------${RESET}"
+    echo -e " ${BOLD}Active Output Streams:${RESET}"
+    local active_found=false
+    while IFS= read -r line; do
+        if [[ -n "$line" ]]; then
+            echo -e "   • $line"
+            active_found=true
+        fi
+    done < <(pw-link -l 2>/dev/null | grep -E "output_FL|output_FR" | grep -v -E "monitor|capture|\|" | sed 's/:.*//' | sort -u)
+    if [[ "$active_found" == "false" ]]; then
+        echo -e "   ${GRAY}(None currently active)${RESET}"
+    fi
+    echo -e "${BOLD}${CYAN}================================================================${RESET}"
+}
+
+cmd_doctor() {
+    echo -e "${BOLD}================================================================${RESET}"
+    echo -e "${BOLD}             PipeWire Audio Stack Doctor Audit                  ${RESET}"
+    echo -e "${BOLD}================================================================${RESET}"
+    local errors=0
+    local warnings=0
+
+    # 1. Systemd Units Check
+    echo -n ":: 1. Systemd Audio Services: "
+    local unit_fail=0
+    for unit in pipewire.service wireplumber.service pipewire-pulse.service asus-speaker-dsp.service; do
+        if ! systemctl --user is-active --quiet "$unit"; then
+            echo -e "\n   ${RED}[FAIL]${RESET} $unit is not running!"
+            unit_fail=1
+            ((errors++))
+        fi
+    done
+    if [[ "$unit_fail" -eq 0 ]]; then
+        echo -e "${GREEN}[✓ PASS]${RESET} All 4 audio units active"
+    fi
+
+    # 2. Clock & Quantum Check
+    echo -n ":: 2. Clock Rate & Quantum:   "
+    local rate quantum
+    rate=$(pw-metadata -n settings 0 2>/dev/null | grep -E "key:'clock\.rate'" | sed -n "s/.*value:'\([^']*\)'.*/\1/p" || echo "")
+    quantum=$(pw-metadata -n settings 0 2>/dev/null | grep -E "key:'clock\.quantum'" | sed -n "s/.*value:'\([^']*\)'.*/\1/p" || echo "")
+    if [[ "$rate" == "48000" ]]; then
+        echo -e "${GREEN}[✓ PASS]${RESET} Synchronized at ${rate} Hz (Quantum: ${quantum})"
+    else
+        echo -e "${YELLOW}[!] WARNING${RESET} Rate is '${rate}', expected 48000 Hz"
+        ((warnings++))
+    fi
+
+    # 3. Zombie / Colliding Process Check
+    echo -n ":: 3. Process Collision:      "
+    if pgrep -f "dusky_audio" >/dev/null 2>&1; then
+        echo -e "${RED}[FAIL]${RESET} Detected zombie dusky_audio process running!"
+        echo "   -> Run: pkill -9 -f dusky_audio"
+        ((errors++))
+    else
+        echo -e "${GREEN}[✓ PASS]${RESET} Zero zombie or rogue audio processes"
+    fi
+
+    # 4. Node Duplication Audit
+    echo -n ":: 4. Node Duplication:       "
+    local mic_clean_count mic_fx_count gaming_count spk_count
+    mic_clean_count=$(pw-dump Node 2>/dev/null | jq '[.[] | select(.info.props["node.name"] == "ghelper-audio")] | length' 2>/dev/null || echo "1")
+    mic_fx_count=$(pw-dump Node 2>/dev/null | jq '[.[] | select(.info.props["node.name"] == "ghelper-audio-fx")] | length' 2>/dev/null || echo "0")
+    gaming_count=$(pw-dump Node 2>/dev/null | jq '[.[] | select(.info.props["node.name"] == "sink.peace_gaming")] | length' 2>/dev/null || echo "1")
+    spk_count=$(pw-dump Node 2>/dev/null | jq '[.[] | select(.info.props["node.name"] == "effect_input.Dolby_Speaker")] | length' 2>/dev/null || echo "1")
+
+    local dup_fail=0
+    if [[ "$mic_clean_count" -gt 1 ]]; then
+        echo -e "\n   ${RED}[FAIL]${RESET} Duplicate ghelper-audio nodes detected ($mic_clean_count instances)"
+        dup_fail=1
+        ((errors++))
+    fi
+    if [[ "$mic_fx_count" -gt 1 ]]; then
+        echo -e "\n   ${RED}[FAIL]${RESET} Duplicate ghelper-audio-fx nodes detected ($mic_fx_count instances)"
+        dup_fail=1
+        ((errors++))
+    fi
+    if [[ "$gaming_count" -gt 1 ]]; then
+        echo -e "\n   ${RED}[FAIL]${RESET} Duplicate sink.peace_gaming nodes detected ($gaming_count instances)"
+        dup_fail=1
+        ((errors++))
+    fi
+    if [[ "$spk_count" -gt 1 ]]; then
+        echo -e "\n   ${RED}[FAIL]${RESET} Duplicate effect_input.Dolby_Speaker nodes detected ($spk_count instances)"
+        dup_fail=1
+        ((errors++))
+    fi
+    if [[ "$dup_fail" -eq 0 ]]; then
+        echo -e "${GREEN}[✓ PASS]${RESET} All filter nodes unique and unshadowed"
+    fi
+
+    # 5. Double Processing & Routing Audit
+    echo -n ":: 5. Double Processing:      "
+    local double_proc=0
+    # Check if peace_gaming links into Dolby_Speaker
+    if pw-link -l 2>/dev/null | grep -A 2 "playback.peace_gaming" | grep -q "effect_input.Dolby_Speaker"; then
+        echo -e "\n   ${RED}[FAIL]${RESET} Double processing detected: sink.peace_gaming is feeding Dolby_Speaker!"
+        double_proc=1
+        ((errors++))
+    fi
+    if [[ "$double_proc" -eq 0 ]]; then
+        echo -e "${GREEN}[✓ PASS]${RESET} No double-processing routes detected"
+    fi
+
+    # 6. Peace Gaming Routing Validation
+    echo -n ":: 6. Gaming Audio Route:     "
+    local peace_out_link
+    peace_out_link=$(pw-link -l 2>/dev/null | grep -A 2 "playback.peace_gaming:output_FL" 2>/dev/null | grep -v "output_FL" | sed -n 's/.*|-> \([^:]*\):.*/\1/p' | head -n 1 || true)
+    local active_game_streams=0
+    active_game_streams=$(pw-link -l 2>/dev/null | (grep -A 2 "sink.peace_gaming:playback" 2>/dev/null || true) | (grep "|<-" 2>/dev/null || true) | wc -l)
+    active_game_streams="${active_game_streams//[^0-9]/}"
+    if [[ "${active_game_streams:-0}" -gt 0 && -z "$peace_out_link" ]]; then
+        echo -e "\n   ${RED}[FAIL]${RESET} sink.peace_gaming has active streams (${active_game_streams}) but NO valid output target link!"
+        ((errors++))
+
+
+
+    elif [[ -n "$peace_out_link" ]]; then
+        echo -e "${GREEN}[✓ PASS]${RESET} playback.peace_gaming -> ${peace_out_link}"
+    else
+        echo -e "${GREEN}[✓ PASS]${RESET} playback.peace_gaming routed (idle)"
+    fi
+
+    # 7. Bluetooth A2DP & Policy Verification
+    echo -n ":: 7. Bluetooth Policy:       "
+    local bt_cards
+    bt_cards=$(pw-dump Device 2>/dev/null | jq -r '.[] | select(.info.props["device.name"] | test("bluez")) | .info.props["device.name"]' 2>/dev/null || true)
+    local bt_warn=0
+    if [[ -n "$bt_cards" ]]; then
+        for card in $bt_cards; do
+            local bt_node_profile
+            bt_node_profile=$(pw-dump Node 2>/dev/null | jq -r --arg a "B0:38:E2:78:9B:FE" '.[] | select(.info.props["api.bluez5.address"] == $a and .info.props["media.class"] == "Audio/Sink") | .info.props["api.bluez5.profile"]' 2>/dev/null | head -n 1 || echo "")
+            local bt_input_node
+            bt_input_node=$(pw-dump Node 2>/dev/null | jq -r --arg a "B0:38:E2:78:9B:FE" '.[] | select(.info.props["api.bluez5.address"] == $a and .info.props["media.class"] == "Audio/Source") | .info.props["node.name"]' 2>/dev/null | head -n 1 || echo "")
+            if [[ -n "$bt_input_node" ]]; then
+                echo -e "\n   ${RED}[FAIL]${RESET} Handsfree profile detected! Bluetooth source node exists: $bt_input_node"
+                ((errors++))
+                bt_warn=1
+            elif [[ -n "$bt_node_profile" && "$bt_node_profile" != "a2dp-sink" ]]; then
+                echo -e "\n   ${YELLOW}[!] WARNING${RESET} Bluetooth headset profile is '$bt_node_profile' (expected a2dp-sink)"
+                ((warnings++))
+                bt_warn=1
+            fi
+        done
+        if [[ "$bt_warn" -eq 0 ]]; then
+            echo -e "${GREEN}[✓ PASS]${RESET} Headset strictly in high-fidelity A2DP mode"
+        fi
+    else
+        echo -e "${GRAY}[INFO]${RESET} No active Bluetooth headset connected"
+    fi
+
+    # 8. Baseline Backup & Config Drift
+    echo -n ":: 8. Baseline Recovery:      "
+    if [[ -d "$BACKUP_DIR" && -f "$BACKUP_DIR/pipewire.conf.d/30-peace-gaming.conf" ]]; then
+        echo -e "${GREEN}[✓ PASS]${RESET} Baseline snapshot verified at ${BACKUP_DIR}"
+    else
+        echo -e "${YELLOW}[!] WARNING${RESET} Baseline backup directory missing or incomplete"
+        ((warnings++))
+    fi
+
+
+    echo -e "${BOLD}================================================================${RESET}"
+    if [[ "$errors" -eq 0 && "$warnings" -eq 0 ]]; then
+        echo -e "${GREEN}${BOLD}Result: 0 errors, 0 warnings. Audio stack is healthy and verified.${RESET}"
+        return 0
+    elif [[ "$errors" -eq 0 ]]; then
+        echo -e "${YELLOW}${BOLD}Result: 0 errors, ${warnings} warning(s). Stack operational with minor notes.${RESET}"
+        return 0
+    else
+        echo -e "${RED}${BOLD}Result: ${errors} error(s), ${warnings} warning(s). Remediation required.${RESET}"
+        return 1
+    fi
+}
+
+cmd_rollback() {
+    echo -e "${BOLD}${YELLOW}================================================================${RESET}"
+    echo -e "${BOLD}${YELLOW}           PipeWire Audio Stack Baseline Rollback               ${RESET}"
+    echo -e "${BOLD}${YELLOW}================================================================${RESET}"
+
+    if [[ ! -d "$BACKUP_DIR" ]]; then
+        echo -e "${RED}Error: Baseline backup directory '$BACKUP_DIR' does not exist!${RESET}" >&2
+        exit 1
+    fi
+
+    local force=false
+    if [[ "${1:-}" == "--yes" || "${1:-}" == "-f" || "${1:-}" == "-y" ]]; then
+        force=true
+    fi
+
+    if [[ "$force" == "false" ]]; then
+        echo -e "This will restore configs from baseline: ${CYAN}${BACKUP_DIR}${RESET}"
+        echo -e "and restart PipeWire user services."
+        read -r -p "Proceed with rollback? [y/N]: " confirm
+        if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+            echo "Rollback aborted by user."
+            exit 0
+        fi
+    fi
+
+    echo "Restoring configuration files..."
+    if [[ -d "$BACKUP_DIR/pipewire.conf.d" ]]; then
+        cp -r "$BACKUP_DIR/pipewire.conf.d/"* "$CONF_DIR/pipewire.conf.d/"
+        echo "  ✓ Restored ~/.config/pipewire/pipewire.conf.d/"
+    fi
+    if [[ -d "$BACKUP_DIR/wireplumber.conf.d" ]]; then
+        cp -r "$BACKUP_DIR/wireplumber.conf.d/"* "$WP_CONF_DIR/wireplumber.conf.d/"
+        echo "  ✓ Restored ~/.config/wireplumber/wireplumber.conf.d/"
+    fi
+    if [[ -d "$BACKUP_DIR/asus-speakers" ]]; then
+        cp -r "$BACKUP_DIR/asus-speakers/"* "${HOME}/.config/asus-speakers/" 2>/dev/null || true
+        echo "  ✓ Restored ~/.config/asus-speakers/"
+    fi
+
+    echo "Restarting audio services..."
+    systemctl --user restart pipewire wireplumber pipewire-pulse asus-speaker-dsp.service
+
+    # Sleep 1 second for node registration
+    sleep 1
+
+    echo -e "${GREEN}Rollback complete! Running audio doctor...${RESET}"
+    cmd_doctor
+}
+
+show_help() {
+    echo -e "${BOLD}Usage:${RESET} audio <command> [options]"
+    echo ""
+    echo -e "${BOLD}Commands:${RESET}"
+    echo -e "  ${GREEN}status${RESET}        Display comprehensive live audio stack status and active streams"
+    echo -e "  ${GREEN}doctor${RESET}        Execute sanity checks (node collisions, double-processing, services)"
+    echo -e "  ${GREEN}rollback${RESET}      Restore audio configurations to baseline snapshot (--yes for non-interactive)"
+    echo -e "  ${GREEN}mic${RESET}           Manage microphone presets and controls (delegates to 'mic')"
+    echo -e "  ${GREEN}speaker|spk${RESET}   Manage ASUS TUF DAX3 speaker DSP profiles (delegates to 'spk')"
+    echo -e "  ${GREEN}help, -h${RESET}      Show this help message"
+}
+
+case "${1:-}" in
+    status)
+        cmd_status
+        ;;
+    doctor)
+        cmd_doctor
+        ;;
+    rollback)
+        shift
+        cmd_rollback "$@"
+        ;;
+    mic)
+        shift
+        exec mic "$@"
+        ;;
+    speaker|spk|dolby)
+        shift
+        exec spk "$@"
+        ;;
+    help|-h|--help)
+        show_help
+        ;;
+    "")
+        cmd_status
+        ;;
+    *)
+        echo "Unknown command: $1" >&2
+        show_help
+        exit 1
+        ;;
+esac

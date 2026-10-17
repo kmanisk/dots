@@ -1,0 +1,79 @@
+PipeWire 'pipewire-0' [1.6.9, manisk@maniskg, cookie:513991856]
+ └─ Clients:
+        35. xdg-desktop-portal                  [1.6.9, manisk@maniskg, pid:1219]
+        37. pipewire                            [1.6.9, manisk@maniskg, pid:103985]
+        38. pipewire                            [1.6.9, manisk@maniskg, pid:103985]
+        39. pipewire                            [1.6.9, manisk@maniskg, pid:97138]
+        40. pipewire                            [1.6.9, manisk@maniskg, pid:97138]
+        41. pipewire                            [1.6.9, manisk@maniskg, pid:97138]
+        60. WirePlumber                         [1.6.9, manisk@maniskg, pid:101545]
+        66. xdg-desktop-portal-wlr              [1.6.9, manisk@maniskg, pid:97153]
+       113. micstudio                           [1.6.9, manisk@maniskg, pid:282339]
+       121. WirePlumber [client]                [1.6.9, manisk@maniskg, pid:101545]
+       126. pipewire                            [1.6.9, manisk@maniskg, pid:279586]
+       142. Steam Voice Settings                [1.6.9, manisk@maniskg, pid:116533]
+       143. Brave input                         [1.6.9, manisk@maniskg, pid:258640]
+       145. Chromium input                      [1.6.9, manisk@maniskg, pid:118513]
+       146. Steam                               [1.6.9, manisk@maniskg, pid:116533]
+       152. wpctl                               [1.6.9, manisk@maniskg, pid:288514]
+       157. Brave                               [1.6.9, manisk@maniskg, pid:258640]
+
+Audio
+ ├─ Devices:
+ │     117. GB207 High Definition Audio Controller [alsa]
+ │     118. Built-in Audio                      [alsa]
+ │     147. soundcore Q20i                      [bluez5]
+ │  
+ ├─ Sinks:
+ │      74. Built-in Audio Analog Stereo        [vol: 1.00]
+ │  *  149. soundcore Q20i                      [vol: 0.50]
+ │  
+ ├─ Sources:
+ │      88. Built-in Audio Analog Stereo        [vol: 0.15]
+ │     116. MicStudio Voice FX                  [vol: 1.00]
+ │  
+ ├─ Filters:
+ │    - filter-chain-97138-29                                       
+ │      42. sink.peace_gaming                                            [Audio/Sink]
+ │      43. playback.peace_gaming                                        [Stream/Output/Audio]
+ │    - filter-chain-97138-30                                       
+ │      44. capture.ghelper-audio                                        [Stream/Input/Audio]
+ │      45. ghelper-audio                                                [Audio/Source]
+ │    - filter-chain-97138-31                                       
+ │      46. capture.ghelper-audio-fx                                     [Stream/Input/Audio]
+ │  *   47. ghelper-audio-fx                                             [Audio/Source]
+ │    - Dolby_Speaker_smart_filter                                  
+ │      69. effect_input.Dolby_Speaker                                   [Audio/Sink]
+ │     109. effect_output.Dolby_Speaker                                  [Stream/Output/Audio]
+ │  
+ └─ Streams:
+       137. micstudio-capture                                           
+             48. monitor_FL     
+             70. monitor_FR     
+             95. input_FR        < ALC256 Analog:capture_FR	[active]
+            151. input_FL        < ALC256 Analog:capture_FL	[active]
+       148. Brave                                                       
+            112. output_FL       > soundcore Q20i:playback_FL	[active]
+            128. output_FR       > soundcore Q20i:playback_FR	[active]
+
+Video
+ ├─ Devices:
+ │      75. ASUS FHD webcam                     [v4l2]
+ │      90. ASUS FHD webcam                     [v4l2]
+ │     101. ASUS FHD webcam                     [v4l2]
+ │     107. ASUS FHD webcam                     [v4l2]
+ │  
+ ├─ Sinks:
+ │  
+ ├─ Sources:
+ │  *   81. ASUS FHD webcam (V4L2)             
+ │      93. ASUS FHD webcam (V4L2)             
+ │  
+ ├─ Filters:
+ │  
+ └─ Streams:
+
+Settings
+ └─ Default Configured Devices:
+         0. Audio/Sink    bluez_output.B0_38_E2_78_9B_FE.1
+         1. Audio/Source  ghelper-audio-fx

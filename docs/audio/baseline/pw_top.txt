@@ -1,0 +1,21 @@
+S   ID  QUANT   RATE    WAIT    BUSY   W/Q   B/Q  ERR FORMAT           NAME 
+C   32      0      0    ---     ---   ---   ---     0                  Dummy-Driver
+C   33      0      0    ---     ---   ---   ---     0                  Freewheel-Driver
+C   42      0      0    ---     ---   ---   ---     0                  sink.peace_gaming
+C   43      0      0    ---     ---   ---   ---     0                  playback.peace_gaming
+C   44      0      0    ---     ---   ---   ---     0                  capture.ghelper-audio
+C   45      0      0    ---     ---   ---   ---     0                  ghelper-audio
+C   46      0      0    ---     ---   ---   ---     0                  capture.ghelper-audio-fx
+C   47      0      0    ---     ---   ---   ---     0                  ghelper-audio-fx
+C   89      0      0    ---     ---   ---   ---     0                  Midi-Bridge
+C   74      0      0    ---     ---   ---   ---     0                  alsa_output.pci-0000_00_1f.3.analog-stereo
+C   88      0      0    ---     ---   ---   ---     0                  alsa_input.pci-0000_00_1f.3.analog-stereo
+C   87      0      0    ---     ---   ---   ---     0                  bluez_midi.server
+C   81      0      0    ---     ---   ---   ---     0                  v4l2_input.pci-0000_00_14.0-usb-0_8_1.0
+C   93      0      0    ---     ---   ---   ---     0                  v4l2_input.pci-0000_00_14.0-usb-0_8_1.2
+C  149      0      0    ---     ---   ---   ---     0                  bluez_output.B0_38_E2_78_9B_FE.1
+C   69      0      0    ---     ---   ---   ---     0                  effect_input.Dolby_Speaker
+C  109      0      0    ---     ---   ---   ---     0                  effect_output.Dolby_Speaker
+C  116      0      0    ---     ---   ---   ---     0                  ghelper-audio-fx
+C  137      0      0    ---     ---   ---   ---     0                  micstudio-capture
+C  148      0      0    ---     ---   ---   ---     0                  Brave

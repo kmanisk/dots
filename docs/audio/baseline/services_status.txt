@@ -1,0 +1,75 @@
+● pipewire.service - PipeWire Multimedia Service
+     Loaded: loaded (/usr/lib/systemd/user/pipewire.service; disabled; preset: enabled)
+    Drop-In: /etc/systemd/user/pipewire.service.d
+             └─90-desktop-oom.conf
+     Active: active (running) since Fri 2026-10-09 22:09:24 IST; 3h 43min ago
+ Invocation: 7eebb57918af48eeac79c7fd555d11b6
+TriggeredBy: ● pipewire.socket
+   Main PID: 97138 (pipewire)
+      Tasks: 2 (limit: 18402)
+     Memory: 56.4M (peak: 78.5M, swap: 25.1M, swap peak: 25.3M)
+        CPU: 3min 51.290s
+     CGroup: /user.slice/user-1000.slice/user@1000.service/session.slice/pipewire.service
+             └─97138 /usr/bin/pipewire
+
+Oct 09 22:40:16 maniskg pipewire[97138]: mod.client-node: detected old client version 4
+Oct 09 22:40:20 maniskg pipewire[97138]: mod.client-node: detected old client version 4
+Oct 09 23:58:44 maniskg pipewire[97138]: pw.node: (bluez_output.9E_74_98_79_5D_15.1-123) running -> error (Received error event)
+Oct 09 23:59:26 maniskg pipewire[97138]: pw.node: (bluez_output.9E_74_98_79_5D_15.1-111) running -> error (Received error event)
+Oct 10 00:00:20 maniskg pipewire[97138]: pw.node: (bluez_output.9E_74_98_79_5D_15.1-95) running -> error (Received error event)
+
+● pipewire-pulse.service - PipeWire PulseAudio
+     Loaded: loaded (/usr/lib/systemd/user/pipewire-pulse.service; disabled; preset: enabled)
+    Drop-In: /etc/systemd/user/pipewire-pulse.service.d
+             └─90-desktop-oom.conf
+     Active: active (running) since Fri 2026-10-09 22:21:23 IST; 3h 31min ago
+ Invocation: 1c98a0a626c54679aa42aef7fffb8598
+TriggeredBy: ● pipewire-pulse.socket
+   Main PID: 103985 (pipewire-pulse)
+      Tasks: 2 (limit: 18402)
+     Memory: 16.1M (peak: 23.8M, swap: 1M, swap peak: 2.3M)
+        CPU: 1min 4.811s
+     CGroup: /user.slice/user-1000.slice/user@1000.service/session.slice/pipewire-pulse.service
+             └─103985 /usr/bin/pipewire-pulse
+
+Oct 09 22:21:23 maniskg systemd[943]: pipewire-pulse.service: Failed with result 'core-dump'.
+Oct 09 23:58:44 maniskg pipewire-pulse[103985]: mod.protocol-pulse: 0x55781b9a7670: card 94 port 1 profiles inconsistent (1 < 2)
+Oct 09 23:59:26 maniskg pipewire-pulse[103985]: mod.protocol-pulse: 0x55781b9a7670: card 153 port 1 profiles inconsistent (1 < 2)
+Oct 09 23:59:27 maniskg pipewire-pulse[103985]: mod.protocol-pulse: client 0x55781bd13470 [pactl]: ERROR command:67 (MOVE_SINK_INPUT) tag:2 error:3 (Invalid argument)
+Oct 10 00:00:20 maniskg pipewire-pulse[103985]: mod.protocol-pulse: 0x55781b9a7670: card 143 port 1 profiles inconsistent (1 < 2)
+Oct 10 01:31:24 maniskg pipewire-pulse[103985]: mod.protocol-pulse: client 0x55781bd0ff50 [pactl]: ERROR command:67 (MOVE_SINK_INPUT) tag:2 error:3 (Invalid argument)
+
+● wireplumber.service - Multimedia Service Session Manager
+     Loaded: loaded (/usr/lib/systemd/user/wireplumber.service; enabled; preset: enabled)
+    Drop-In: /etc/systemd/user/wireplumber.service.d
+             └─90-desktop-oom.conf
+     Active: active (running) since Fri 2026-10-09 22:16:10 IST; 3h 36min ago
+ Invocation: 33a877bca74847abb1f5a59b2c776d65
+   Main PID: 101545 (wireplumber)
+      Tasks: 7 (limit: 18402)
+     Memory: 18.5M (peak: 21.9M, swap: 376K, swap peak: 392K)
+        CPU: 3min 18.074s
+     CGroup: /user.slice/user-1000.slice/user@1000.service/session.slice/wireplumber.service
+             └─101545 /usr/bin/wireplumber
+
+Oct 10 00:00:20 maniskg wireplumber[101545]: spa.bluez5.sink.media: Missing completion reports for packet (0 suppressed): Bluetooth adapter firmware bug?
+Oct 10 00:00:20 maniskg wireplumber[101545]: spa.bluez5.sink.media: Missing completion reports for packet (0 suppressed): Bluetooth adapter firmware bug?
+Oct 10 00:00:20 maniskg wireplumber[101545]: spa.bluez5.sink.media: Missing completion reports for packet (0 suppressed): Bluetooth adapter firmware bug?
+Oct 10 00:00:20 maniskg wireplumber[101545]: spa.bluez5.sink.media: Missing completion reports for packet (0 suppressed): Bluetooth adapter firmware bug?
+Oct 10 00:00:20 maniskg wireplumber[101545]: spa.bluez5.sink.media: Missing completion reports for packet (0 suppressed): Bluetooth adapter firmware bug?
+Oct 10 00:00:20 maniskg wireplumber[101545]: spa.bluez5.sink.media: Missing completion reports for packet (0 suppressed): Bluetooth adapter firmware bug?
+Oct 10 00:00:20 maniskg wireplumber[101545]: spa.bluez5.sink.media: Missing completion reports for packet (0 suppressed): Bluetooth adapter firmware bug?
+Oct 10 00:00:20 maniskg wireplumber[101545]: spa.bluez5.sink.media: Missing completion reports for packet (0 suppressed): Bluetooth adapter firmware bug?
+Oct 10 00:00:20 maniskg wireplumber[101545]: pw.node: (bluez_output.9E_74_98_79_5D_15.1-95) running -> error (Received error event)
+Oct 10 00:00:20 maniskg wireplumber[101545]: spa.bluez5: Failure in Bluetooth audio transport /org/bluez/hci0/dev_9E_74_98_79_5D_15/sep1/fd0
+
+● asus-speaker-dsp.service - ASUS TUF Speaker DSP (DAX3 Filter Chain)
+     Loaded: loaded (/home/manisk/.config/systemd/user/asus-speaker-dsp.service; enabled; preset: enabled)
+     Active: active (running) since Sat 2026-10-10 01:43:09 IST; 9min ago
+ Invocation: 99ea52e81d9d476884574442be794896
+   Main PID: 279586 (pipewire)
+      Tasks: 2 (limit: 18402)
+     Memory: 8.5M (peak: 9.5M)
+        CPU: 225ms
+     CGroup: /user.slice/user-1000.slice/user@1000.service/app.slice/asus-speaker-dsp.service
+             └─279586 /usr/bin/pipewire -c /home/manisk/.config/pipewire/asus-tuf-dax/active-runner.conf
