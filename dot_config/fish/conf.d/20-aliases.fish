@@ -71,7 +71,7 @@ alias lgall="git add . && git commit -m 'something' && git push -u origin master
 
 # Package Management (Arch / CachyOS / Paru / FZF)
 alias pcheck="checkupdates; paru -Qua 2>/dev/null"
-alias uall="/home/manisk/.local/bin/uall"
+# uall is a PATH script (~/.local/bin/uall) - no alias so fish never caches a stale copy
 alias paru="paru --noconfirm"
 alias pki="pkg install"
 alias pkia="pkg aur"
