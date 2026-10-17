@@ -13,8 +13,8 @@ set -euo pipefail
 
 echo "==> [1/4] Official repos (pacman -Syu; snap-pac snapshots inside)"
 sudo pacman -Syu --noconfirm
-echo "==> [2/4] AUR (paru -Syu, auto-accepted, no PKGBUILD review)"
-paru -Syu --noconfirm --noedit
+echo "==> [2/4] AUR (paru -Syu, auto-accepted, review skipped)"
+paru -Syu --noconfirm --skipreview
 echo "==> [3/4] npm globals"
 npm update -g 2>/dev/null || echo "    (npm globals skipped)"
 echo "==> [4/4] fish plugins"
