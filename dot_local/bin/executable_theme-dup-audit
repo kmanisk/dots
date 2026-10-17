@@ -1,0 +1,175 @@
+#!/usr/bin/env python3
+"""Theme palette duplicate audit for the unified theme engine cache."""
+import glob, json, math, os
+
+CACHE = os.path.expanduser("~/.cache/theme/themes")
+KEYS = ["BASE00", "BASE01", "BASE02", "BASE03", "BASE04", "BASE05", "BASE06", "BASE07",
+        "BASE08", "BASE09", "BASE0A", "BASE0B", "BASE0C", "BASE0D", "BASE0E", "BASE0F"]
+
+def rgb(h):
+    if not isinstance(h, str) or not h.startswith("#") or len(h) < 7:
+        return None
+    try:
+        return tuple(int(h[i:i+2], 16) for i in (1, 3, 5))
+    except ValueError:
+        return None
+
+themes = {}
+for f in glob.glob(os.path.join(CACHE, "*.json")):
+    try:
+        d = json.load(open(f))
+    except Exception:
+        continue
+    pal = (d.get("palette") or {}).get("base_16") or {}
+    cols = [rgb(pal.get(k)) for k in KEYS]
+    if any(c is None for c in cols):
+        continue
+    name = d.get("name") or os.path.basename(f)[:-5]
+    themes[name] = {
+        "type": d.get("type", "?"),
+        "accent": d.get("accent"),
+        "provider": (d.get("source") or {}).get("provider", "?"),
+        "cols": cols,
+    }
+
+print(f"themes with full 16-color palettes: {len(themes)}")
+
+def mean_dist(a, b):
+    return math.sqrt(sum(sum((x - y) ** 2 for x, y in zip(p, q)) for p, q in zip(a["cols"], b["cols"])) / 16.0)
+
+names = sorted(themes)
+pairs = []
+for i, a in enumerate(names):
+    for b in names[i+1:]:
+        if themes[a]["type"] != themes[b]["type"]:
+            continue  # compare dark with dark, light with light only
+        pairs.append((mean_dist(themes[a], themes[b]), a, b))
+pairs.sort()
+
+print("\n== 40 closest same-type pairs (mean RGB distance, 0 = identical, max 441) ==")
+for d, a, b in pairs[:40]:
+    print(f"{d:6.1f}  {a}  <->  {b}   [{themes[a]['provider']}/{themes[b]['provider']}]")
+
+# Cluster via union-find
+THRESH = 30.0
+parent = {n: n for n in names}
+def find(x):
+    while parent[x] != x:
+        parent[x] = parent[parent[x]]
+        x = parent[x]
+    return x
+def union(a, b):
+    ra, rb = find(a), find(b)
+    if ra != rb:
+        parent[rb] = ra
+for d, a, b in pairs:
+    if d < THRESH:
+        union(a, b)
+
+clusters = {}
+for n in names:
+    clusters.setdefault(find(n), []).append(n)
+tls = [sorted(v) for v in clusters.values() if len(v) > 1]
+tls.sort(key=len, reverse=True)
+print(f"\n== clusters closer than {THRESH} (same type), {len(tls)} multi-member clusters ==")
+for cl in tls:
+    print(f"[{len(cl)}] " + " | ".join(f"{m}({themes[m]['provider']})" for m in cl))
+
+# Direct check of the user's example: any 'void' theme vs cthulhu
+print("\n== void / cthulhu direct check ==")
+cands = [n for n in names if "void" in n.lower()]
+cth = [n for n in names if "cthulhu" in n.lower()]
+print("void-like:", cands)
+print("cthulhu-like:", cth)
+for a in cands:
+    for b in cth:
+        if themes[a]["type"] == themes[b]["type"]:
+            print(f"  distance {a} <-> {b}: {mean_dist(themes[a], themes[b]):.1f}")
+
+"""theme-dup-audit: cluster near-duplicate theme palettes in the unified theme engine cache (~/.cache/theme/themes). Reads auto-generated schema-1 json; compares 16-color base_16 palettes, same-type only. stdout report; full pairs included."""#!/usr/bin/env python3
+"""Theme palette duplicate audit for the unified theme engine cache."""
+import glob, json, math, os
+
+CACHE = os.path.expanduser("~/.cache/theme/themes")
+KEYS = ["BASE00", "BASE01", "BASE02", "BASE03", "BASE04", "BASE05", "BASE06", "BASE07",
+        "BASE08", "BASE09", "BASE0A", "BASE0B", "BASE0C", "BASE0D", "BASE0E", "BASE0F"]
+
+def rgb(h):
+    if not isinstance(h, str) or not h.startswith("#") or len(h) < 7:
+        return None
+    try:
+        return tuple(int(h[i:i+2], 16) for i in (1, 3, 5))
+    except ValueError:
+        return None
+
+themes = {}
+for f in glob.glob(os.path.join(CACHE, "*.json")):
+    try:
+        d = json.load(open(f))
+    except Exception:
+        continue
+    pal = (d.get("palette") or {}).get("base_16") or {}
+    cols = [rgb(pal.get(k)) for k in KEYS]
+    if any(c is None for c in cols):
+        continue
+    name = d.get("name") or os.path.basename(f)[:-5]
+    themes[name] = {
+        "type": d.get("type", "?"),
+        "accent": d.get("accent"),
+        "provider": (d.get("source") or {}).get("provider", "?"),
+        "cols": cols,
+    }
+
+print(f"themes with full 16-color palettes: {len(themes)}")
+
+def mean_dist(a, b):
+    return math.sqrt(sum(sum((x - y) ** 2 for x, y in zip(p, q)) for p, q in zip(a["cols"], b["cols"])) / 16.0)
+
+names = sorted(themes)
+pairs = []
+for i, a in enumerate(names):
+    for b in names[i+1:]:
+        if themes[a]["type"] != themes[b]["type"]:
+            continue  # compare dark with dark, light with light only
+        pairs.append((mean_dist(themes[a], themes[b]), a, b))
+pairs.sort()
+
+print("\n== 40 closest same-type pairs (mean RGB distance, 0 = identical, max 441) ==")
+for d, a, b in pairs[:40]:
+    print(f"{d:6.1f}  {a}  <->  {b}   [{themes[a]['provider']}/{themes[b]['provider']}]")
+
+# Cluster via union-find
+THRESH = 30.0
+parent = {n: n for n in names}
+def find(x):
+    while parent[x] != x:
+        parent[x] = parent[parent[x]]
+        x = parent[x]
+    return x
+def union(a, b):
+    ra, rb = find(a), find(b)
+    if ra != rb:
+        parent[rb] = ra
+for d, a, b in pairs:
+    if d < THRESH:
+        union(a, b)
+
+clusters = {}
+for n in names:
+    clusters.setdefault(find(n), []).append(n)
+tls = [sorted(v) for v in clusters.values() if len(v) > 1]
+tls.sort(key=len, reverse=True)
+print(f"\n== clusters closer than {THRESH} (same type), {len(tls)} multi-member clusters ==")
+for cl in tls:
+    print(f"[{len(cl)}] " + " | ".join(f"{m}({themes[m]['provider']})" for m in cl))
+
+# Direct check of the user's example: any 'void' theme vs cthulhu
+print("\n== void / cthulhu direct check ==")
+cands = [n for n in names if "void" in n.lower()]
+cth = [n for n in names if "cthulhu" in n.lower()]
+print("void-like:", cands)
+print("cthulhu-like:", cth)
+for a in cands:
+    for b in cth:
+        if themes[a]["type"] == themes[b]["type"]:
+            print(f"  distance {a} <-> {b}: {mean_dist(themes[a], themes[b]):.1f}")
