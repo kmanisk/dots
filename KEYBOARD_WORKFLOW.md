@@ -31,10 +31,9 @@ All future keybinding modifications across **i3**, **xremap**, **Zed**, **Alacri
 │                       Win + [ / ]          (WS 5–6)         │
 │  - Move + Follow:     Win + Shift + u / i / o / p           │
 │                       Win + Shift + { / }                   │
-│  - Layout Toggles:    Win + ; or Win + a (Smart Tiling/Tab) │
+│  - Layout Toggles:    Win + ; (Smart Tiling/Tab)            │
 │  - Fast Window Kill:  Win + q or Win + x                    │
 │  - Persistent Clip:   Win + y (Cliphist + Rofi Gruvbox)     │
-│  - Cheatsheet Modal:  Win + ? (Shift + /)                   │
 └──────────────────────────────┬──────────────────────────────┘
                                │
 ┌──────────────────────────────▼──────────────────────────────┐
@@ -79,8 +78,7 @@ All future keybinding modifications across **i3**, **xremap**, **Zed**, **Alacri
 | **`q` or `x`** | `Win` (`Mod4`) | Close / Kill Focused Window | i3wm | Left thumb + ring/index | **8.5/10** |
 | **`Return`** | `Win` or `Alt` | Launch Alacritty Terminal | i3wm | Left thumb + Right pinky | **9/10** |
 | **`y`** | `Win` (`Mod4`) | Clipboard History (Rofi + Cliphist) | i3wm | Left thumb + Right index | **8.5/10** |
-| **`?` (`Shift + /`)** | `Win` (`Mod4`) | Rofi Cheatsheet Fuzzy Finder | i3wm | Replaces deprecated F1 | **8.5/10** |
-| **`Ctrl + ?`** | `Win` (`Mod4`) | Open Full Cheatsheet in Zed Markdown | i3wm | Replaces deprecated Shift+F1 | **8/10** |
+| **`?` (`Shift + /`)** | `Win` (`Mod4`) | Rofi Websearch | i3wm | **8.5/10** |
 | **`Caps` (Tap)** | None | `Escape` (Threshold: 200ms) | xremap | Left home pinky | **10/10** |
 | **`Caps + h / j / k / l`** | Caps (Hold) | Physical Arrow Keys (← ↓ ↑ →) | xremap | Left home pinky + Right home row | **10/10** |
 | **`Caps + o / p`** | Caps (Hold) | Word Jump Left / Right (`Ctrl+← / →`)| xremap | Left home pinky + Right top row | **9.5/10** |
@@ -105,7 +103,6 @@ Whenever modifying keybindings, update the source configurations and keep dotfil
 | **i3 Window Manager** | `~/.config/i3/config` | `~/.local/share/chezmoi/dot_config/i3/config` |
 | **xremap Key Remapper** | `~/.config/xremap/config.yml` | `~/.local/share/chezmoi/dot_config/xremap/config.yml` |
 | **Zed Editor Keymap** | `~/.config/zed/keymap.json` | `~/.local/share/chezmoi/dot_config/zed/keymap.json` |
-| **Dynamic Cheatsheet** | `~/.local/bin/i3-cheatsheet` | `~/.local/share/chezmoi/dot_local/bin/executable_i3-cheatsheet` |
 
 ### Validation & Reload Checklist
 1. **Validate i3 syntax:**

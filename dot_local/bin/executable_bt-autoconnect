@@ -138,6 +138,10 @@ class BluetoothAutoConnector:
                 self.log(f"Connection already in progress for {name} ({addr})")
                 continue
 
+            if bool(props.get("Blocked", False)):
+                self.log(f"{name} ({addr}) is blocked (auto-connect refused); skipping.")
+                continue
+
             self.log(f"Initiating async connect to {name} ({addr})...")
             self.connecting_devices.add(addr)
 

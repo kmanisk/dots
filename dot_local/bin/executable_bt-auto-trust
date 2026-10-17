@@ -159,10 +159,11 @@ def auto_connect_trusted_audio():
                 paired   = props.get('Paired', False)
                 trusted  = props.get('Trusted', False)
                 connected = props.get('Connected', False)
+                blocked  = props.get('Blocked', False)
                 uuids    = props.get('UUIDs', [])
                 name     = props.get('Name', 'Unknown')
                 is_audio = any("110b" in u.lower() or "110a" in u.lower() for u in uuids)
-                if paired and trusted and not connected and is_audio:
+                if paired and trusted and not connected and is_audio and not blocked:
                     mac = path.split("dev_")[-1].replace("_", ":")
                     print(f"[+] Boot auto-connect: {name} ({mac})")
                     subprocess.Popen(["bluetoothctl", "connect", mac],

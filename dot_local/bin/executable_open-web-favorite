@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# open-web-favorite - Open a URL in the browser and focus the browser workspace
+# ==============================================================================
+# Called by generated fuzzel favorites (.desktop Exec). Opens the URL and
+# focuses the browser workspace (WS2).
+set -u
+
+url="${1:-}"
+[ -n "$url" ] || exit 1
+
+xdg-open "$url" >/dev/null 2>&1 &
+
+if [ -n "${SWAYSOCK:-}" ]; then
+    swaymsg "workspace number 2" >/dev/null 2>&1 || true
+else
+    i3-msg "workspace number 2" >/dev/null 2>&1 || true
+fi

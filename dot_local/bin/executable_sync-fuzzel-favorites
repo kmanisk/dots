@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# sync-fuzzel-favorites - Project bookmarks into the Fuzzel launcher (Alt+Space)
+# ==============================================================================
+# Source of truth: ~/.config/rofi/favorites.list  (Name | URL | [icon])
+# Output:          ~/.local/share/applications/fuzzel-favorite-*.desktop
+#
+# Display names are emoji-stripped; logos come from icon names resolved via the
+# hicolor icon theme (SVGs in ~/.local/share/icons/hicolor/scalable/apps).
+set -u
+
+LIST_FILE="$HOME/.config/rofi/favorites.list"
+APPS_DIR="$HOME/.local/share/applications"
+ICONS_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
+PREFIX="fuzzel-favorite"
+HELPER="$HOME/.local/bin/open-web-favorite"
+
+[ -f "$LIST_FILE" ] || { echo "sync-fuzzel-favorites: $LIST_FILE not found" >&2; exit 1; }
+mkdir -p "$APPS_DIR"
+
+# Drop previously generated entries so removals in the list propagate
+rm -f "$APPS_DIR/${PREFIX}"-*.desktop
+
+count=0
+while IFS='|' read -r name url icon; do
+    # Trim surrounding whitespace (bash builtin, no forks)
+    name="${name#"${name%%[![:space:]]*}"}"; name="${name%"${name##*[![:space:]]}"}"
+    url="${url#"${url%%[![:space:]]*}"}";   url="${url%"${url##*[![:space:]]}"}"
+    icon="${icon-}"
+    icon="${icon#"${icon%%[![:space:]]*}"}"; icon="${icon%"${icon##*[![:space:]]}"}"
+
+    [ -n "$name" ] && [ -n "$url" ] || continue
+
+    # Strip leading emoji/symbols from the display name (fuzzel menu style)
+    clean="$(printf '%s' "$name" | sed -E 's/^[^0-9A-Za-z]+//')"
+    [ -n "$clean" ] || clean="$name"
+
+    # Stable filesystem-safe slug from the URL
+    slug="$(printf '%s' "$url" | sed -E 's#^[a-z]+://##; s#^www\.##; s#[^0-9A-Za-z]+#-#g; s#^-+|-+$##g' | cut -c1-60)"
+
+    # Escape % for the .desktop Exec field (field codes)
+    exec_url="$(printf '%s' "$url" | sed 's/%/%%/g')"
+
+    # Resolve logo to an absolute .svg path (fuzzel loads these directly);
+    # fall back to a theme icon name if no local logo exists
+    icon_path="$icon"
+    if [ -n "$icon" ]; then
+        case "$icon" in
+            /*) [ -f "$icon" ] || icon_path="" ;;
+            *)  [ -f "$ICONS_DIR/$icon.svg" ] && icon_path="$ICONS_DIR/$icon.svg" ;;
+        esac
+    fi
+
+    file="$APPS_DIR/${PREFIX}-${slug}.desktop"
+    {
+        echo "[Desktop Entry]"
+        echo "Type=Application"
+        echo "Name=$clean"
+        echo "Comment=Web favorite"
+        echo "Exec=$HELPER $exec_url"
+        [ -n "$icon_path" ] && echo "Icon=$icon_path"
+        echo "Terminal=false"
+        echo "Categories=Network;WebBrowser;"
+        echo "Keywords=bookmark;favorite;web;"
+        echo "StartupNotify=false"
+    } > "$file"
+
+    count=$((count + 1))
+done < "$LIST_FILE"
+
+command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APPS_DIR" >/dev/null 2>&1
+
+[ -t 1 ] && echo "Synced $count favorites into fuzzel ($APPS_DIR)"
+exit 0

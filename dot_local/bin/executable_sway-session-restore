@@ -257,7 +257,7 @@ def restore_system_state(sock, saved, dry):
 
 def restore_ws(sock, ws, entries, present, dry, steam_killed=False):
     # Apps that can legitimately have multiple windows open at once.
-    MULTI_INSTANCE = {"alacritty", "ghostty"}
+    MULTI_INSTANCE = {"alacritty", "ghostty", "foot", "kitty"}
     # Track per-app launch count for multi-instance apps this call.
     launched_count: dict = {}
     launched = 0

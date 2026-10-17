@@ -15,6 +15,8 @@ HINTS=$(cat <<'HINT_EOF'
 !pdb ProtonDB
 !ddg DuckDuckGo
 !sdb SteamDB
+!fg  FitGirl Repacks
+!sr  SteamRIP
 Google (Default)
 HINT_EOF
 )
@@ -55,12 +57,15 @@ for arg in "$@"; do
 done
 
 # 1. First prompt: user types query
-# Control+Return (custom-1) triggers suggestions; Enter triggers instant search
+# Enter submits exactly what is typed (instant search). Click a chip or type a
+# !bang (e.g. "!pdb") to target an engine. Control+Return (custom-1) triggers
+# suggestions; a trailing "?" also does.
 QUERY=$(echo "$HINTS" | rofi -dmenu -i -p "Search" \
     -sort \
     -sorting-method "fzf" \
     -matching "fuzzy" \
-    -kb-accept-custom "" \
+    -kb-accept-entry "" \
+    -kb-accept-custom "Return" \
     -kb-accept-alt "" \
     -kb-custom-1 "Control+Return" \
     -kb-custom-2 "Shift+Return" \
@@ -88,6 +93,8 @@ case "$QUERY" in
     *"ProtonDB"*|*"!pdb"*)      PREFIX="!pdb " ;;
     *"DuckDuckGo"*|*"!ddg"*)    PREFIX="!ddg " ;;
     *"SteamDB"*|*"!sdb"*)       PREFIX="!sdb " ;;
+    *"FitGirl"*|*"!fg"*)        PREFIX="!fg " ;;
+    *"SteamRIP"*|*"!sr"*)       PREFIX="!sr " ;;
     *"Google"*)                 PREFIX="" ;;
     *)                          PREFIX="" ;;
 esac
@@ -165,6 +172,14 @@ case "$QUERY" in
         ENGINE="steamdb"
         RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!sdb|sdb:|sdb|steamdb)[[:space:]]+//')"
         ;;
+    \!fg\ *|fg:\ *|fg\ *|fitgirl\ *|fitgirlrepacks\ *)
+        ENGINE="fitgirl"
+        RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!fg|fg:|fg|fitgirl|fitgirlrepacks)[[:space:]]+//')"
+        ;;
+    \!sr\ *|sr:\ *|sr\ *|steamrip\ *)
+        ENGINE="steamrip"
+        RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!sr|sr:|sr|steamrip)[[:space:]]+//')"
+        ;;
     \!so\ *|so:\ *|so\ *|stackoverflow\ *)
         ENGINE="stackoverflow"
         RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!so|so:|so|stackoverflow)[[:space:]]+//')"
@@ -232,6 +247,12 @@ case "$ENGINE" in
         ;;
     steamdb)
         URL="https://steamdb.info/search/?a=all&q=${ENCODED_QUERY}"
+        ;;
+    fitgirl)
+        URL="https://fitgirl-repacks.site/?s=${ENCODED_QUERY}"
+        ;;
+    steamrip)
+        URL="https://steamrip.com/?s=${ENCODED_QUERY}"
         ;;
     stackoverflow)
         URL="https://stackoverflow.com/search?q=${ENCODED_QUERY}"

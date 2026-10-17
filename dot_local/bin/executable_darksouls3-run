@@ -23,10 +23,9 @@ export PROTON_ENABLE_NVAPI=0
 # Load in-game mods: Souls3Mod FPS unlock (d3dcompiler_43 proxy) + ReShade (dxgi proxy + d3dcompiler_47)
 export WINEDLLOVERRIDES="d3d11=n,b;dinput8=n,b;d3dcompiler_43=n,b;d3dcompiler_47=n;dxgi=n,b"
 
-# MangoHud overlay: Position at top-right with custom layout (i5 Blue -> RTX 5050 Green -> Memory -> FPS)
+# MangoHud overlay: same minimal HUD as Elden Ring/global (starts hidden, Alt+3 toggles)
 export MANGOHUD=1
 export MANGOHUD_CONFIGFILE="/mnt/Games/NonSteamGames/Dark Souls III/MangoHud.conf"
-export MANGOHUD_CONFIG="position=top-right"
 
 # LSFG-VK 2.0: Enable profile unless explicit DISABLE_LSFGVK is set
 if [ "${ENABLE_LSFG:-1}" = "1" ] && [ "${DISABLE_LSFGVK:-0}" != "1" ]; then

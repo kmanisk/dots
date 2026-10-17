@@ -53,7 +53,7 @@ unset cache_dir zcompdump dump_cache
 # -----------------------------------------------------------------------------
 # [1] ENVIRONMENT VARIABLES & PATH
 # -----------------------------------------------------------------------------
-export TERMINAL='kitty'
+export TERMINAL='footclient'
 export EDITOR='nvim'
 export VISUAL='nvim'
 

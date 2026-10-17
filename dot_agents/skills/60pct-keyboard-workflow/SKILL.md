@@ -29,14 +29,14 @@ All future keybinding modifications across **i3**, **xremap**, **Zed**, **Alacri
   - Move: `Win + Shift + h / j / k / l`
   - Switch Workspaces: `Win + u / i / o / p` (WS 1–4), `Win + [ / ]` (WS 5–6)
   - Move + Follow: `Win + Shift + u / i / o / p`, `Win + Shift + { / }`
-  - Fast Window Kill: `Win + BackSpace` or `Win + q` (Graceful, eliminates pinky claw) / `Win + Shift + BackSpace` or `Win + Shift + q` (Force)
+  - Force Kill: `Win + BackSpace` (SIGKILL via force-kill-window; xremap: `Caps + BackSpace`)
+  - Graceful Close: `Win + q` only (polite WM_DELETE; xremap: `Caps + q`). Shift variants removed 2026-10-18.
   - Toggle Floating / Tiling: `Alt + Shift + Space`
   - Toggle Scratchpad / Background Focus: `Win + Space`
   - Spotify Scratchpad Toggle: `Win + m`
-  - Window Mark Mode: `Win + Shift + m` (mark container with letter, jump with `Win + '`)
   - Process Killer Menu: `Caps + w` (App Aggregator & Terminator; formerly `Win + Shift + e` / `Win + x`)
   - Persistent Clip: `Win + y` (Cliphist + Rofi Gruvbox)
-  - Cheatsheet Modal: `Win + ?` (`Shift + /`)
+  - Websearch: `Win + ?` (`Shift + /`; cheatsheet modal removed 2026-10-18)
   - Region Screenshot (Clipboard): `Win + S`
   - OCR Snip: `Win + Shift + S` (fullscreen screenshot in gaming mode)
   - Cursor Theme Toggle: `Alt + Shift + c` (Dark / Light)
@@ -56,8 +56,8 @@ All future keybinding modifications across **i3**, **xremap**, **Zed**, **Alacri
     - Volume Control: `Caps + ]` (VolumeUp), `Caps + \` (VolumeDown)
     - Fullscreen Screenshot: `Caps + Space` (file + clipboard; WS 3/4 save to `Screenshots/Gaming`, 2026-10-18)
     - Region Screenshot (Saved to File + Clipboard): `Caps + s`
-    - Window Close (Graceful): `Caps + q` or `Caps + BackSpace` (Two-Handed)
-    - Window Force Kill: `Caps + Shift + q` or `Caps + Shift + BackSpace`
+    - Window Close (Graceful): `Caps + q` only (Two-Handed)
+    - Window Force Kill: `Caps + BackSpace` (maps to `Win + BackSpace` force-kill)
     - Process Killer Menu: `Caps + w` (App-level aggregator & terminator; formerly `Win + Shift + e`)
     - Steam Launch (DGPU): `Caps + e` (Steam on WS 3 via `STEAM_DGPU=1 steam-workspace`; migrated from `Alt + Shift + S`, 2026-10-18)
     - Kill Steam & Games: `Caps + r` (Emergency terminator for Steam, Proton games & Wine processes)
@@ -81,4 +81,3 @@ All future keybinding modifications across **i3**, **xremap**, **Zed**, **Alacri
 - Fish shell: `~/.config/fish/config.fish`, `~/.config/fish/conf.d/`, and `~/.config/fish/functions/` (chezmoi: `~/.local/share/chezmoi/dot_config/fish/`)
 - xremap: `~/.config/xremap/config.yml` (chezmoi: `~/.local/share/chezmoi/dot_config/xremap/config.yml`)
 - Zed: `~/.config/zed/keymap.json` (chezmoi: `~/.local/share/chezmoi/dot_config/zed/keymap.json`)
-- Cheatsheet: `~/.local/bin/i3-cheatsheet` (chezmoi: `~/.local/share/chezmoi/dot_local/bin/executable_i3-cheatsheet`)

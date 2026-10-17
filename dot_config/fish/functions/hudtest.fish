@@ -40,6 +40,11 @@ function hudtest --description "Preview MangoHud telemetry overlay on a spinning
         echo "Rendering MangoHud preview with active configuration (~/.config/MangoHud/MangoHud.conf)"
     end
 
+    # Previews must always show the HUD even though the default preset hides it
+    # for games. read_cfg keeps the config file in the chain (a bare MANGOHUD_CONFIG
+    # would replace it entirely); no_display=0 is applied last and wins.
+    set -x MANGOHUD_CONFIG "read_cfg,no_display=0"
+
     if test $use_igpu -eq 1
         echo "GPU: Intel iGPU (Integrated)"
         mangohud vkcube

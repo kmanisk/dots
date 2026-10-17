@@ -38,15 +38,13 @@ keymap:
       CapsLock-Shift-r:
         launch: ["/home/manisk/.local/bin/killgame"]
 
-  # --- General Universal Copy / Paste / Cut (All GUI Applications) ---
-  - name: Universal Copy Paste
+  # --- Universal Paste (All GUI Applications; Win+C / Win+X pass through) ---
+  - name: Universal Paste
     application:
-      not: ["Alacritty", "kitty", "scratch-term", "scratch-notes", "cs2", "gamescope", "eldenring.exe", "GTAIV.exe", "^steam_app_.*"]
+      not: ["Alacritty", "kitty", "foot", "footclient", "scratch-term", "scratch-notes", "cs2", "gamescope", "eldenring.exe", "GTAIV.exe", "^steam_app_.*"]
     exact_match: true
     remap:
-      Super-c: C-c # Win+C -> Ctrl+C (Universal Copy)
       Super-v: C-v # Win+V -> Ctrl+V (Universal Paste)
-      Super-x: C-x # Win+X -> Ctrl+X (Universal Cut)
 
   # --- CapsLock layer ---
   - name: CapsLock layer
@@ -60,6 +58,8 @@ keymap:
       CapsLock-l: Right
       CapsLock-o: C-Left
       CapsLock-p: C-Right
+      CapsLock-Alt-j: { launch: ["/home/manisk/.local/bin/xscroll", "down"] }
+      CapsLock-Alt-k: { launch: ["/home/manisk/.local/bin/xscroll", "up"] }
       # Actions
       CapsLock-n: Enter
       CapsLock-SEMICOLON: [End, Enter]
@@ -93,13 +93,10 @@ keymap:
         launch: ["/home/manisk/.local/bin/screenshot-region", "--save"]
 
       # Window Close & Kill (Sway native integration):
-      # - CapsLock + q: Graceful close (without reaching down to physical Super)
-      # - CapsLock + BackSpace: Graceful close (two-handed)
-      # - CapsLock + Shift + q / CapsLock + Shift + BackSpace: Force kill
+      # - CapsLock + q: Graceful close (Win+q = polite WM_DELETE)
+      # - CapsLock + BackSpace: Force kill (Win+BackSpace = force-kill-window, 2026-10-18)
       CapsLock-q: Super-q
       CapsLock-BackSpace: Super-BackSpace
-      CapsLock-Shift-q: Super-Shift-q
-      CapsLock-Shift-BackSpace: Super-Shift-BackSpace
 
       # Process Killer Menu (formerly Win+Shift+e):
       CapsLock-w:
@@ -118,14 +115,31 @@ keymap:
       CapsLock-v:
         launch: ["/home/manisk/.local/bin/clipboard-view"]
 
+  # --- Terminal Scrollback (agy & foot terminals) ---
+  # Inline CLI tools like agy and standard shell sessions use Foot's native scrollback keys.
+  - name: Terminal scrollback
+    application:
+      only: ["foot", "footclient", "scratch-term", "scratch-notes"]
+    window:
+      not: ["/OC \\|/"]
+    exact_match: true
+    remap:
+      Alt-Ctrl-j: [C-S-j, C-S-j, C-S-j]
+      Ctrl-Alt-j: [C-S-j, C-S-j, C-S-j]
+      Alt-Ctrl-k: [C-S-k, C-S-k, C-S-k]
+      Ctrl-Alt-k: [C-S-k, C-S-k, C-S-k]
+      CapsLock-Alt-j: [C-S-j, C-S-j, C-S-j]
+      CapsLock-Alt-k: [C-S-k, C-S-k, C-S-k]
+
   # --- Mouse scroll (Alt+Ctrl layer, vim-style: j=down, k=up) ---
-  # xremap can't emit wheel natively (upstream XUPSCROLL match-only),
-  # so delegate to one-shot uinput emitter. Hold repeats via key repeat.
+  # Operates on opencode, Brave, and other GUI apps via persistent uinput wheel emulator.
   - name: Scroll emulation
     exact_match: true
     remap:
       Alt-Ctrl-j: { launch: ["/home/manisk/.local/bin/xscroll", "down"] }
+      Ctrl-Alt-j: { launch: ["/home/manisk/.local/bin/xscroll", "down"] }
       Alt-Ctrl-k: { launch: ["/home/manisk/.local/bin/xscroll", "up"] }
+      Ctrl-Alt-k: { launch: ["/home/manisk/.local/bin/xscroll", "up"] }
 
   # --- Katana Sub-legends on Right Alt (brightness) ---
   # REMOVED 2026-10-02: RightAlt-q/w entries were dead — modmap converts

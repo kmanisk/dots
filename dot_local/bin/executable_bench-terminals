@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+# ===================================================================
+# bench-terminals: Side-by-side memory and CPU benchmark in Sway WS5
+# Compares isolated Foot vs Kitty instance without touching WS1/scratchpad
+# ===================================================================
+
+set -euo pipefail
+
+# Invariant check: Sway environment
+if [[ -z "${SWAYSOCK:-}" ]]; then
+    echo "Error: SWAYSOCK is not set. This benchmark requires an active Sway session." >&2
+    exit 1
+fi
+
+for cmd in swaymsg jq foot kitty awk; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "Error: Required dependency '$cmd' not found in PATH." >&2
+        exit 1
+    fi
+done
+
+# Save original focused workspace
+ORIG_WS=$(swaymsg -t get_workspaces | jq -r '.[] | select(.focused==true).name')
+TARGET_WS="5"
+
+echo "Switching to workspace ${TARGET_WS} and launching test windows..."
+swaymsg "workspace ${TARGET_WS}" >/dev/null
+
+# Unique app-ids to prevent any collision with existing Kitty in WS1 or scratchpad
+KITTY_APPID="bench-kitty"
+FOOT_APPID="bench-foot"
+
+# Clean up any leftover stale benchmark processes if previously interrupted
+pkill -f "bench-kitty" 2>/dev/null || true
+pkill -f "bench-foot" 2>/dev/null || true
+
+# Launch both side by side on WS5
+kitty --class "${KITTY_APPID}" bash -c 'printf "=== Benchmark: Kitty (WS5) ===\nPID: $$\nWaiting for sampler...\n"; exec sleep 180' &
+KPID_LAUNCH=$!
+
+foot --app-id "${FOOT_APPID}" bash -c 'printf "=== Benchmark: Foot (WS5) ===\nPID: $$\nWaiting for sampler...\n"; exec sleep 180' &
+FPID_LAUNCH=$!
+
+# Allow windows to map, build OpenGL context / Wayland buffers, and settle
+echo "Settling processes and initializing Wayland surfaces (2.5s)..."
+sleep 2.5
+
+# Retrieve exact PIDs verified through Sway IPC tree node matching on WS5
+KITTY_PID=$(swaymsg -t get_tree | jq -r ".. | select(.type?==\"con\" and .app_id?==\"${KITTY_APPID}\") | .pid" | head -n1)
+FOOT_PID=$(swaymsg -t get_tree | jq -r ".. | select(.type?==\"con\" and .app_id?==\"${FOOT_APPID}\") | .pid" | head -n1)
+
+# Fallback to launch PID if Sway IPC reported empty
+KITTY_PID="${KITTY_PID:-$KPID_LAUNCH}"
+FOOT_PID="${FOOT_PID:-$FPID_LAUNCH}"
+
+if [[ ! -d "/proc/${KITTY_PID}" ]] || [[ ! -d "/proc/${FOOT_PID}" ]]; then
+    echo "Error: One of the benchmark processes failed to initialize." >&2
+    echo "Kitty PID: ${KITTY_PID}, Foot PID: ${FOOT_PID}" >&2
+    exit 1
+fi
+
+get_mem_kb() {
+    local pid="$1"
+    local field="$2"
+    awk -v f="${field}:" '$1==f {print $2; exit}' "/proc/${pid}/smaps_rollup" 2>/dev/null || echo "0"
+}
+
+get_cpu_ticks() {
+    local pid="$1"
+    awk '{print $14 + $15}' "/proc/${pid}/stat" 2>/dev/null || echo "0"
+}
+
+get_total_cpu_ticks() {
+    awk '/^cpu / {print $2 + $3 + $4 + $5 + $6 + $7 + $8}' /proc/stat
+}
+
+echo "Sampling CPU and memory metrics over 2.0s interval..."
+
+K_CPU_START=$(get_cpu_ticks "${KITTY_PID}")
+F_CPU_START=$(get_cpu_ticks "${FOOT_PID}")
+TOTAL_CPU_START=$(get_total_cpu_ticks)
+
+sleep 2.0
+
+K_CPU_END=$(get_cpu_ticks "${KITTY_PID}")
+F_CPU_END=$(get_cpu_ticks "${FOOT_PID}")
+TOTAL_CPU_END=$(get_total_cpu_ticks)
+
+# Read memory statistics from smaps_rollup (in kB)
+K_RSS=$(get_mem_kb "${KITTY_PID}" "Rss")
+K_PSS=$(get_mem_kb "${KITTY_PID}" "Pss")
+K_PRIV_CLEAN=$(get_mem_kb "${KITTY_PID}" "Private_Clean")
+K_PRIV_DIRTY=$(get_mem_kb "${KITTY_PID}" "Private_Dirty")
+K_USS=$(( K_PRIV_CLEAN + K_PRIV_DIRTY ))
+
+F_RSS=$(get_mem_kb "${FOOT_PID}" "Rss")
+F_PSS=$(get_mem_kb "${FOOT_PID}" "Pss")
+F_PRIV_CLEAN=$(get_mem_kb "${FOOT_PID}" "Private_Clean")
+F_PRIV_DIRTY=$(get_mem_kb "${FOOT_PID}" "Private_Dirty")
+F_USS=$(( F_PRIV_CLEAN + F_PRIV_DIRTY ))
+
+# Calculate CPU percentage
+TOTAL_DIFF=$(( TOTAL_CPU_END - TOTAL_CPU_START ))
+if (( TOTAL_DIFF > 0 )); then
+    K_CPU_PCT=$(awk -v diff="$(( K_CPU_END - K_CPU_START ))" -v tot="${TOTAL_DIFF}" 'BEGIN {printf "%.2f", (diff/tot)*100}')
+    F_CPU_PCT=$(awk -v diff="$(( F_CPU_END - F_CPU_START ))" -v tot="${TOTAL_DIFF}" 'BEGIN {printf "%.2f", (diff/tot)*100}')
+else
+    K_CPU_PCT="0.00"
+    F_CPU_PCT="0.00"
+fi
+
+# Convert kB to MB for display
+kb_to_mb() {
+    awk -v kb="$1" 'BEGIN {printf "%.2f", kb / 1024}'
+}
+
+K_RSS_MB=$(kb_to_mb "${K_RSS}")
+K_PSS_MB=$(kb_to_mb "${K_PSS}")
+K_USS_MB=$(kb_to_mb "${K_USS}")
+
+F_RSS_MB=$(kb_to_mb "${F_RSS}")
+F_PSS_MB=$(kb_to_mb "${F_PSS}")
+F_USS_MB=$(kb_to_mb "${F_USS}")
+
+DIFF_RSS_MB=$(awk -v k="${K_RSS_MB}" -v f="${F_RSS_MB}" 'BEGIN {printf "%.2f", k - f}')
+DIFF_PSS_MB=$(awk -v k="${K_PSS_MB}" -v f="${F_PSS_MB}" 'BEGIN {printf "%.2f", k - f}')
+DIFF_USS_MB=$(awk -v k="${K_USS_MB}" -v f="${F_USS_MB}" 'BEGIN {printf "%.2f", k - f}')
+
+RATIO_RSS=$(awk -v k="${K_RSS_MB}" -v f="${F_RSS_MB}" 'BEGIN {if (f > 0) printf "%.1fx", k / f; else print "N/A"}')
+
+echo ""
+echo "=================================================================="
+echo " TERMINAL BENCHMARK: WORKSPACE 5 ISOLATION (Single Instance)"
+echo "=================================================================="
+printf "%-22s %-16s %-16s %-16s\n" "Metric" "Kitty (PID ${KITTY_PID})" "Foot (PID ${FOOT_PID})" "Foot Advantage"
+printf "%-22s %-16s %-16s %-16s\n" "----------------------" "----------------" "----------------" "----------------"
+printf "%-22s %-16s %-16s %-16s\n" "RSS (Resident RAM)" "${K_RSS_MB} MB" "${F_RSS_MB} MB" "-${DIFF_RSS_MB} MB (${RATIO_RSS} leaner)"
+printf "%-22s %-16s %-16s %-16s\n" "PSS (Proportional)" "${K_PSS_MB} MB" "${F_PSS_MB} MB" "-${DIFF_PSS_MB} MB"
+printf "%-22s %-16s %-16s %-16s\n" "USS (Private RAM)" "${K_USS_MB} MB" "${F_USS_MB} MB" "-${DIFF_USS_MB} MB"
+printf "%-22s %-16s %-16s %-16s\n" "CPU Utilization" "${K_CPU_PCT}%" "${F_CPU_PCT}%" "Equal (idle)"
+echo "=================================================================="
+echo ""
+echo "=================================================================="
+echo " MULTI-WINDOW FOOTPRINT PROJECTION (Based on Measured RSS)"
+echo "=================================================================="
+printf "%-10s %-18s %-18s %-18s\n" "Windows" "Kitty Total RAM" "Foot Total RAM" "RAM Saved"
+printf "%-10s %-18s %-18s %-18s\n" "-------" "---------------" "--------------" "---------"
+
+for count in 1 3 5 6 8 10; do
+    K_TOT=$(awk -v c="${count}" -v m="${K_RSS_MB}" 'BEGIN {printf "%.1f MB", c * m}')
+    F_TOT=$(awk -v c="${count}" -v m="${F_RSS_MB}" 'BEGIN {printf "%.1f MB", c * m}')
+    SAVED=$(awk -v c="${count}" -v m="${DIFF_RSS_MB}" 'BEGIN {printf "%.1f MB (%.2f GB)", c * m, (c * m) / 1024}')
+    printf "%-10s %-18s %-18s %-18s\n" "${count}" "${K_TOT}" "${F_TOT}" "${SAVED}"
+done
+echo "=================================================================="
+echo ""
+
+# Prompt user for teardown
+read -r -p "Benchmark complete. Terminate test windows and return to WS ${ORIG_WS}? [Y/n]: " choice
+choice="${choice:-Y}"
+
+if [[ "${choice}" =~ ^[Yy]$ ]]; then
+    kill "${KITTY_PID}" 2>/dev/null || true
+    kill "${FOOT_PID}" 2>/dev/null || true
+    swaymsg "workspace ${ORIG_WS}" >/dev/null
+    echo "Benchmark windows cleaned up. Returned to workspace ${ORIG_WS}."
+else
+    echo "Windows left open on workspace 5."
+fi

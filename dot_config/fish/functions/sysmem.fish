@@ -1,3 +1,3 @@
-function sysmem --description "Audit system core, compositor, Xwayland and essential headless service memory"
+function sysmem --description "Inspect live system RAM breakdown, process categories, and baseline"
     ~/.local/bin/sysmem $argv
 end

@@ -1,9 +1,10 @@
 /**
- * Power Menu — big horizontal button bar (power-button-menu style).
+ * Power Menu — icon-only horizontal button bar.
  * Five equal tiles, left-to-right: Shutdown, Restart, Lock, Suspend, Logout.
+ * Labels intentionally omitted; the script maps each glyph to its action.
  * Colors inherited from ~/.config/rofi/system.rasi (theme engine compiled),
  * so a future `theme-set` recolors this menu automatically.
- * Layout: 2026-10-18 rewrite from vertical list to horizontal tiles.
+ * Layout: 2026-10-18 rewrite to icon-only square tiles (text labels removed).
  */
 @import "~/.config/rofi/system.rasi"
 
@@ -20,7 +21,7 @@ window {
     border:              2px;
     border-color:        @accent;
     border-radius:       0px;
-    width:               1120px;
+    width:               730px;
     location:            center;
     anchor:              center;
     padding:             24px;
@@ -43,12 +44,12 @@ listview {
     border:              0px;
 }
 
-/* One tile = one big button */
+/* One tile = one icon button */
 element {
     orientation:         vertical;
     background-color:    @background-alt;
     text-color:          @foreground;
-    padding:             28px 6px;
+    padding:             40px 6px;
     border:              2px;
     border-color:        @background-alt;
     border-radius:       0px;
@@ -65,7 +66,7 @@ element selected {
 element-text {
     background-color:    transparent;
     text-color:          inherit;
-    font:                "VictorMono Nerd Font Mono Bold 21";
-    vertical-align:      0.55;
+    font:                "VictorMono Nerd Font Mono Bold 36";
+    vertical-align:      0.5;
     horizontal-align:    0.5;
 }

@@ -72,6 +72,7 @@ alias lgall="git add . && git commit -m 'something' && git push -u origin master
 # Package Management (Arch / CachyOS / Paru / FZF)
 alias pcheck="checkupdates; paru -Qua 2>/dev/null"
 alias uall="paru && sudo pacman -Syu"
+alias paru="paru --noconfirm"
 alias pki="pkg install"
 alias pkia="pkg aur"
 alias pkr="pkg remove"

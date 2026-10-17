@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Modern Rofi Power Menu with Automatic i3 Session Preservation
+# Icon-Only Rofi Power Menu with Automatic i3 Session Preservation
 # ==============================================================================
 export PATH="$HOME/.local/bin:$PATH"
 
@@ -13,12 +13,12 @@ save_session() {
     fi
 }
 
-# Options with icons
-shutdown='⏻ Shutdown'
-reboot=' Restart'
-lock='󰌾 Lock Screen'
-suspend='󰤄 Suspend'
-logout='󰍃 Logout'
+# Icon-only entries (Material design glyphs; matched exactly in the case below)
+shutdown='󰐥'
+reboot='󰜉'
+lock='󰌾'
+suspend='󰤄'
+logout='󰍃'
 
 # Prompt via Rofi
 chosen=$(printf "%s\n%s\n%s\n%s\n%s" "$shutdown" "$reboot" "$lock" "$suspend" "$logout" | rofi \
@@ -31,21 +31,21 @@ chosen=$(printf "%s\n%s\n%s\n%s\n%s" "$shutdown" "$reboot" "$lock" "$suspend" "$
     -selected-row 0)
 
 case "$chosen" in
-    *"Shutdown"*)
+    "$shutdown")
         save_session
         systemctl poweroff
         ;;
-    *"Restart"*)
+    "$reboot")
         save_session
         systemctl reboot
         ;;
-    *"Lock"*)
+    "$lock")
         sleep 0.1 && swaylock -f -c 000000
         ;;
-    *"Suspend"*)
+    "$suspend")
         systemctl suspend
         ;;
-    *"Logout"*)
+    "$logout")
         save_session
         if [ -n "${SWAYSOCK:-}" ] || [ "${XDG_SESSION_TYPE:-}" = "wayland" ]; then
             swaymsg exit

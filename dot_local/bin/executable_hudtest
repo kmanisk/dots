@@ -13,4 +13,9 @@ if [[ -n "$TARGET_CONFIG" && -f "$TARGET_CONFIG" ]]; then
     shift
 fi
 
+# Previews must always show the HUD even though the default preset hides it
+# for games. read_cfg keeps the config file in the chain (a bare MANGOHUD_CONFIG
+# would replace it entirely); no_display=0 is then applied last and wins.
+export MANGOHUD_CONFIG="read_cfg,no_display=0"
+
 exec prime-run mangohud vkcube "$@"

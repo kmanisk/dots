@@ -7,6 +7,7 @@ set -gx LANG en_US.UTF-8
 set -gx LC_ALL en_US.UTF-8
 set -gx EDITOR nvim
 set -gx VISUAL nvim
+set -gx TERMINAL footclient
 
 # Ensure user binaries are prioritized in PATH
 fish_add_path -m ~/.local/bin

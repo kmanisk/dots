@@ -1,0 +1,91 @@
+#!/bin/bash
+# ==============================================================================
+# bt-refuse-toggle — toggle auto-connect refusal for the soundcore Q20i
+# ==============================================================================
+# Refused (Blocked=yes): the kernel rejects incoming connections from the
+#   device and the bt-autoconnect / bt-auto-trust daemons skip it entirely.
+# Allowed (Blocked=no) : normal auto-connect behavior returns (daemons plus
+#   the one-shot boot connect from bt-auto-trust).
+#
+# Bound in sway to $mod+Shift+Return. Pass --dry-run to preview the action.
+# To cover more devices, loop over a MAC:NAME list here.
+# ==============================================================================
+
+set -u
+
+MAC="B0:38:E2:78:9B:FE"
+NAME="soundcore Q20i"
+
+DRY_RUN=0
+case "${1:-}" in
+    --dry-run|-n) DRY_RUN=1 ;;
+    -h|--help)
+        printf 'usage: %s [--dry-run]\n' "${0##*/}"
+        printf 'Toggles auto-connect refusal (BlueZ block) for %s (%s).\n' "$NAME" "$MAC"
+        exit 0
+        ;;
+esac
+
+bt_state() {
+    bluetoothctl info "$MAC" 2>/dev/null | awk -F': ' '/Blocked:/ {print $2; exit}'
+}
+
+bt_connected() {
+    bluetoothctl info "$MAC" 2>/dev/null | grep -q "Connected: yes"
+}
+
+run_bt() {
+    if (( DRY_RUN )); then
+        printf 'dry-run: bluetoothctl %s\n' "$*"
+        return 0
+    fi
+    bluetoothctl "$@" >/dev/null 2>&1
+}
+
+notify() {
+    if (( DRY_RUN )); then
+        printf 'dry-run: notify-send %s | %s\n' "$1" "$2"
+        return 0
+    fi
+    notify-send -a Bluetooth \
+        -h string:x-canonical-private-synchronous:bt-refuse \
+        -i "${3:-audio-headphones}" -t 3000 "$1" "$2" 2>/dev/null || true
+}
+
+case "$(bt_state)" in
+    yes)  # currently refused -> allow auto-connect again
+        run_bt unblock "$MAC"
+        if ! bt_connected; then
+            if (( DRY_RUN )); then
+                printf 'dry-run: bluetoothctl connect %s (background)\n' "$MAC"
+            else
+                bluetoothctl connect "$MAC" >/dev/null 2>&1 &
+            fi
+        fi
+        want=no
+        title="Bluetooth auto-connect ON"
+        body="$NAME may connect automatically again"
+        icon="audio-headphones"
+        ;;
+    no)   # currently allowed -> refuse
+        run_bt block "$MAC"
+        if bt_connected; then
+            run_bt disconnect "$MAC"
+        fi
+        want=yes
+        title="Bluetooth auto-connect OFF"
+        body="$NAME is refused and stays disconnected"
+        icon="audio-volume-muted"
+        ;;
+    *)
+        notify "Bluetooth toggle failed" "Cannot read Blocked state for $NAME ($MAC)" dialog-error
+        exit 1
+        ;;
+esac
+
+if (( DRY_RUN )) || [[ "$(bt_state)" == "$want" ]]; then
+    notify "$title" "$body" "$icon"
+else
+    notify "Bluetooth toggle failed" "Expected Blocked=$want for $NAME ($MAC)" dialog-error
+    exit 1
+fi

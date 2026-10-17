@@ -1,103 +1,708 @@
-#!/usr/bin/env bash
+#!/usr/bin/env python3
 # ==============================================================================
-# sysmem: Audit true system baseline memory footprint (idle with nothing open).
-# Excludes visible interactive user apps (browsers, editors, games, agent processes).
-# Accurately includes:
-#   - Linux Kernel & Drivers (Slab, KMS)
-#   - Root System Daemons
-#   - Sway Compositor & Xwayland
-#   - All User Background Services (PipeWire, xremap, etc.)
-#   - Hidden Scratchpad Windows (Kitty terminal, Neovim scratchpad & subprocesses)
+# sysmem: System Memory Analyzer & Categorized Breakdown Tool
+# Target: CachyOS / Sway Wayland / x86-64-v3
+#
+# Audits real-time RAM usage with Proportional Set Size (PSS) accounting,
+# application-level workload aggregation, and idle baseline estimation.
 # ==============================================================================
-set -euo pipefail
+import argparse
+import glob
+import json
+import os
+import re
+import subprocess
+import sys
+from collections import defaultdict
 
-format_gb() {
-    local kb=$1
-    awk -v k="$kb" 'BEGIN { printf "%.2f GB\n", k / 1024 / 1024 }'
-}
+USE_COLOR = sys.stdout.isatty()
 
-# 1. Total Physical RAM from /proc/meminfo
-total_kb=$(awk '/MemTotal:/ {print $2}' /proc/meminfo)
 
-# 2. Kernel & Hardware Driver structures (Slab, PageTables, KernelStack)
-kernel_kb=$(awk '/^(Slab|PageTables|KernelStack):/ {sum += $2} END {print sum}' /proc/meminfo)
+def col(text, code):
+    if not USE_COLOR:
+        return text
+    return f"\033[{code}m{text}\033[0m"
 
-# 3. System-level Root Daemons (systemd, dbus, udev, network, etc.)
-root_daemons_kb=$(ps -u root -o rss= | awk '{sum += $1} END {print sum}')
 
-# 4. Sway Compositor + Xwayland
-sway_rss=0
-xwayland_rss=0
-while read -r rss comm; do
-    case "$comm" in
-        sway) sway_rss=$(( sway_rss + rss )) ;;
-        Xwayland) xwayland_rss=$(( xwayland_rss + rss )) ;;
-    esac
-done < <(ps -u "$UID" -o rss=,comm= | grep -E "\b(sway|Xwayland)\b" || true)
+def bold(text):
+    return col(text, "1")
 
-compositor_kb=$(( sway_rss + xwayland_rss ))
 
-# 5. Hidden Scratchpad Memory (Kitty scratch-term, scratch-notes, embedded Nvim)
-scratchpad_kb=$(python3 -c '
-import json, subprocess, sys
-try:
-    tree = json.loads(subprocess.check_output(["swaymsg", "-t", "get_tree"], stderr=subprocess.DEVNULL))
-except Exception:
-    sys.exit(0)
+def cyan(text):
+    return col(text, "36")
 
-scratch_pids = set()
-def find_pids(n, in_scratch=False):
-    name = n.get("name") or ""
-    if name in ("__i3", "__i3_scratch") or (n.get("type") == "workspace" and name == "__i3_scratch"):
-        in_scratch = True
-    if in_scratch and n.get("pid"):
-        scratch_pids.add(n["pid"])
-    for c in n.get("nodes", []) + n.get("floating_nodes", []):
-        find_pids(c, in_scratch)
-find_pids(tree)
 
-all_pids = set(scratch_pids)
-for p in list(scratch_pids):
+def green(text):
+    return col(text, "32")
+
+
+def yellow(text):
+    return col(text, "33")
+
+
+def blue(text):
+    return col(text, "34")
+
+
+def magenta(text):
+    return col(text, "35")
+
+
+def dim(text):
+    return col(text, "2")
+
+
+def red(text):
+    return col(text, "31")
+
+
+def format_mem(mb):
+    if mb >= 1024:
+        return f"{mb / 1024:6.2f} GB"
+    return f"{mb:6.1f} MB"
+
+
+def read_meminfo():
+    mem = {}
     try:
-        out = subprocess.check_output(["pgrep", "-P", str(p)], stderr=subprocess.DEVNULL).decode().split()
-        for sub in out:
-            all_pids.add(int(sub))
-            out2 = subprocess.check_output(["pgrep", "-P", sub], stderr=subprocess.DEVNULL).decode().split()
-            for sub2 in out2:
-                all_pids.add(int(sub2))
-    except Exception:
-        pass
+        with open("/proc/meminfo", "r") as f:
+            for line in f:
+                parts = line.split(":")
+                if len(parts) == 2:
+                    mem[parts[0].strip()] = int(parts[1].strip().split()[0])
+    except Exception as e:
+        print(f"Error reading /proc/meminfo: {e}", file=sys.stderr)
+        sys.exit(1)
+    return mem
 
-total_kb = 0
-for p in all_pids:
+
+def get_foot_window_count():
+    """Query Sway IPC tree to find exact number of active Foot windows."""
     try:
-        with open(f"/proc/{p}/statm") as f:
-            rss_pages = int(f.read().split()[1])
-            total_kb += rss_pages * 4
+        out = subprocess.check_output(
+            ["swaymsg", "-t", "get_tree"], stderr=subprocess.DEVNULL, timeout=1.0
+        )
+        tree = json.loads(out)
+        count = 0
+        normal = 0
+        scratch = 0
+
+        def walk(n, in_scratch=False):
+            nonlocal count, normal, scratch
+            name = n.get("name") or ""
+            if name in ("__i3", "__i3_scratch") or (
+                n.get("type") == "workspace" and name == "__i3_scratch"
+            ):
+                in_scratch = True
+            app = n.get("app_id") or ""
+            cls = (n.get("window_properties") or {}).get("class") or ""
+            if app in ("foot", "footclient", "scratch-term", "scratch-notes") or cls in (
+                "foot",
+                "footclient",
+            ):
+                count += 1
+                if in_scratch or app.startswith("scratch-"):
+                    scratch += 1
+                else:
+                    normal += 1
+            for c in n.get("nodes", []) + n.get("floating_nodes", []):
+                walk(c, in_scratch)
+
+        walk(tree)
+        return count, normal, scratch
     except Exception:
-        pass
-print(total_kb)
-' 2>/dev/null || echo 0)
+        return None, None, None
 
-# 6. ALL User Background Services & Audio Daemons
-# Exclude visible interactive user apps, as well as scratchpad processes already counted
-user_services_kb=$(ps -u "$UID" -o pid=,rss=,comm=,args= | \
-    grep -vE "\b(brave|firefox|chromium|zen-alpha|kitty|alacritty|wezterm|foot|xterm|nvim|vim|code|zed|opencode|steam|game|agy|mcp|node|npm|uv|kitten|fish|bash -c|top|ps|grep)\b" | \
-    awk '$3 !~ /^(sway|Xwayland)$/ {sum += $2} END {print sum+0}')
 
-# 7. Total True Idle RAM (Including hidden scratchpads)
-total_baseline_kb=$(( kernel_kb + root_daemons_kb + compositor_kb + user_services_kb + scratchpad_kb ))
+def classify_app_and_category(pid, comm, cmd):
+    comm_l = comm.lower()
+    cmd_l = cmd.lower()
 
-# 8. Formatted Summary Output
-echo "=============================================================="
-echo "          TRUE SYSTEM IDLE BASELINE MEMORY FOOTPRINT          "
-echo "=============================================================="
-printf "  1. Linux Kernel & Hardware Drivers (Slab, KMS)    :  %s\n" "$(format_gb "$kernel_kb")"
-printf "  2. System-wide Root Daemons (systemd, Network)    :  %s\n" "$(format_gb "$root_daemons_kb")"
-printf "  3. Display Compositor (Sway + Xwayland)           :  %s\n" "$(format_gb "$compositor_kb")"
-printf "  4. All User Background Services & Audio Daemons   :  %s\n" "$(format_gb "$user_services_kb")"
-printf "  5. Hidden Scratchpads (Kitty terminal, Neovim)   :  %s\n" "$(format_gb "$scratchpad_kb")"
-echo "--------------------------------------------------------------"
-printf "  TOTAL PURE IDLE RAM USAGE (NOTHING OPEN)          :  %s\n" "$(format_gb "$total_baseline_kb")"
-printf "  TOTAL PHYSICAL RAM INSTALLED                      :  %s\n" "$(format_gb "$total_kb")"
-echo "=============================================================="
+    # 1. Web Browsers (Brave, Chrome, Firefox, Zen)
+    if "brave" in comm_l or "brave" in cmd_l:
+        subtype = "Tab / Renderer"
+        if "--type=gpu-process" in cmd_l:
+            subtype = "GPU Process"
+        elif "--type=utility" in cmd_l:
+            m = re.search(r"--utility-sub-type=([a-zA-Z0-9_.]+)", cmd_l)
+            subtype = m.group(1).split(".")[-1] if m else "Utility"
+        elif "--type=renderer" in cmd_l:
+            subtype = "Extension" if "--extension-process" in cmd_l else "Tab / Renderer"
+        elif "--type=crashpad" in cmd_l:
+            subtype = "Crashpad"
+        else:
+            subtype = "Browser Core"
+        return "Brave Web Browser", subtype, "Web Browsers"
+
+    if any(b in comm_l or b in cmd_l for b in ["firefox", "zen-alpha", "zen", "chromium", "chrome"]):
+        return f"{comm} Browser", "Web Browser", "Web Browsers"
+
+    # 2. AI Agents & Coding Tools
+    if "opencode" in comm_l or "opencode" in cmd_l:
+        subtype = "Server Daemon" if "serve" in cmd_l else "Client Session"
+        return "opencode AI Assistant", subtype, "AI Agents & Dev Daemons"
+
+    if "agy" in comm_l or "/agy" in cmd_l or "antigravity" in cmd_l:
+        return "Antigravity CLI (agy)", "CLI Agent", "AI Agents & Dev Daemons"
+
+    if any(k in cmd_l for k in ["mcp-server", "mcp_server", "mcp"]) or any(
+        k in comm_l for k in ["arch-ops-server", "snapper-mcp"]
+    ):
+        for known in [
+            "steam-mcp",
+            "lutris-mcp",
+            "bash-mcp",
+            "color-scheme-mcp",
+            "arch-ops-server",
+            "snapper-mcp",
+            "mcp-server-filesystem",
+            "server-filesystem",
+            "server-git",
+            "server-fetch",
+        ]:
+            if known in cmd_l or known in comm_l:
+                return "MCP Tool Servers", known, "AI Agents & Dev Daemons"
+        return "MCP Tool Servers", "mcp-tool", "AI Agents & Dev Daemons"
+
+    if comm_l == "node" and ("build/index.js" in cmd_l or "index.js" in cmd_l):
+        return "MCP Tool Servers", "Node runtime", "AI Agents & Dev Daemons"
+    if "uv" in cmd_l and ("archive-v0" in cmd_l or "mcp" in cmd_l):
+        return "MCP Tool Servers", "Python UV", "AI Agents & Dev Daemons"
+
+    # 3. Terminal Emulators
+    if comm_l in ["foot", "footclient"]:
+        subtype = "Server Daemon" if "--server" in cmd_l else "Client Window"
+        return "Foot Terminal", subtype, "Terminal Emulators"
+    if comm_l == "kitty":
+        return "Kitty Terminal", "Terminal Window", "Terminal Emulators"
+    if comm_l in ["alacritty", "wezterm"]:
+        return f"{comm} Terminal", "Terminal Window", "Terminal Emulators"
+
+    # 4. Display Compositor & Desktop UI
+    if comm_l == "sway":
+        return "Sway Compositor", "Wayland Compositor", "Compositor & Display"
+    if comm_l == "xwayland":
+        return "Xwayland Display Server", "X11 Compatibility", "Compositor & Display"
+    if comm_l in ["waybar", "mako", "rofi", "xremap", "wlsunset", "swayidle", "swaylock"]:
+        return "Desktop Shell & UI", comm, "Compositor & Display"
+
+    # 5. Audio & Multimedia
+    if "pipewire" in comm_l:
+        return "PipeWire Audio", "Audio Engine", "Audio & Multimedia"
+    if "wireplumber" in comm_l:
+        return "WirePlumber", "Session Manager", "Audio & Multimedia"
+    if "dusky" in cmd_l:
+        return "Dusky Studio", "DSP RNNoise", "Audio & Multimedia"
+    if comm_l in ["cava", "mpv", "spotify"]:
+        return f"{comm} Media", comm, "Audio & Multimedia"
+
+    # 6. Shells & Editors
+    if comm_l in ["fish", "bash", "zsh"]:
+        return "Interactive Shells", comm, "Shells & CLI Tools"
+    if comm_l in ["nvim", "vim"]:
+        return "Neovim Editor", comm, "Shells & CLI Tools"
+    if comm_l in ["zed", "code"]:
+        return f"{comm} Code Editor", comm, "Shells & CLI Tools"
+    if comm_l in ["yazi", "btop", "htop", "tmux", "git", "tree"]:
+        return "CLI & System Utilities", comm, "Shells & CLI Tools"
+
+    # 7. Cloud Storage & Mounts
+    if "rclone" in comm_l or "rclone" in cmd_l:
+        return "rclone Cloud Storage", "gdrive mount", "System & Background Services"
+
+    # 8. Background & System Daemons (Fallback)
+    return "System & Root Daemons", comm, "System & Background Services"
+
+
+def get_process_metrics():
+    procs = []
+    cat_pss = defaultdict(int)
+    cat_rss = defaultdict(int)
+    cat_count = defaultdict(int)
+
+    app_pss = defaultdict(int)
+    app_rss = defaultdict(int)
+    app_subtypes = defaultdict(lambda: defaultdict(int))
+    app_category = {}
+
+    for pdir in glob.glob("/proc/[0-9]*"):
+        try:
+            pid = int(os.path.basename(pdir))
+            with open(f"/proc/{pid}/comm", "r", errors="ignore") as f:
+                comm = f.read().strip()
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                cmd = f.read().replace(b"\0", b" ").decode("utf-8", "replace").strip()
+
+            pss = 0
+            rss = 0
+            try:
+                with open(f"/proc/{pid}/smaps_rollup", "r", errors="ignore") as f:
+                    for line in f:
+                        if line.startswith("Pss:"):
+                            pss = int(line.split()[1])
+                        elif line.startswith("Rss:"):
+                            rss = int(line.split()[1])
+            except Exception:
+                with open(f"/proc/{pid}/statm", "r", errors="ignore") as f:
+                    rss = int(f.read().split()[1]) * 4
+                    pss = rss
+
+            app, subtype, cat = classify_app_and_category(pid, comm, cmd)
+
+            cat_pss[cat] += pss
+            cat_rss[cat] += rss
+            cat_count[cat] += 1
+
+            app_pss[app] += pss
+            app_rss[app] += rss
+            app_subtypes[app][subtype] += 1
+            app_category[app] = cat
+
+            procs.append({
+                "pid": pid,
+                "comm": comm,
+                "cmd": cmd,
+                "pss_kb": pss,
+                "rss_kb": rss,
+                "category": cat,
+                "app": app,
+                "subtype": subtype,
+            })
+        except Exception:
+            continue
+
+    return procs, cat_pss, cat_rss, cat_count, app_pss, app_rss, app_subtypes, app_category
+
+
+def make_bar(percent, width=14):
+    filled = int(round((percent / 100.0) * width))
+    filled = max(0, min(width, filled))
+    return f"[{'=' * filled}{' ' * (width - filled)}]"
+
+
+def render_breakdown(show_pids=False, show_categories=False, show_all=False, top_n=10, as_json=False):
+    mem = read_meminfo()
+    tot_kb = mem.get("MemTotal", 0)
+    avail_kb = mem.get("MemAvailable", 0)
+    used_kb = tot_kb - avail_kb
+    free_kb = mem.get("MemFree", 0)
+    cached_kb = mem.get("Cached", 0) + mem.get("Buffers", 0)
+    swap_tot_kb = mem.get("SwapTotal", 0)
+    swap_free_kb = mem.get("SwapFree", 0)
+    swap_used_kb = swap_tot_kb - swap_free_kb
+
+    slab_kb = mem.get("Slab", 0) + mem.get("PageTables", 0) + mem.get("KernelStack", 0)
+
+    tot_mb = tot_kb / 1024
+    used_mb = used_kb / 1024
+    avail_mb = avail_kb / 1024
+    cached_mb = cached_kb / 1024
+
+    (
+        procs,
+        cat_pss,
+        cat_rss,
+        cat_count,
+        app_pss,
+        app_rss,
+        app_subtypes,
+        app_category,
+    ) = get_process_metrics()
+
+    # Add Kernel structures into category tracking
+    cat_pss["Kernel & Drivers (Slab)"] = slab_kb
+    cat_rss["Kernel & Drivers (Slab)"] = slab_kb
+    cat_count["Kernel & Drivers (Slab)"] = 1
+
+    # Foot window count query via Sway
+    foot_win_count, foot_norm_count, foot_scratch_count = get_foot_window_count()
+
+    if as_json:
+        data = {
+            "system": {
+                "total_ram_mb": round(tot_mb, 2),
+                "used_ram_mb": round(used_mb, 2),
+                "available_ram_mb": round(avail_mb, 2),
+                "cached_ram_mb": round(cached_mb, 2),
+                "swap_used_mb": round(swap_used_kb / 1024, 2),
+                "swap_total_mb": round(swap_tot_kb / 1024, 2),
+            },
+            "applications": [
+                {
+                    "program": app,
+                    "pss_mb": round(pss_kb / 1024, 2),
+                    "rss_mb": round(app_rss[app] / 1024, 2),
+                    "ram_percent": round((pss_kb / 1024 / tot_mb) * 100, 2),
+                    "process_count": sum(app_subtypes[app].values()),
+                    "subtypes": dict(app_subtypes[app]),
+                    "foot_windows": foot_win_count if app == "Foot Terminal" else None,
+                }
+                for app, pss_kb in sorted(app_pss.items(), key=lambda x: x[1], reverse=True)
+            ],
+            "categories": [
+                {
+                    "category": cat,
+                    "pss_mb": round(pss_kb / 1024, 2),
+                    "rss_mb": round(cat_rss[cat] / 1024, 2),
+                    "ram_percent": round((pss_kb / 1024 / tot_mb) * 100, 2),
+                    "process_count": cat_count[cat],
+                }
+                for cat, pss_kb in sorted(cat_pss.items(), key=lambda x: x[1], reverse=True)
+            ],
+        }
+        print(json.dumps(data, indent=2))
+        return
+
+    # Text rendering: Compact Zero-Scroll View
+    used_pct = (used_mb / tot_mb) * 100
+    avail_pct = (avail_mb / tot_mb) * 100
+    swap_info = f" | Swap: {swap_used_kb/1024/1024:.2f}G/{swap_tot_kb/1024/1024:.2f}G" if swap_tot_kb > 0 else ""
+
+    try:
+        term_width = os.get_terminal_size().columns
+    except Exception:
+        term_width = 104
+    term_width = max(104, term_width)
+    div_line = bold("-" * term_width)
+    sub_div = dim("-" * term_width)
+
+    print(div_line)
+    print(
+        f"  RAM: {bold(f'{tot_mb/1024:.2f} GB')} | "
+        f"Used: {bold(yellow(f'{used_mb/1024:.2f} GB'))} ({used_pct:.1f}%) | "
+        f"Avail: {bold(green(f'{avail_mb/1024:.2f} GB'))} ({avail_pct:.1f}%) | "
+        f"Cache: {bold(blue(f'{cached_mb/1024:.2f} GB'))}{swap_info}"
+    )
+    print(div_line)
+
+    hdr_app = (
+        f"  {'APPLICATION':<26} {'MEMORY':>10}  "
+        f"{'% RAM':>6}   {'PROCESSES'}"
+    )
+    print(bold(hdr_app))
+    print(sub_div)
+
+    sorted_apps = sorted(app_pss.items(), key=lambda x: x[1], reverse=True)
+    display_apps = sorted_apps if (show_all or top_n is None) else sorted_apps[:top_n]
+
+    for app, pss_kb in display_apps:
+        pss_m = pss_kb / 1024
+        pct = (pss_m / tot_mb) * 100
+        total_procs = sum(app_subtypes[app].values())
+        proc_str = f"{total_procs} {'proc' if total_procs == 1 else 'procs'}"
+
+        app_padded = f"{app:<26}"
+        if "Browser" in app:
+            app_disp = yellow(app_padded)
+        elif "opencode" in app or "Antigravity" in app or "MCP" in app:
+            app_disp = magenta(app_padded)
+        elif "Foot" in app or "Terminal" in app:
+            app_disp = green(app_padded)
+        elif "Sway" in app or "Xwayland" in app:
+            app_disp = cyan(app_padded)
+        elif "PipeWire" in app or "WirePlumber" in app:
+            app_disp = blue(app_padded)
+        elif "System" in app or "Daemon" in app:
+            app_disp = bold(app_padded)
+        else:
+            app_disp = app_padded
+
+        pss_str = format_mem(pss_m)
+
+        print(f"  {app_disp} {pss_str:>10}  {pct:5.1f}%   {proc_str}")
+
+    # Section 2: Macro Category Breakdown (Full table on -c/--categories or -a/--all, compact bar by default)
+    if show_categories or show_all:
+        print(div_line)
+        print(bold(cyan("                       HIGH-LEVEL CATEGORY BREAKDOWN")))
+        print(sub_div)
+        hdr_cat = (
+            f"  {'CATEGORY':<30} {'MEMORY':>10} "
+            f"{'% RAM':>7} {'PROCS':<6} {'USAGE BAR'}"
+        )
+        print(bold(hdr_cat))
+        print(sub_div)
+
+        for cat, pss_kb in sorted(cat_pss.items(), key=lambda x: x[1], reverse=True):
+            pss_m = pss_kb / 1024
+            pct = (pss_m / tot_mb) * 100
+            cnt = cat_count[cat]
+            bar = make_bar(pct, width=14)
+            cat_padded = f"{cat:<30}"
+            if "Browser" in cat:
+                cat_disp = yellow(cat_padded)
+            elif "AI Agents" in cat:
+                cat_disp = magenta(cat_padded)
+            elif "Terminal" in cat:
+                cat_disp = green(cat_padded)
+            elif "Compositor" in cat:
+                cat_disp = cyan(cat_padded)
+            elif "Kernel" in cat:
+                cat_disp = blue(cat_padded)
+            else:
+                cat_disp = bold(cat_padded)
+
+            pss_str = format_mem(pss_m)
+            print(
+                f"  {cat_disp} {pss_str:>10} {pct:6.1f}%  {cnt:<6} {dim(bar)}"
+            )
+        print(div_line)
+    else:
+        # Compact category summary bar (keeps overall view under 15 lines, never scrolls off screen)
+        print(div_line)
+        cat_summaries = []
+        for cat, pss_kb in sorted(cat_pss.items(), key=lambda x: x[1], reverse=True)[:5]:
+            short_name = cat.split("(")[0].strip()
+            if "Web" in short_name:
+                short_name = "Web"
+                cat_lbl = yellow(short_name)
+            elif "AI Agents" in short_name:
+                short_name = "AI/Dev"
+                cat_lbl = magenta(short_name)
+            elif "Kernel" in short_name:
+                short_name = "Kernel"
+                cat_lbl = blue(short_name)
+            elif "System" in short_name:
+                short_name = "System"
+                cat_lbl = bold(short_name)
+            elif "Compositor" in short_name:
+                short_name = "Display"
+                cat_lbl = cyan(short_name)
+            else:
+                cat_lbl = short_name
+            cat_summaries.append(f"{cat_lbl}: {bold(f'{pss_kb/1024/1024:.2f}G')}")
+        cat_line = f"  {bold('Categories:')} " + " | ".join(cat_summaries)
+        print(cat_line)
+        print(div_line)
+
+    # Optional Section: Top Individual Processes (if --pids / -p is passed)
+    if show_pids:
+        print(div_line)
+        print(bold(cyan(f"          TOP {top_n} INDIVIDUAL PROCESSES (BY PROPORTIONAL RAM / PSS)")))
+        print(sub_div)
+        procs.sort(key=lambda x: x["pss_kb"], reverse=True)
+        hdr_top = f"  {'PID':<8} {'MEMORY':>10} {'% RAM':>7}   {'PROCESS / SUBTYPE'}"
+        print(bold(hdr_top))
+        print(sub_div)
+
+        for p in procs[:top_n]:
+            pid_s = f"{p['pid']:<8}"
+            pss_m = p["pss_kb"] / 1024
+            pct = (pss_m / tot_mb) * 100
+            lbl = f"{p['app']} ({p['subtype']})"
+            lbl_padded = f"{lbl:<44}"
+
+            if "Brave" in lbl:
+                lbl_disp = yellow(lbl_padded)
+            elif "agy" in lbl or "opencode" in lbl or "MCP" in lbl:
+                lbl_disp = magenta(lbl_padded)
+            elif "Foot" in lbl:
+                lbl_disp = green(lbl_padded)
+            elif "Sway" in lbl or "Xwayland" in lbl:
+                lbl_disp = cyan(lbl_padded)
+            else:
+                lbl_disp = lbl_padded
+
+            pss_str = format_mem(pss_m)
+            print(f"  {pid_s} {pss_str:>10} {pct:6.1f}%   {lbl_disp}")
+        print(div_line)
+
+
+def render_baseline():
+    mem = read_meminfo()
+    tot_kb = mem.get("MemTotal", 0)
+    kernel_kb = mem.get("Slab", 0) + mem.get("PageTables", 0) + mem.get("KernelStack", 0)
+
+    # 1. Root daemons
+    root_kb = 0
+    sway_kb = 0
+    xwayland_kb = 0
+    uid = os.getuid()
+
+    for pdir in glob.glob("/proc/[0-9]*"):
+        try:
+            pid = int(os.path.basename(pdir))
+            stat = os.stat(pdir)
+            with open(f"/proc/{pid}/statm", "r") as f:
+                rss = int(f.read().split()[1]) * 4
+            with open(f"/proc/{pid}/comm", "r") as f:
+                comm = f.read().strip()
+            if stat.st_uid == 0:
+                root_kb += rss
+            if stat.st_uid == uid:
+                if comm == "sway":
+                    sway_kb += rss
+                elif comm == "Xwayland":
+                    xwayland_kb += rss
+        except Exception:
+            continue
+
+    compositor_kb = sway_kb + xwayland_kb
+
+    # 2. Hidden scratchpads in Sway
+    scratchpad_kb = 0
+    try:
+        tree = json.loads(
+            subprocess.check_output(
+                ["swaymsg", "-t", "get_tree"], stderr=subprocess.DEVNULL
+            )
+        )
+        scratch_pids = set()
+
+        def find_pids(n, in_scratch=False):
+            name = n.get("name") or ""
+            if name in ("__i3", "__i3_scratch") or (
+                n.get("type") == "workspace" and name == "__i3_scratch"
+            ):
+                in_scratch = True
+            if in_scratch and n.get("pid"):
+                scratch_pids.add(n["pid"])
+            for c in n.get("nodes", []) + n.get("floating_nodes", []):
+                find_pids(c, in_scratch)
+
+        find_pids(tree)
+        for p in list(scratch_pids):
+            try:
+                with open(f"/proc/{p}/statm") as f:
+                    scratchpad_kb += int(f.read().split()[1]) * 4
+            except Exception:
+                pass
+    except Exception:
+        scratchpad_kb = 0
+
+    # 3. User services (exclude interactive apps and dev agents)
+    excluded_keywords = [
+        "brave",
+        "firefox",
+        "chromium",
+        "zen",
+        "kitty",
+        "alacritty",
+        "wezterm",
+        "foot",
+        "footclient",
+        "nvim",
+        "vim",
+        "code",
+        "zed",
+        "opencode",
+        "steam",
+        "game",
+        "agy",
+        "mcp",
+        "arch-ops-server",
+        "snapper-mcp",
+        "color-scheme",
+        "node",
+        "npm",
+        "uv",
+        "fish",
+        "bash",
+        "zsh",
+        "top",
+        "ps",
+        "grep",
+        "sway",
+        "xwayland",
+    ]
+
+    user_services_kb = 0
+    for pdir in glob.glob("/proc/[0-9]*"):
+        try:
+            pid = int(os.path.basename(pdir))
+            stat = os.stat(pdir)
+            if stat.st_uid != uid:
+                continue
+            with open(f"/proc/{pid}/comm", "r") as f:
+                comm = f.read().strip().lower()
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                cmd = f.read().replace(b"\0", b" ").decode("utf-8", "replace").strip().lower()
+            if any(w in comm or w in cmd for w in excluded_keywords):
+                continue
+            with open(f"/proc/{pid}/statm", "r") as f:
+                rss = int(f.read().split()[1]) * 4
+            user_services_kb += rss
+        except Exception:
+            continue
+
+    total_baseline_kb = (
+        kernel_kb + root_kb + compositor_kb + user_services_kb + scratchpad_kb
+    )
+
+    def to_gb(kb):
+        return f"{kb / 1024 / 1024:.2f} GB"
+
+    print("==============================================================")
+    print("          TRUE SYSTEM IDLE BASELINE MEMORY FOOTPRINT          ")
+    print("==============================================================")
+    print(f"  1. Linux Kernel & Hardware Drivers (Slab, KMS)    :  {to_gb(kernel_kb)}")
+    print(f"  2. System-wide Root Daemons (systemd, Network)    :  {to_gb(root_kb)}")
+    print(f"  3. Display Compositor (Sway + Xwayland)           :  {to_gb(compositor_kb)}")
+    print(f"  4. All User Background Services & Audio Daemons   :  {to_gb(user_services_kb)}")
+    print(f"  5. Hidden Scratchpads (Foot terminal, Neovim)     :  {to_gb(scratchpad_kb)}")
+    print("--------------------------------------------------------------")
+    print(f"  TOTAL PURE IDLE RAM USAGE (NOTHING OPEN)          :  {to_gb(total_baseline_kb)}")
+    print(f"  TOTAL PHYSICAL RAM INSTALLED                      :  {to_gb(tot_kb)}")
+    print("==============================================================")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Audit live system memory breakdown, aggregated application workloads, and baseline footprint.",
+        add_help=True,
+    )
+    parser.add_argument(
+        "-p",
+        "--pids",
+        action="store_true",
+        help="Display raw individual process PIDs ranking.",
+    )
+    parser.add_argument(
+        "-b",
+        "--baseline",
+        "--idle",
+        action="store_true",
+        help="Audit pure system idle baseline memory (excluding running apps).",
+    )
+    parser.add_argument(
+        "-n",
+        "--top",
+        type=int,
+        default=8,
+        help="Number of items to display in tables (default: 8).",
+    )
+    parser.add_argument(
+        "-c",
+        "--categories",
+        action="store_true",
+        help="Display the high-level category breakdown table.",
+    )
+    parser.add_argument(
+        "-a",
+        "--all",
+        action="store_true",
+        help="Display all tables (both Applications and Categories).",
+    )
+    parser.add_argument(
+        "-j",
+        "--json",
+        action="store_true",
+        help="Output memory metrics as structured JSON.",
+    )
+
+    args = parser.parse_args()
+
+    if args.baseline:
+        render_baseline()
+    else:
+        render_breakdown(
+            show_pids=args.pids,
+            show_categories=args.categories,
+            show_all=args.all,
+            top_n=args.top,
+            as_json=args.json,
+        )
+
+
+if __name__ == "__main__":
+    main()
