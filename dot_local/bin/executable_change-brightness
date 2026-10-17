@@ -74,7 +74,7 @@ if [[ "$DIRECTION" == "down" ]]; then
         busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Brightness d "$FLOAT_VAL" 2>/dev/null || true
 
         SUB_PERCENT=$(( 100 - NEW_SW ))
-        OSD_LABEL="🌙 Sub-Zero: -${SUB_PERCENT}%"
+        OSD_LABEL="Sub-Zero: -${SUB_PERCENT}%"
         OSD_VAL="$NEW_SW"
         ICON="weather-clear-night"
     fi
@@ -93,7 +93,7 @@ else
             FLOAT_VAL=$(awk -v val="$NEW_SW" 'BEGIN { printf "%.2f", val / 100 }')
             busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Brightness d "$FLOAT_VAL" 2>/dev/null || true
             SUB_PERCENT=$(( 100 - NEW_SW ))
-            OSD_LABEL="🌙 Sub-Zero: -${SUB_PERCENT}%"
+            OSD_LABEL="Sub-Zero: -${SUB_PERCENT}%"
             OSD_VAL="$NEW_SW"
             ICON="weather-clear-night"
         fi
