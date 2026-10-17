@@ -1,0 +1,572 @@
+#!/usr/bin/env python3
+"""
+fps-ab - A/B benchmark harness for CS2 (CachyOS, Sway/Wayland, i5-13450HX + RTX 5050).
+
+Sets ONE experiment variable at a time, captures MangoHud frame logs from CS2
+benchmark runs, and prints average FPS plus 1% / 0.1% lows side by side.
+
+Experiments:
+  epp   CPU energy_performance_preference on all cpufreq policies:
+        balance_power | balance_performance | performance | power
+        intel_lpmd is stopped for the session because it rewrites EPP;
+        "fps-ab reset" restores it.
+  mrt   Sway output max_render_time (ms) on every active output: off | 1 | 2 | 3
+        Runtime-only: lost on sway reload or logout.
+
+Workflows:
+  A. Scripted run (no Steam launch-option changes needed):
+       fps-ab set epp performance
+       fps-ab run epp-performance        # timed MangoHud logging; quit CS2 when the run is done
+  B. Manual run (Steam or MANGOHUD=1 cs2-launch): one CSV per Shift_L+F2 toggle pair,
+     so one game session can cover several attempts and live value switches:
+       fps-ab collect epp-performance --experiment epp --value performance \
+           --file attempt1.csv --file attempt2.csv
+     (without --file, collect parses the newest log in ~/.local/share/goverlay)
+
+Notes:
+  - avg FPS is time-weighted from the log's elapsed column (frames per sample window
+    divided by logged seconds); 1% / 0.1% lows are taken from the slowest
+    1% / 0.1% of sample windows.
+  - Logging starts at game launch (scripted) or at your Shift_L+F2 press (manual), so
+    menu/loading time can pad a capture; use --skip N to drop the first N seconds.
+  - Captures use the immutable MangoHud.conf as-is; --uncapped overrides with
+    vsync=0,fps_limit=0 for a raw capability capture.
+  - Use --warmup for the first throwaway run so it stays out of the report.
+  - CS2 gets MangoHud via the implicit Vulkan layer (MANGOHUD=1); LD_PRELOAD is
+    deliberately not used because cs2.sh scrubs it.
+
+Results: ~/.local/state/fps-ab/ (results.tsv, logs/, state.json).
+Sandbox for testing: FPSAB_DIR=/tmp/... ; alternate launcher: FPSAB_CMD=/path/to/cmd.
+Related: ~/docs/gaming/cs2/performance-benchmarks.md
+"""
+
+import argparse
+import csv
+import glob
+import json
+import os
+import subprocess
+import sys
+import time
+from datetime import datetime
+
+STATE_DIR = os.path.expanduser(os.environ.get("FPSAB_DIR", "~/.local/state/fps-ab"))
+LOGS_DIR = os.path.join(STATE_DIR, "logs")
+RESULTS_TSV = os.path.join(STATE_DIR, "results.tsv")
+STATE_JSON = os.path.join(STATE_DIR, "state.json")
+
+MHUD_LOG_DIR = os.path.expanduser("~/.local/share/goverlay")
+LAUNCH_CMD = os.path.expanduser(os.environ.get("FPSAB_CMD", "~/.local/bin/cs2-launch"))
+DEFAULT_DURATION = 420
+
+EPP_GLOB = "/sys/devices/system/cpu/cpufreq/policy*/energy_performance_preference"
+EPP_DEFAULT = "power"
+LPMD_UNIT = "intel_lpmd"
+
+RESULTS_HEADER = ["when", "label", "experiment", "value", "avg_fps", "p1_low",
+                  "p01_low", "frames", "duration_s", "source"]
+
+_sudo_prefix = None
+
+
+def log(tag, msg):
+    print(f"[{tag}] {msg}")
+
+
+def die(msg):
+    log("ERROR", msg)
+    sys.exit(1)
+
+
+def now_iso():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def ensure_dirs():
+    os.makedirs(LOGS_DIR, exist_ok=True)
+
+
+def sudo_prefix():
+    global _sudo_prefix
+    if _sudo_prefix is None:
+        probe = subprocess.run(["sudo", "-n", "true"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        _sudo_prefix = ["sudo", "-n"] if probe.returncode == 0 else ["sudo"]
+    return _sudo_prefix
+
+
+def sh(cmd, sudo=False, input_text=None, what=None):
+    argv = (sudo_prefix() if sudo else []) + cmd
+    result = subprocess.run(argv, input=input_text, text=True, capture_output=True)
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip()
+        die(f"{what or ' '.join(cmd)} failed (rc={result.returncode}): {detail}")
+    return result
+
+
+def load_state():
+    try:
+        with open(STATE_JSON) as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_state(state):
+    ensure_dirs()
+    with open(STATE_JSON, "w") as fh:
+        json.dump(state, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+
+
+# ---------------------------------------------------------------- EPP
+
+def epp_policies():
+    return sorted(glob.glob(EPP_GLOB))
+
+
+def epp_current():
+    counts = {}
+    for path in epp_policies():
+        with open(path) as fh:
+            value = fh.read().strip()
+        counts[value] = counts.get(value, 0) + 1
+    return counts
+
+
+def lpmd_active():
+    return subprocess.run(["systemctl", "is-active", "--quiet", LPMD_UNIT]).returncode == 0
+
+
+def set_epp(value):
+    policies = epp_policies()
+    if not policies:
+        die("no cpufreq policy files found")
+    avail_path = os.path.join(os.path.dirname(policies[0]),
+                              "energy_performance_available_preferences")
+    with open(avail_path) as fh:
+        available = fh.read().split()
+    if value not in available:
+        die(f"invalid EPP value '{value}' (available: {' '.join(available)})")
+    if lpmd_active():
+        sh(["systemctl", "stop", LPMD_UNIT], sudo=True, what=f"stop {LPMD_UNIT}")
+        log("WARN", f"{LPMD_UNIT} stopped for this session - run 'fps-ab reset' afterwards")
+    for path in policies:
+        sh(["tee", path], sudo=True, input_text=value + "\n", what=f"write {path}")
+    time.sleep(2)
+    current = epp_current()
+    if list(current) == [value]:
+        log("OK", f"EPP '{value}' active on {current[value]} policies")
+    else:
+        log("WARN", f"EPP read-back: {current} (expected all '{value}')")
+    state = load_state()
+    state.update({"experiment": "epp", "value": value, "updated": now_iso(),
+                  "lpmd_stopped": True})
+    save_state(state)
+    log("INFO", f"record runs as: fps-ab run epp-{value}")
+
+
+# ---------------------------------------------------------------- MRT
+
+def sway_outputs():
+    result = subprocess.run(["swaymsg", "-t", "get_outputs", "-r"],
+                            text=True, capture_output=True)
+    if result.returncode != 0 or not result.stdout.strip():
+        die("swaymsg get_outputs failed - is this a Sway session?")
+    try:
+        outputs = json.loads(result.stdout)
+    except ValueError:
+        die("could not parse sway output list")
+    return [out for out in outputs if out.get("active")]
+
+
+def set_mrt(value):
+    val = "off" if value in ("0", "off") else value
+    if val not in ("off", "1", "2", "3"):
+        die("mrt value must be off | 1 | 2 | 3")
+    outputs = sway_outputs()
+    if not outputs:
+        die("no active sway outputs")
+    for out in outputs:
+        sh(["swaymsg", "output", out["name"], "max_render_time", val],
+           what=f"swaymsg output {out['name']}")
+    time.sleep(0.3)
+    expect = 0 if val == "off" else int(val)
+    readback = {out["name"]: out.get("max_render_time") for out in sway_outputs()}
+    mismatched = {name: got for name, got in readback.items() if got != expect}
+    if mismatched:
+        log("WARN", f"read-back mismatch: {mismatched} (expected {expect})")
+    else:
+        log("OK", f"max_render_time={val} on {', '.join(readback)}")
+    state = load_state()
+    state.update({"experiment": "mrt", "value": val, "updated": now_iso()})
+    save_state(state)
+    log("INFO", f"record runs as: fps-ab run mrt-{val}   (reset: fps-ab set mrt off)")
+
+
+# ---------------------------------------------------------------- parsing
+
+def parse_mangohud_csv(path, skip_seconds=0.0):
+    try:
+        with open(path, newline="") as fh:
+            lines = fh.readlines()
+    except OSError as exc:
+        die(f"cannot read {path}: {exc}")
+    start = None
+    for idx, line in enumerate(lines):
+        if line.startswith("fps,frametime"):
+            start = idx
+            break
+    if start is None:
+        die(f"{path}: no 'fps,frametime' section (not a MangoHud log?)")
+    header = next(csv.reader([lines[start]]))
+    ft_idx = header.index("frametime") if "frametime" in header else 1
+    elapsed_idx = header.index("elapsed") if "elapsed" in header else None
+    samples = []  # (elapsed_ns or None, frametime_ms)
+    for row in csv.reader(lines[start + 1:]):
+        if len(row) <= ft_idx:
+            continue
+        try:
+            ft = float(row[ft_idx])
+            et = None
+            if elapsed_idx is not None and len(row) > elapsed_idx:
+                et = float(row[elapsed_idx])
+        except ValueError:
+            continue
+        if ft > 0:
+            samples.append((et, ft))
+    if len(samples) < 30:
+        die(f"{path}: only {len(samples)} samples parsed - too little data")
+
+    frames = 0.0
+    duration = 0.0
+    used = []
+    have_elapsed = elapsed_idx is not None and samples[0][0] is not None
+    if have_elapsed:
+        base = samples[0][0]
+        prev = base
+        for et, ft in samples:
+            delta = et - prev
+            prev = et
+            if delta < 0:
+                have_elapsed = False
+                break
+            if (et - base) / 1e9 < skip_seconds:
+                continue
+            frames += (delta / 1e6) / ft  # dt_ms / frametime_ms = frames in window
+            duration += delta / 1e9
+            used.append(ft)
+    if not have_elapsed or duration <= 0 or duration > 43200:
+        # fallback: assume uniform 100 ms windows
+        used = [ft for _, ft in samples]
+        if skip_seconds > 0:
+            elapsed_ft = 0.0
+            cut = 0
+            for cut, ft in enumerate(used):
+                elapsed_ft += ft / 1000.0
+                if elapsed_ft >= skip_seconds:
+                    break
+            used = used[cut + 1:]
+        frames = sum(100.0 / ft for ft in used)
+        duration = 0.1 * len(used)
+    if len(used) < 30:
+        die(f"{path}: only {len(used)} samples left after --skip - use a smaller skip")
+    ordered = sorted(used, reverse=True)
+
+    def low(pct):
+        count = max(1, int(round(len(used) * pct)))
+        return 1000.0 / (sum(ordered[:count]) / count)
+
+    if duration <= 0:
+        die(f"{path}: zero logged duration")
+    return {"frames": int(round(frames)), "duration": duration,
+            "avg": frames / duration, "p1": low(0.01), "p01": low(0.001)}
+
+
+def newest_log(directory, since_ts=None):
+    candidates = []
+    for path in glob.glob(os.path.join(directory, "*.csv")):
+        if path.endswith("_summary.csv"):
+            continue
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            continue
+        if since_ts is not None and mtime < since_ts - 1:
+            continue
+        candidates.append((mtime, path))
+    return max(candidates)[1] if candidates else None
+
+
+# ---------------------------------------------------------------- results
+
+def read_results():
+    if not os.path.exists(RESULTS_TSV):
+        return []
+    with open(RESULTS_TSV, newline="") as fh:
+        return list(csv.DictReader(fh, delimiter="\t"))
+
+
+def append_result(label, stats, source, experiment=None, value=None):
+    ensure_dirs()
+    state = load_state()
+    exp = experiment or state.get("experiment") or "-"
+    val = value or state.get("value") or "-"
+    new_file = not os.path.exists(RESULTS_TSV)
+    with open(RESULTS_TSV, "a", newline="") as fh:
+        writer = csv.writer(fh, delimiter="\t")
+        if new_file:
+            writer.writerow(RESULTS_HEADER)
+        writer.writerow([
+            now_iso(), label, exp, val,
+            f"{stats['avg']:.1f}", f"{stats['p1']:.1f}", f"{stats['p01']:.1f}",
+            stats["frames"], f"{stats['duration']:.1f}", source,
+        ])
+    log("OK", f"recorded run in {RESULTS_TSV}")
+
+
+def group_rows(rows):
+    groups = {}
+    for row in rows:
+        exp = (row.get("experiment") or "-").strip()
+        val = (row.get("value") or "-").strip()
+        key = (exp, val) if exp not in ("", "-") else ("label", (row.get("label") or "-").strip())
+        groups.setdefault(key, []).append(row)
+    return groups
+
+
+def print_group_table(groups, detail=False):
+    if not groups:
+        log("INFO", "no runs recorded yet")
+        return
+    print()
+    print(f"{'experiment':<12} {'value':<20} {'runs':>4} {'avg fps':>9} "
+          f"{'1% low':>9} {'0.1% low':>9}")
+    print("-" * 70)
+    for (exp, val), rows in sorted(groups.items(), key=lambda kv: (kv[0][0], kv[0][1])):
+        avgs = [float(r["avg_fps"]) for r in rows]
+        p1s = [float(r["p1_low"]) for r in rows]
+        p01s = [float(r["p01_low"]) for r in rows]
+        print(f"{exp:<12} {val:<20} {len(rows):>4} {sum(avgs) / len(avgs):>9.1f} "
+              f"{sum(p1s) / len(p1s):>9.1f} {sum(p01s) / len(p01s):>9.1f}")
+        if detail:
+            for row in rows:
+                print(f"    {row['when']}  {row['label']:<20} "
+                      f"avg={row['avg_fps']:>7}  1%={row['p1_low']:>7}  "
+                      f"0.1%={row['p01_low']:>7}  {row['frames']} frames")
+    print()
+
+
+def print_run_stats(label, stats, source):
+    print()
+    log("OK", f"{label}: avg {stats['avg']:.1f} fps | 1% low {stats['p1']:.1f} fps | "
+             f"0.1% low {stats['p01']:.1f} fps | {stats['frames']} frames / "
+             f"{stats['duration']:.0f}s")
+    log("INFO", f"source: {source}")
+
+
+# ---------------------------------------------------------------- commands
+
+def cmd_set(experiment, value):
+    if experiment == "epp":
+        set_epp(value)
+    elif experiment == "mrt":
+        set_mrt(value)
+    else:
+        die("experiment must be 'epp' or 'mrt'")
+
+
+def cmd_run(label, duration, uncapped, skip, warmup):
+    ensure_dirs()
+    if subprocess.run(["pgrep", "-x", "cs2"],
+                      stdout=subprocess.DEVNULL).returncode == 0:
+        die("CS2 is already running - close it first (MangoHud env applies at launch only)")
+    if not os.path.exists(LAUNCH_CMD):
+        die(f"launcher not found: {LAUNCH_CMD} (override with FPSAB_CMD)")
+    env = os.environ.copy()
+    env["MANGOHUD"] = "1"
+    config = (f"autostart_log=1,log_duration={duration},log_interval=100,"
+              f"output_folder={LOGS_DIR}")
+    if uncapped:
+        config += ",vsync=0,fps_limit=0"
+    env["MANGOHUD_CONFIG"] = config
+    log("INFO", f"launching {LAUNCH_CMD} (MangoHud logging {duration}s -> {LOGS_DIR})")
+    if uncapped:
+        log("INFO", "uncapped capture: vsync=0,fps_limit=0 overridden via MANGOHUD_CONFIG")
+    else:
+        log("INFO", "capture uses MangoHud.conf as-is; add --uncapped for vsync=0,fps_limit=0")
+    log("INFO", "run the benchmark map in CS2, then quit the game when the run is done")
+    before = time.time()
+    rc = subprocess.call([LAUNCH_CMD], env=env)
+    if rc != 0:
+        log("WARN", f"launcher exited with rc={rc}")
+    time.sleep(1.5)
+    source = newest_log(LOGS_DIR, since_ts=before)
+    if source is None:
+        die("no new MangoHud log found - MangoHud did not attach. "
+            "Verify the game started, or use the manual workflow (see --help)")
+    stats = parse_mangohud_csv(source, skip_seconds=skip)
+    print_run_stats(label, stats, source)
+    if warmup:
+        log("INFO", "warmup run - not recorded in results")
+        return
+    append_result(label, stats, source)
+    print_group_table(group_rows(read_results()))
+
+
+def cmd_collect(label, from_dir, file_paths, skip, force, experiment, value):
+    if file_paths:
+        sources = [os.path.expanduser(path) for path in file_paths]
+    else:
+        directory = os.path.expanduser(from_dir or MHUD_LOG_DIR)
+        newest = newest_log(directory)
+        if newest is None:
+            die(f"no MangoHud csv logs found in {directory} (use --from DIR or --file PATH)")
+        sources = [newest]
+    for source in sources:
+        if not os.path.exists(source):
+            die(f"log not found: {source}")
+        for row in read_results():
+            if row.get("source") == source and row.get("label") == label and not force:
+                die(f"{source} already recorded for label '{label}' "
+                    "(use --force to record again)")
+        stats = parse_mangohud_csv(source, skip_seconds=skip)
+        print_run_stats(label, stats, source)
+        append_result(label, stats, source, experiment=experiment, value=value)
+    print_group_table(group_rows(read_results()))
+
+
+def cmd_report(detail, experiment):
+    rows = read_results()
+    if experiment:
+        rows = [r for r in rows if r.get("experiment") == experiment]
+        if not rows:
+            die(f"no runs recorded for experiment '{experiment}'")
+    print_group_table(group_rows(rows), detail=detail)
+
+
+def cmd_status():
+    print(f"state dir:   {STATE_DIR}")
+    current = epp_current()
+    if current:
+        summary = ", ".join(f"{name} x{count}" for name, count in sorted(current.items()))
+        print(f"EPP now:     {summary}")
+    print(f"intel_lpmd:  {'active' if lpmd_active() else 'inactive'}")
+    try:
+        outputs = sway_outputs()
+        mrt = ", ".join(f"{o['name']}={o.get('max_render_time')}" for o in outputs)
+        print(f"max_render_time: {mrt}")
+    except SystemExit:
+        print("max_render_time: (swaymsg unavailable)")
+    state = load_state()
+    if state:
+        print(f"last set:    experiment={state.get('experiment', '-')} "
+              f"value={state.get('value', '-')} ({state.get('updated', '?')})")
+    rows = read_results()
+    print(f"runs recorded: {len(rows)}")
+    if rows:
+        print_group_table(group_rows(rows))
+
+
+def cmd_reset():
+    policies = epp_policies()
+    if policies:
+        avail_path = os.path.join(os.path.dirname(policies[0]),
+                                  "energy_performance_available_preferences")
+        with open(avail_path) as fh:
+            available = fh.read().split()
+        if EPP_DEFAULT in available:
+            for path in policies:
+                sh(["tee", path], sudo=True, input_text=EPP_DEFAULT + "\n",
+                   what=f"write {path}")
+            log("OK", f"EPP restored to '{EPP_DEFAULT}'")
+    enabled = subprocess.run(["systemctl", "is-enabled", "--quiet", LPMD_UNIT]).returncode == 0
+    if enabled and not lpmd_active():
+        sh(["systemctl", "start", LPMD_UNIT], sudo=True, what=f"start {LPMD_UNIT}")
+        log("OK", f"{LPMD_UNIT} started")
+    try:
+        outputs = sway_outputs()
+    except SystemExit:
+        outputs = []
+    for out in outputs:
+        sh(["swaymsg", "output", out["name"], "max_render_time", "off"],
+           what=f"swaymsg output {out['name']}")
+    if outputs:
+        log("OK", "max_render_time=off on all outputs")
+    state = load_state()
+    state.pop("experiment", None)
+    state.pop("value", None)
+    state["lpmd_stopped"] = False
+    state["updated"] = now_iso()
+    save_state(state)
+    log("OK", "baseline restored")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="fps-ab",
+        description="A/B benchmark harness for CS2: EPP and max_render_time experiments "
+                    "with MangoHud capture.")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_set = sub.add_parser("set", help="apply one experiment value")
+    p_set.add_argument("experiment", choices=["epp", "mrt"])
+    p_set.add_argument("value",
+                       help="epp: balance_power|balance_performance|performance|power    "
+                            "mrt: off|1|2|3")
+
+    p_run = sub.add_parser("run",
+                           help="launch cs2-launch with timed MangoHud logging, then parse")
+    p_run.add_argument("label", help="e.g. epp-performance or mrt-1")
+    p_run.add_argument("--duration", type=int, default=DEFAULT_DURATION,
+                       help=f"MangoHud logging window in seconds (default {DEFAULT_DURATION})")
+    p_run.add_argument("--skip", type=float, default=0.0,
+                       help="drop the first N seconds of frames (menu/loading)")
+    p_run.add_argument("--uncapped", action="store_true",
+                       help="override vsync=0,fps_limit=0 during capture")
+    p_run.add_argument("--warmup", action="store_true",
+                       help="parse and print but do not record (throwaway run)")
+
+    p_col = sub.add_parser("collect",
+                           help="parse the newest (or given) MangoHud log from a manual run")
+    p_col.add_argument("label", help="e.g. epp-performance")
+    p_col.add_argument("--from", dest="from_dir", default=None,
+                       help=f"directory with MangoHud logs (default: {MHUD_LOG_DIR})")
+    p_col.add_argument("--file", dest="file_paths", action="append", default=None,
+                       help="specific MangoHud csv to parse (repeatable)")
+    p_col.add_argument("--experiment", default=None,
+                       help="override experiment tag for grouping (e.g. epp)")
+    p_col.add_argument("--value", default=None,
+                       help="override value tag for grouping (e.g. performance)")
+    p_col.add_argument("--skip", type=float, default=0.0,
+                       help="drop the first N seconds of frames")
+    p_col.add_argument("--force", action="store_true",
+                       help="allow recording the same source file twice")
+
+    p_rep = sub.add_parser("report", help="side-by-side summary grouped by experiment value")
+    p_rep.add_argument("--detail", action="store_true", help="also list every recorded run")
+    p_rep.add_argument("--experiment", choices=["epp", "mrt"], default=None)
+
+    sub.add_parser("reset", help="restore baseline: intel_lpmd on, EPP default, mrt off")
+    sub.add_parser("status", help="show current EPP / lpmd / mrt / last set values")
+
+    args = parser.parse_args()
+    if args.cmd == "set":
+        cmd_set(args.experiment, args.value)
+    elif args.cmd == "run":
+        cmd_run(args.label, args.duration, args.uncapped, args.skip, args.warmup)
+    elif args.cmd == "collect":
+        cmd_collect(args.label, args.from_dir, args.file_paths, args.skip, args.force, args.experiment, args.value)
+    elif args.cmd == "report":
+        cmd_report(args.detail, args.experiment)
+    elif args.cmd == "reset":
+        cmd_reset()
+    elif args.cmd == "status":
+        cmd_status()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        sys.exit(130)
