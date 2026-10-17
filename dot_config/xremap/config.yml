@@ -105,6 +105,10 @@ keymap:
       CapsLock-w:
         launch: ["/home/manisk/.local/bin/rofi-pkill"]
 
+      # Steam Launch (was Alt+Shift+S):
+      CapsLock-e:
+        launch: ["/bin/sh", "-c", "STEAM_DGPU=1 ~/.local/bin/steam-workspace"]
+
       # Passthrough
       CapsLock-a: a
       CapsLock-b: b
