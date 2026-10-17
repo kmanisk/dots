@@ -38,14 +38,6 @@ keymap:
       CapsLock-Shift-r:
         launch: ["/home/manisk/.local/bin/killgame"]
 
-  # --- Universal Paste (All GUI Applications; Win+C / Win+X pass through) ---
-  - name: Universal Paste
-    application:
-      not: ["Alacritty", "kitty", "foot", "footclient", "scratch-term", "scratch-notes", "cs2", "gamescope", "eldenring.exe", "GTAIV.exe", "^steam_app_.*"]
-    exact_match: true
-    remap:
-      Super-v: C-v # Win+V -> Ctrl+V (Universal Paste)
-
   # --- CapsLock layer ---
   - name: CapsLock layer
     application:
