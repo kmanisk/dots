@@ -56,15 +56,12 @@ for arg in "$@"; do
     esac
 done
 
-# 1. First prompt: user types query
-# Enter submits exactly what is typed (instant search). Click a chip or type a
-# !bang (e.g. "!pdb") to target an engine. Control+Return (custom-1) triggers
-# suggestions; a trailing "?" also does.
+# 1. First prompt: user types query or selects an engine
 QUERY=$(echo "$HINTS" | rofi -dmenu -i -p "Search" \
     -sort \
     -sorting-method "fzf" \
     -matching "fuzzy" \
-    -kb-accept-entry "" \
+    -kb-accept-entry "Control+m" \
     -kb-accept-custom "Return" \
     -kb-accept-alt "" \
     -kb-custom-1 "Control+Return" \
@@ -81,43 +78,6 @@ if [ $EXIT_CODE -eq 10 ] || [ $EXIT_CODE -eq 11 ]; then
     WANT_SUGGESTIONS=1
 fi
 
-# If user clicked/selected a hint line without typing a query, prompt with that engine prefix
-case "$QUERY" in
-    *"YouTube"*|*"!yt"*)        PREFIX="!yt " ;;
-    *"ArchWiki"*|*"!aw"*)       PREFIX="!aw " ;;
-    *"GitHub"*|*"!gh"*)         PREFIX="!gh " ;;
-    *"Wikipedia"*|*"!w "*)      PREFIX="!w " ;;
-    *"Amazon"*|*"!a "*)         PREFIX="!a " ;;
-    *"Reddit"*|*"!rd"*)         PREFIX="!rd " ;;
-    *"StackOverflow"*|*"!so"*)  PREFIX="!so " ;;
-    *"ProtonDB"*|*"!pdb"*)      PREFIX="!pdb " ;;
-    *"DuckDuckGo"*|*"!ddg"*)    PREFIX="!ddg " ;;
-    *"SteamDB"*|*"!sdb"*)       PREFIX="!sdb " ;;
-    *"FitGirl"*|*"!fg"*)        PREFIX="!fg " ;;
-    *"SteamRIP"*|*"!sr"*)       PREFIX="!sr " ;;
-    *"Google"*)                 PREFIX="" ;;
-    *)                          PREFIX="" ;;
-esac
-
-if [ -n "$PREFIX" ]; then
-    QUERY=$(rofi -dmenu -i -p "Enter query" -filter "$PREFIX" \
-        -sort \
-        -sorting-method "fzf" \
-        -matching "fuzzy" \
-        -kb-accept-custom "" \
-        -kb-accept-alt "" \
-        -kb-custom-1 "Control+Return" \
-        -kb-custom-2 "Shift+Return" \
-        -theme "$THEME")
-    PREFIX_EXIT_CODE=$?
-    [ $PREFIX_EXIT_CODE -eq 1 ] && exit 0
-    [ -z "$QUERY" ] && exit 0
-    if [ $PREFIX_EXIT_CODE -eq 10 ] || [ $PREFIX_EXIT_CODE -eq 11 ]; then
-        WANT_SUGGESTIONS=1
-    fi
-fi
-
-# Trim whitespace
 QUERY="$(echo "$QUERY" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 
 # Check for trailing '?' -> triggers suggestions
@@ -127,89 +87,192 @@ if [[ "$QUERY" =~ \?$ ]]; then
     QUERY="$(echo "$QUERY" | sed -e 's/[[:space:]]*$//')"
 fi
 
+[ -z "$QUERY" ] && exit 0
+
 # Check for Direct URL
 if [[ "$QUERY" =~ ^https?:// ]] || [[ "$QUERY" =~ ^www\. ]]; then
     [[ "$QUERY" =~ ^www\. ]] && QUERY="https://$QUERY"
     xdg-open "$QUERY" >/dev/null 2>&1 &
-    i3-msg "workspace number 2" >/dev/null 2>&1 || true
+    swaymsg "workspace number 2" >/dev/null 2>&1 || i3-msg "workspace number 2" >/dev/null 2>&1 || true
     exit 0
 fi
 
-# Parse engine and strip bang/prefix
-ENGINE="google"
+ENGINE=""
 RAW_QUERY=""
+NEED_PROMPT=0
 
+# 1. Standalone engine selection (user selected chip or typed engine without query)
 case "$QUERY" in
-    \!yt\ *|yt:\ *|yt\ *|youtube\ *)
+    *"YouTube"*|\!yt|yt:|yt|youtube|\!youtube)
         ENGINE="youtube"
-        RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!yt|yt:|yt|youtube)[[:space:]]+//')"
+        NEED_PROMPT=1
         ;;
-    \!aw\ *|aw:\ *|aw\ *|arch\ *|\!arch\ *)
+    *"ArchWiki"*|\!aw|aw:|aw|arch|\!arch|archwiki|\!archwiki)
         ENGINE="archwiki"
-        RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!aw|aw:|aw|!arch|arch)[[:space:]]+//')"
+        NEED_PROMPT=1
         ;;
-    \!gh\ *|gh:\ *|gh\ *|git\ *|github\ *)
+    *"GitHub"*|\!gh|gh:|gh|git|\!git|github|\!github)
         ENGINE="github"
-        RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!gh|gh:|gh|git|github)[[:space:]]+//')"
+        NEED_PROMPT=1
         ;;
-    \!w\ *|w:\ *|w\ *|wiki\ *|\!wiki\ *)
+    *"Wikipedia"*|\!w|w:|w|wiki|\!wiki|wikipedia|\!wikipedia)
         ENGINE="wikipedia"
-        RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!w|w:|w|!wiki|wiki)[[:space:]]+//')"
+        NEED_PROMPT=1
         ;;
-    \!a\ *|a:\ *|a\ *|amz:\ *|amz\ *|amazon\ *|\!amz\ *)
+    *"Amazon"*|\!a|a:|a|amz:|amz|\!amz|amazon|\!amazon)
         ENGINE="amazon"
-        RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!a|a:|a|amz:|amz|!amz|amazon)[[:space:]]+//')"
+        NEED_PROMPT=1
         ;;
-    \!rd\ *|rd:\ *|rd\ *|r/\ *|\!r\ *|r:\ *|reddit\ *)
+    *"Reddit"*|\!rd|rd:|rd|r/|\!r|r:|reddit|\!reddit)
         ENGINE="reddit"
-        RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!rd|rd:|rd|r\/|!r|r:|reddit)[[:space:]]+//')"
+        NEED_PROMPT=1
         ;;
-    \!ddg\ *|ddg:\ *|ddg\ *|duck\ *)
-        ENGINE="duckduckgo"
-        RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!ddg|ddg:|ddg|duck)[[:space:]]+//')"
-        ;;
-    \!sdb\ *|sdb:\ *|sdb\ *|steamdb\ *)
-        ENGINE="steamdb"
-        RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!sdb|sdb:|sdb|steamdb)[[:space:]]+//')"
-        ;;
-    \!fg\ *|fg:\ *|fg\ *|fitgirl\ *|fitgirlrepacks\ *)
-        ENGINE="fitgirl"
-        RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!fg|fg:|fg|fitgirl|fitgirlrepacks)[[:space:]]+//')"
-        ;;
-    \!sr\ *|sr:\ *|sr\ *|steamrip\ *)
-        ENGINE="steamrip"
-        RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!sr|sr:|sr|steamrip)[[:space:]]+//')"
-        ;;
-    \!so\ *|so:\ *|so\ *|stackoverflow\ *)
+    *"StackOverflow"*|\!so|so:|so|stackoverflow|\!stackoverflow)
         ENGINE="stackoverflow"
-        RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!so|so:|so|stackoverflow)[[:space:]]+//')"
+        NEED_PROMPT=1
         ;;
-    \!pdb\ *|pdb:\ *|pdb\ *|proton\ *|protondb\ *)
+    *"ProtonDB"*|\!pdb|pdb:|pdb|proton|\!proton|protondb|\!protondb)
         ENGINE="protondb"
-        RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!pdb|pdb:|pdb|proton|protondb)[[:space:]]+//')"
+        NEED_PROMPT=1
         ;;
-    \!g\ *|g:\ *|g\ *|google\ *)
-        ENGINE="google"
-        RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!g|g:|g|google)[[:space:]]+//')"
+    *"DuckDuckGo"*|\!ddg|ddg:|ddg|duck|\!duck|duckduckgo|\!duckduckgo)
+        ENGINE="duckduckgo"
+        NEED_PROMPT=1
         ;;
-    *)
+    *"SteamDB"*|\!sdb|sdb:|sdb|steamdb|\!steamdb)
+        ENGINE="steamdb"
+        NEED_PROMPT=1
+        ;;
+    *"FitGirl"*|\!fg|fg:|fg|fitgirl|\!fitgirl|fitgirlrepacks|\!fitgirlrepacks)
+        ENGINE="fitgirl"
+        NEED_PROMPT=1
+        ;;
+    *"SteamRIP"*|\!sr|sr:|sr|steamrip|\!steamrip)
+        ENGINE="steamrip"
+        NEED_PROMPT=1
+        ;;
+    *"Google"*|\!g|g:|g|google|\!google)
         ENGINE="google"
-        RAW_QUERY="$QUERY"
+        NEED_PROMPT=1
         ;;
 esac
 
-[ -z "$RAW_QUERY" ] && exit 0
+# 2. Engine prefix with query (user typed bang/prefix and search terms together in Prompt 1)
+if [ -z "$ENGINE" ]; then
+    case "$QUERY" in
+        \!yt\ *|yt:\ *|yt\ *|youtube\ *|\!youtube\ *)
+            ENGINE="youtube"
+            RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!yt|yt:|yt|youtube|!youtube)[[:space:]]+//')"
+            ;;
+        \!aw\ *|aw:\ *|aw\ *|\!arch\ *|arch\ *|archwiki\ *|\!archwiki\ *)
+            ENGINE="archwiki"
+            RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!aw|aw:|aw|!arch|arch|archwiki|!archwiki)[[:space:]]+//')"
+            ;;
+        \!gh\ *|gh:\ *|gh\ *|git\ *|\!git\ *|github\ *|\!github\ *)
+            ENGINE="github"
+            RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!gh|gh:|gh|git|!git|github|!github)[[:space:]]+//')"
+            ;;
+        \!w\ *|w:\ *|w\ *|wiki\ *|\!wiki\ *|wikipedia\ *|\!wikipedia\ *)
+            ENGINE="wikipedia"
+            RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!w|w:|w|!wiki|wiki|wikipedia|!wikipedia)[[:space:]]+//')"
+            ;;
+        \!a\ *|a:\ *|a\ *|amz:\ *|amz\ *|\!amz\ *|amazon\ *|\!amazon\ *)
+            ENGINE="amazon"
+            RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!a|a:|a|amz:|amz|!amz|amazon|!amazon)[[:space:]]+//')"
+            ;;
+        \!rd\ *|rd:\ *|rd\ *|r/\ *|\!r\ *|r:\ *|reddit\ *|\!reddit\ *)
+            ENGINE="reddit"
+            RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!rd|rd:|rd|r\/|!r|r:|reddit|!reddit)[[:space:]]+//')"
+            ;;
+        \!ddg\ *|ddg:\ *|ddg\ *|duck\ *|\!duck\ *|duckduckgo\ *|\!duckduckgo\ *)
+            ENGINE="duckduckgo"
+            RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!ddg|ddg:|ddg|duck|!duck|duckduckgo|!duckduckgo)[[:space:]]+//')"
+            ;;
+        \!sdb\ *|sdb:\ *|sdb\ *|steamdb\ *|\!steamdb\ *)
+            ENGINE="steamdb"
+            RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!sdb|sdb:|sdb|steamdb|!steamdb)[[:space:]]+//')"
+            ;;
+        \!fg\ *|fg:\ *|fg\ *|fitgirl\ *|\!fitgirl\ *|fitgirlrepacks\ *|\!fitgirlrepacks\ *)
+            ENGINE="fitgirl"
+            RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!fg|fg:|fg|fitgirl|!fitgirl|fitgirlrepacks|!fitgirlrepacks)[[:space:]]+//')"
+            ;;
+        \!sr\ *|sr:\ *|sr\ *|steamrip\ *|\!steamrip\ *)
+            ENGINE="steamrip"
+            RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!sr|sr:|sr|steamrip|!steamrip)[[:space:]]+//')"
+            ;;
+        \!so\ *|so:\ *|so\ *|stackoverflow\ *|\!stackoverflow\ *)
+            ENGINE="stackoverflow"
+            RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!so|so:|so|stackoverflow|!stackoverflow)[[:space:]]+//')"
+            ;;
+        \!pdb\ *|pdb:\ *|pdb\ *|proton\ *|\!proton\ *|protondb\ *|\!protondb\ *)
+            ENGINE="protondb"
+            RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!pdb|pdb:|pdb|proton|!proton|protondb|!protondb)[[:space:]]+//')"
+            ;;
+        \!g\ *|g:\ *|g\ *|google\ *|\!google\ *)
+            ENGINE="google"
+            RAW_QUERY="$(echo "$QUERY" | sed -E 's/^(!g|g:|g|google|!google)[[:space:]]+//')"
+            ;;
+        *)
+            ENGINE="google"
+            RAW_QUERY="$QUERY"
+            ;;
+    esac
+fi
+
+# 3. If only engine was selected, prompt for the query
+if [ "$NEED_PROMPT" -eq 1 ]; then
+    PROMPT_TITLE="Search"
+    case "$ENGINE" in
+        youtube)       PROMPT_TITLE="YouTube" ;;
+        archwiki)      PROMPT_TITLE="ArchWiki" ;;
+        github)        PROMPT_TITLE="GitHub" ;;
+        wikipedia)     PROMPT_TITLE="Wikipedia" ;;
+        amazon)        PROMPT_TITLE="Amazon" ;;
+        reddit)        PROMPT_TITLE="Reddit" ;;
+        stackoverflow) PROMPT_TITLE="StackOverflow" ;;
+        protondb)      PROMPT_TITLE="ProtonDB" ;;
+        duckduckgo)    PROMPT_TITLE="DuckDuckGo" ;;
+        steamdb)       PROMPT_TITLE="SteamDB" ;;
+        fitgirl)       PROMPT_TITLE="FitGirl" ;;
+        steamrip)      PROMPT_TITLE="SteamRIP" ;;
+        google)        PROMPT_TITLE="Google" ;;
+    esac
+
+    QUERY=$(rofi -dmenu -i -p "$PROMPT_TITLE" \
+        -kb-accept-entry "" \
+        -kb-accept-custom "Return" \
+        -kb-accept-alt "" \
+        -kb-custom-1 "Control+Return" \
+        -kb-custom-2 "Shift+Return" \
+        -theme "$THEME" < /dev/null)
+    PROMPT2_EXIT=$?
+    [ $PROMPT2_EXIT -eq 1 ] && exit 0
+    [ -z "$QUERY" ] && exit 0
+
+    if [ $PROMPT2_EXIT -eq 10 ] || [ $PROMPT2_EXIT -eq 11 ]; then
+        WANT_SUGGESTIONS=1
+    fi
+
+    RAW_QUERY="$(echo "$QUERY" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+
+    if [[ "$RAW_QUERY" =~ \?$ ]]; then
+        WANT_SUGGESTIONS=1
+        RAW_QUERY="${RAW_QUERY%\?}"
+        RAW_QUERY="$(echo "$RAW_QUERY" | sed -e 's/[[:space:]]*$//')"
+    fi
+
+    [ -z "$RAW_QUERY" ] && exit 0
+fi
 
 # If user requested suggestions (via '?' or Ctrl+Return):
 if [ "$WANT_SUGGESTIONS" -eq 1 ]; then
     SUGGESTIONS=$(fetch_suggestions "$ENGINE" "$RAW_QUERY")
     if [ -n "$SUGGESTIONS" ]; then
-        # Present suggestions as horizontal chips right next to prompt
         CHOICE=$(printf "%s\n%s" "$RAW_QUERY" "$SUGGESTIONS" | rofi -dmenu -i \
             -sort \
             -sorting-method "fzf" \
             -matching "fuzzy" \
-            -p "💡 $ENGINE" \
+            -p "$ENGINE" \
             -theme "$THEME")
         if [ -n "$CHOICE" ]; then
             RAW_QUERY="$CHOICE"
@@ -267,4 +330,4 @@ esac
 
 # Launch in browser and jump to workspace 2
 xdg-open "$URL" >/dev/null 2>&1 &
-i3-msg "workspace number 2" >/dev/null 2>&1 || true
+swaymsg "workspace number 2" >/dev/null 2>&1 || i3-msg "workspace number 2" >/dev/null 2>&1 || true
