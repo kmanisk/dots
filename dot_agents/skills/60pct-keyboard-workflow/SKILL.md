@@ -52,11 +52,12 @@ All future keybinding modifications across **i3**, **xremap**, **Zed**, **Alacri
     - Paste: `Caps + .` (`Ctrl+V`)
     - Brightness Control: `Caps + [` (BrightnessUp), `Caps + '` (BrightnessDown)
     - Volume Control: `Caps + ]` (VolumeUp), `Caps + \` (VolumeDown)
-    - Fullscreen Screenshot (Saved to File + Clipboard): `Caps + Space`
+    - Fullscreen Screenshot (Clipboard ONLY): `Caps + Space`
+    - Region Screenshot (Saved to File + Clipboard): `Caps + s`
     - Window Close (Graceful): `Caps + q` or `Caps + BackSpace` (Two-Handed)
     - Window Force Kill: `Caps + Shift + q` or `Caps + Shift + BackSpace`
     - Process Killer Menu: `Caps + w` (App-level aggregator & terminator; formerly `Win + Shift + e`)
-    - Silent Steam Launcher: `Caps + e` (Launch Steam quietly in background on WS 3)
+    - Steam Launch (DGPU): `Caps + e` (Steam on WS 3 via `STEAM_DGPU=1 steam-workspace`; migrated from `Alt + Shift + S`, 2026-10-18)
     - Kill Steam & Games: `Caps + r` (Emergency terminator for Steam, Proton games & Wine processes)
     - Virtual F-Keys: `Caps + 1..0, -, =` (`F1..F12`)
 
