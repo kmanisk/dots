@@ -13,7 +13,7 @@ PIN_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/clipboard_pins"
 mkdir -p "$PIN_DIR"
 THEME="$HOME/.config/rofi/clipboard-floating.rasi"
 
-PIN_PREFIX="📌 [PIN] "
+PIN_PREFIX="󰐃 [PIN] "
 
 notify() {
     notify-send -a "Clipboard" -u low -i edit-paste "$1" "$2" 2>/dev/null
@@ -80,6 +80,10 @@ while true; do
 
     # --- ACTION: ALT+P (Pin) -> Loops ---
     if [ "$exit_code" -eq 11 ]; then
+        if [[ "$chosen" == *'[[ binary data'* ]]; then
+            notify "Pin Unavailable" "Image entries cannot be pinned"
+            continue
+        fi
         if [ "$is_pinned" -eq 1 ]; then
             notify "Already Pinned" "This item is already pinned"
         else
@@ -95,6 +99,10 @@ while true; do
 
     # --- ACTION: ALT+X (Unpin) -> Loops ---
     if [ "$exit_code" -eq 12 ]; then
+        if [ "$is_pinned" -eq 0 ] && [[ "$chosen" == *'[[ binary data'* ]]; then
+            notify "Not Pinned" "Image entries cannot be pinned"
+            continue
+        fi
         if [ "$is_pinned" -eq 1 ]; then
             pin_text="${chosen#"${PIN_PREFIX}"}"
             unpinned=0
@@ -163,10 +171,9 @@ while true; do
                 notify "Copied Pin" "$pin_text"
             fi
         else
-            raw_text=$(cliphist decode <<< "$chosen" 2>/dev/null)
-            if [ -n "$raw_text" ]; then
-                printf '%s' "$raw_text" | wl-copy
-                notify "Copied to Clipboard" "$(head -n 1 <<< "$raw_text")"
+            if cliphist decode <<< "$chosen" 2>/dev/null | wl-copy; then
+                preview="${chosen#*$'\t'}"
+                notify "Copied to Clipboard" "${preview:0:80}"
             fi
         fi
         exit 0

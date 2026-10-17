@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# clipboard-view: open the image currently in the Wayland clipboard with imv.
+# Bound to Caps+v via xremap (launch action). No image -> notify + exit.
+export PATH="$HOME/.local/bin:/usr/bin:/bin"
+
+type=$(wl-paste --list-types 2>/dev/null | grep -m1 '^image/') || true
+if [ -z "$type" ]; then
+    notify-send -a "Clipboard" -u low -i image-x-generic "No image in clipboard" "Copy an image first" 2>/dev/null
+    exit 1
+fi
+case "$type" in
+    image/png)  ext=png ;;
+    image/jpeg) ext=jpg ;;
+    image/webp) ext=webp ;;
+    image/gif)  ext=gif ;;
+    image/bmp)  ext=bmp ;;
+    *)          ext=img ;;
+esac
+tmp="${XDG_RUNTIME_DIR:-/tmp}/clipboard-view.$ext"
+wl-paste --type "$type" > "$tmp" 2>/dev/null || exit 1
+[ -s "$tmp" ] || exit 1
+exec imv "$tmp"

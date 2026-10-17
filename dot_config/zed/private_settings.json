@@ -21,7 +21,7 @@
     // FONT SWITCHER (Uncomment any ONE line to switch font instantly)
     // ─────────────────────────────────────────────────────────────────────────────
     // ── [1] Modern Crisp / Tall / Academic Mono ──────────────────────────────────
-    // "buffer_font_family": "Iosevka Nerd Font", // Active Default (Tall Condensed CRT)
+    "buffer_font_family": "Iosevka Nerd Font", // Active Default (Tall Condensed CRT)
     // "buffer_font_family": "Iosevka Nerd Font Mono",
     // "buffer_font_family": "Aporetic Sans Mono",         // Academic Vintage Vector Sans
     // "buffer_font_family": "Aporetic Serif Mono",        // Academic Vintage Book Serif
@@ -43,8 +43,8 @@
     // "buffer_font_family": "Departure Mono",             // Early Macintosh / DEC VT Hybrid
     // "buffer_font_family": "ProggyClean Nerd Font",      // Classic 90s C/C++ Developer Console
     // "buffer_font_family": "ProFontIIx Nerd Font",       // 1980s Mac / Atari ST Console
-    // "buffer_font_family": "Monocraft",        // Chunky 8-Bit Pixel Console
-    "buffer_font_family": "Comic Mono", // Casual Legible Monospace
+    // "buffer_font_family": "Monocraft", // Chunky 8-Bit Pixel Console
+    // "buffer_font_family": "Comic Mono", // Casual Legible Monospace
     // "buffer_font_family": "Pixel Code",                 // Pixel Art Vector Coding Font
     // "buffer_font_family": "OCR-A BT",                   // Classic Optical Character Recognition
     // "buffer_font_family": "OCR-B 10 BT",                // European Standard OCR Monospace

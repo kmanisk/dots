@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# cliphist-store-capped: size-guarded store shim for the cliphist watcher.
+# cliphist 0.7.0 has no max-store-size option: buffer the incoming clipboard
+# payload (stdin from wl-paste --watch), skip empty and oversized items, then
+# store everything else byte-for-byte.
+# ==============================================================================
+export PATH="$HOME/.local/bin:$PATH"
+
+MAX_BYTES=$((1024 * 1024))
+
+tmp=$(mktemp "${XDG_RUNTIME_DIR:-/tmp}/cliphist-store.XXXXXX") || exit 1
+trap 'rm -f "$tmp"' EXIT
+
+cat > "$tmp" 2>/dev/null || exit 1
+size=$(stat -c %s "$tmp" 2>/dev/null) || exit 1
+
+[ "$size" -gt 0 ] || exit 0
+[ "$size" -le "$MAX_BYTES" ] || exit 0
+
+cliphist store < "$tmp"

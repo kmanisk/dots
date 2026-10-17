@@ -42,8 +42,10 @@ keymap = [
 	{ on = "<Left>",  run = "leave", desc = "Back to the parent directory" },
 	{ on = "<Right>", run = "enter", desc = "Enter the child directory" },
 
-	{ on = "H", run = "back",    desc = "Back to previous directory" },
-	{ on = "L", run = "forward", desc = "Forward to next directory" },
+	{ on = "H", run = "tab_switch -1 --relative", desc = "Switch to previous tab" },
+	{ on = "L", run = "tab_switch 1 --relative",  desc = "Switch to next tab" },
+	{ on = "<C-o>", run = "back",    desc = "Back to previous directory" },
+	{ on = "<C-i>", run = "forward", desc = "Forward to next directory" },
 
 	# Toggle
 	{ on = "<Space>", run = [ "toggle", "arrow 1" ], desc = "Toggle the current selection state" },
@@ -75,6 +77,7 @@ keymap = [
 	{ on = "<C-->",     run = "hardlink",                    desc = "Hardlink yanked files" },
 	{ on = "Y",         run = "unyank",                      desc = "Cancel the yank status" },
 	{ on = "X",         run = "unyank",                      desc = "Cancel the yank status" },
+	{ on = "C",         run = "plugin ouch",                 desc = "Compress with ouch" },
 
 	# Official plugins (yazi-rs/plugins)
 	{ on = "F",         run = "plugin jump-to-char",         desc = "Jump to file by first char" },

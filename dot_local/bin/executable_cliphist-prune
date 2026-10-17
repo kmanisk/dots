@@ -1,19 +1,53 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# cliphist-prune: Prune clipboard database and purge pinned files older than TTL
-# Default Retention: 7 days for unpinned clipboard DB, 30 days for orphaned pins
+# cliphist-prune: periodic maintenance for the clipboard store (weekly timer).
+#
+# 1. Rebuild-compact the database: cliphist 0.7.0 has no `compact` subcommand
+#    and deleting entries never shrinks the file, so rebuild it from live
+#    entries into a fresh file and swap it in (only when every entry was
+#    re-stored successfully).
+# 2. Drop pinned notes older than 30 days.
+#
+# Retention is enforced by the engine: ~/.config/cliphist/config (max-items)
+# and cliphist-store-capped (item size), so this job only compacts.
 # ==============================================================================
+set -u
+
+DB="${XDG_CACHE_HOME:-$HOME/.cache}/cliphist/db"
 PIN_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/clipboard_pins"
+tmpdb="$DB.tmp.$$"
+trap 'rm -f "$tmpdb"' EXIT
 
-# Prune unpinned history bounded to 200 items max
-if cliphist list 2>/dev/null | grep -q .; then
-    # Keep only the newest 200 clips
-    cliphist list 2>/dev/null | tail -n +201 | while read -r line; do
-        cliphist delete <<< "$line" 2>/dev/null
-    done
-fi
-
-# Remove any temporary or untagged pin scratch files older than 30 days
+# --- pinned-note expiry -------------------------------------------------------
 if [ -d "$PIN_DIR" ]; then
     find "$PIN_DIR" -type f -mtime +30 -delete 2>/dev/null
+fi
+
+# --- database rebuild-compact -------------------------------------------------
+[ -s "$DB" ] || exit 0
+
+# Remove stale tmp file from a previous interrupted run
+rm -f "$DB".tmp.* 2>/dev/null
+
+before=$(cliphist list 2>/dev/null | wc -l)
+[ "$before" -gt 0 ] || exit 0
+
+failed=0
+while IFS= read -r line; do
+    cliphist decode <<< "$line" 2>/dev/null \
+        | CLIPHIST_MAX_ITEMS=200000 cliphist -db-path "$tmpdb" store 2>/dev/null \
+        || { failed=1; break; }
+done < <(cliphist list 2>/dev/null | tac)
+
+after=$(cliphist -db-path "$tmpdb" list 2>/dev/null | wc -l)
+
+if [ "$failed" -eq 0 ] && [ "$after" -eq "$before" ]; then
+    if mv -f "$DB" "$DB.prev" 2>/dev/null && mv -f "$tmpdb" "$DB" 2>/dev/null; then
+        rm -f "$DB.prev"
+    else
+        logger -t cliphist-prune "rebuild-compact: swap failed, restoring original" 2>/dev/null
+        [ -f "$DB.prev" ] && mv -f "$DB.prev" "$DB" 2>/dev/null
+    fi
+else
+    logger -t cliphist-prune "rebuild-compact skipped (before=$before after=$after failed=$failed)" 2>/dev/null
 fi

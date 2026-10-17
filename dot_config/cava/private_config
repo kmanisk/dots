@@ -75,9 +75,9 @@ synchronized_sync = 1
 
 
 [color]
-# Theme: Void Theme for (void)
+# Theme: tundra (tundra)
 background = 'default'
-foreground = '#bb9af7'
+foreground = '#a5b4fc'
 
 gradient = 0
 

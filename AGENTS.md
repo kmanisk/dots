@@ -23,6 +23,7 @@ or Cursor, both of those now read `AGENTS.md` too, so this one file covers all t
   install/removal, confirm a Snapper pre-update snapshot exists or trigger one first.
 - **Never run `pacman -Sy`** (partial upgrade risk) — always `pacman -Syu`.
 - **Never put a raw secret/token in this file or in any command it runs.**
+- **Zero emojis across the codebase:** Never add emojis to `README.md`, markdown documentation, shell scripts (`.sh`), source code, comments, or log messages. Keep formatting clean, technical, and professional.
 - **Mandatory Pre-Completion Verification & Collision Audit:** Never report a task complete without actively validating configs, services, and scripts. For Sway/i3, always run `sway -C`, audit for duplicate or shadowed keybindings across modes/scopes, and test live reload (`swaymsg reload`). For systemd units, check `systemctl --user status` and journal logs. For scripts, run syntax checks. Fix all regressions and collisions before marking the task done.
 
 ---

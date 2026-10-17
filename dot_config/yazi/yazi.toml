@@ -4,10 +4,10 @@
 #:schema https://yazi-rs.github.io/schemas/yazi.json
 
 [mgr]
-ratio          = [ 1, 4, 3 ]
-sort_by        = "alphabetical"
+ratio          = [ 1, 3, 4 ]
+sort_by        = "btime"
 sort_sensitive = false
-sort_reverse 	 = false
+sort_reverse   = true
 sort_dir_first = true
 sort_translit  = false
 sort_fallback  = "alphabetical"
@@ -20,12 +20,12 @@ mouse_events   = [ "click", "scroll", "drag" ]
 [preview]
 wrap            = "no"
 tab_size        = 2
-max_width       = 600
-max_height      = 900
+max_width       = 1600
+max_height      = 1200
 cache_dir       = ""
-image_delay     = 30
-image_filter    = "triangle"
-image_quality   = 75
+image_delay     = 15
+image_filter    = "lanczos3"
+image_quality   = 90
 ueberzug_scale  = 1
 ueberzug_offset = [ 0, 0, 0, 0 ]
 
@@ -104,6 +104,18 @@ image_bound      = [ 10000, 10000 ]
 suppress_preload = false
 
 [plugin]
+prepend_previewers = [
+	# Audio: metadata + cover art (exifaudio + exiftool)
+	{ mime = "audio/*", run = "exifaudio" },
+	# Markdown: rendered (glow)
+	{ mime = "text/markdown", run = "glow" },
+	# Archives: tree + icons (ouch)
+	{ mime = "application/{*zip,tar,bzip2,7z*,rar,xz,zstd,java-archive}", run = "ouch --show-file-icons" },
+]
+append_previewers = [
+	# Binary fallback: hex dump instead of plain metadata (hexyl)
+	{ url = "*", run = "hexyl" },
+]
 fetchers = [
 	# Git status (official git.yazi plugin)
 	{ url = "*", run = "git", prio = "high", group = "git" },
