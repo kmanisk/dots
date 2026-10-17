@@ -75,9 +75,9 @@ synchronized_sync = 1
 
 
 [color]
-# Theme: tundra (tundra)
+# Theme: Synthwave '84 theme for (synthwave84)
 background = 'default'
-foreground = '#a5b4fc'
+foreground = '#ff00ff'
 
 gradient = 0
 
