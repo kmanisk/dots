@@ -206,6 +206,19 @@ class BluetoothAutoConnector:
         if interface == "org.bluez.Device1":
             if "Connected" in changed:
                 is_connected = bool(changed["Connected"])
+                if is_connected:
+                    try:
+                        dev_obj = self.bus.get_object("org.bluez", path)
+                        dev_props = dbus.Interface(dev_obj, "org.freedesktop.DBus.Properties")
+                        all_props = dev_props.GetAll("org.bluez.Device1")
+                        icon = str(all_props.get("Icon", ""))
+                        dev_name = str(all_props.get("Name", ""))
+                        if "keyboard" in icon.lower() or "katana" in dev_name.lower():
+                            self.log(f"Bluetooth keyboard connected ({dev_name}). Refreshing xremap in 1s...")
+                            GLib.timeout_add_seconds(1, self.restart_xremap)
+                    except Exception:
+                        pass
+
                 # Check if this device is one of our targets
                 targets = self.get_target_device_objects()
                 for addr, (target_path, dev_iface, props) in targets.items():
@@ -225,10 +238,23 @@ class BluetoothAutoConnector:
                 self.log("Bluetooth adapter powered ON. Triggering auto-connect...")
                 GLib.timeout_add_seconds(1, self.one_shot_scan)
 
+    def restart_xremap(self):
+        try:
+            subprocess.Popen(
+                ["systemctl", "--user", "restart", "xremap.service"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            self.log("xremap restarted to grab newly connected input device.")
+        except Exception:
+            pass
+        return False
+
     def on_prepare_for_sleep(self, going_to_sleep):
         if not going_to_sleep:
-            self.log("System resumed from sleep. Triggering auto-connect in 2s...")
+            self.log("System resumed from sleep. Triggering auto-connect and xremap in 2s...")
             GLib.timeout_add_seconds(2, self.one_shot_scan)
+            GLib.timeout_add_seconds(3, self.restart_xremap)
 
     def status(self):
         targets = self.get_target_device_objects()
