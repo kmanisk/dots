@@ -3,7 +3,7 @@
 **Target System:** CachyOS rolling · Sway (Wayland) / i3wm · Intel i5-13450HX + RTX 5050 Mobile (AsusMuxDgpu / Hybrid)  
 **Primary Codec:** Realtek ALC256 HD Audio · Bluetooth A2DP (Soundcore Q20i)  
 **Audio Framework:** Native PipeWire 1.6.9 + WirePlumber 0.5 (100% Daemonless & Headless DSP)  
-**Document Location:** `~/docs/audio/AUDIO_ARCHITECTURE.md`
+**Document Location:** `~/.local/share/chezmoi/docs/audio/AUDIO_ARCHITECTURE.md`
 
 ---
 
@@ -13,7 +13,7 @@ All system audio processing is managed natively inside the PipeWire multimedia g
 
 ```mermaid
 flowchart TD
-    subgraph CapturePipeline["🎙️ Unified Microphone Capture Pipeline (40-mic.conf)"]
+    subgraph CapturePipeline["Unified Microphone Capture Pipeline (40-mic.conf)"]
         HW_MIC["Internal ALC256 Mic<br/>(alsa_input.pci-0000_00_1f.3.analog-stereo)"] --> HPF_80["1. 80 Hz High-Pass Filter<br/>(bq_highpass, Q=0.707)"]
         HPF_80 --> DPDFNET["2. DPDFNet Neural Denoiser<br/>(libdpdfnet_ladspa.so, Attn=45dB)"]
         DPDFNET --> DELAY_80["3. Latency Compensation<br/>(builtin delay, 80 ms)"]
@@ -24,7 +24,7 @@ flowchart TD
         LIM --> GHELPER_CLEAN["Virtual Source: ghelper-audio<br/>(MicStudio Unified Source, Priority 3000)"]
     end
 
-    subgraph PlaybackPipeline["🎧 Playback & Routing Pipeline (30-peace-gaming.conf & WirePlumber)"]
+    subgraph PlaybackPipeline["Playback & Routing Pipeline (30-peace-gaming.conf & WirePlumber)"]
         GAMES["Competitive Games<br/>(CS2, The Finals, PUBG, Apex, ARC Raiders)"] --> PEACE_SINK["sink.peace_gaming<br/>(Peace PUBG EQ + LoudMax Limiter)"]
         APPS["Desktop & Media Apps<br/>(Brave, Discord, Media Players)"] --> SMART_FILTERS["WirePlumber Smart Filters<br/>(dax-speaker-route.lua)"]
         
@@ -52,7 +52,7 @@ flowchart TD
 | **Internal Mic** | Realtek ALC256 Analog Stereo | `alsa_input.pci-0000_00_1f.3.analog-stereo` | Capture: `23 (0.00 dB)`<br/>Internal Mic Boost: `1 (+10.00 dB)` |
 | **Internal Speakers** | Realtek ALC256 Analog Stereo | `alsa_output.pci-0000_00_1f.3.analog-stereo` | ASUS TUF Laptop Internal Speakers |
 | **Wired Headset** | Realtek ALC256 3.5mm Combo Jack | `alsa_output.pci-0000_00_1f.3.analog-stereo` | Auto-switches via ALSA jack detection |
-| **Bluetooth Audio** | Soundcore Q20i (`B0:38:E2_78:9B:FE`) | `bluez_output.B0_38_E2_78_9B_FE.1` | High-fidelity A2DP (`AAC` / `SBC-XQ`) |
+| **Bluetooth Audio** | Soundcore Q20i (`B0:38:E2:78:9B:FE`) | `bluez_output.B0_38_E2_78_9B_FE.1` | High-fidelity A2DP (`AAC` / `SBC-XQ`) |
 | **HDMI / DP Audio** | NVIDIA GB207 Audio Controller | `alsa_output.pci-0000_01_00.1` | GeForce RTX 5050 Mobile HDMI/Type-C DP |
 
 ---
@@ -173,7 +173,7 @@ Script: [`~/.local/share/wireplumber/scripts/gaming-audio-route.lua`](file:///ho
 Files & Services:
 * [`~/.config/pipewire/pipewire.conf.d/42-dolby-headphones.conf`](file:///home/manisk/.config/pipewire/pipewire.conf.d/42-dolby-headphones.conf) (Dolby Headphone Filter Chain)
 * [`~/.config/systemd/user/asus-speaker-dsp.service`](file:///home/manisk/.config/systemd/user/asus-speaker-dsp.service) (ASUS DAX3 Speaker Filter-Chain Runner)
-* [`~/.config/pipewire/asus-tuf-dax/`](file:///home/manisk/.config/pipewire/asus-tuf-dax/) (`active-runner.conf`, `active.irs`, profile directory)
+* [`~/.config/pipewire/asus-tuf-dax/`](file:///home/manisk/.config/pipewire/asus-tuf-dax/) (`active-runner.conf` symlink + per-profile directories; profile selection recorded in `~/.config/asus-speakers/state.conf`)
 * [`~/.config/wireplumber/wireplumber.conf.d/40-dax-speaker-route.conf`](file:///home/manisk/.config/wireplumber/wireplumber.conf.d/40-dax-speaker-route.conf) (WirePlumber 0.5 module trigger)
 * [`~/.local/share/wireplumber/scripts/dax-speaker-route.lua`](file:///home/manisk/.local/share/wireplumber/scripts/dax-speaker-route.lua) (Live dynamic hardware-route switcher)
 * [`~/.local/bin/rofi-speaker-dsp`](file:///home/manisk/.local/bin/rofi-speaker-dsp) & [`~/.local/bin/asus-speaker-doctor`](file:///home/manisk/.local/bin/asus-speaker-doctor) (Interactive voicing switcher & diagnostics)
@@ -182,15 +182,16 @@ Files & Services:
 Activated automatically whenever Bluetooth (e.g. Soundcore Q20i) or 3.5mm wired headphones are connected:
 * **Stage 1: Dialogue Clarity**: LSP 16-band Parametric EQ (+2 dB peaking boost centered at 3000 Hz, Q = 1.0) for vocal intelligibility in movies, shows, and podcasts.
 * **Stage 2: AutoGain Leveler**: LSP AutoGain Stereo (Target: −18.0 dBFS, max boost +6.0 dB, threshold −70 dBFS) for broadcast-level consistency across disparate YouTube and media loudness standards.
-* **Stage 3: Headphone Dynamics**: LSP Multiband Stereo Compressor (controlled 2:1 dynamic expansion, 5 ms attack, 100 ms release) preventing harsh dynamics while keeping audio full and open.
+* **Stage 3: Headphone Dynamics**: LSP Multiband Stereo Compressor (controlled 2:1 compression, 5 ms attack, 100 ms release) preventing harsh dynamics while keeping audio full and open.
 * **Stage 4: Studio Limiter**: LSP True-Peak Limiter Stereo (ceiling −0.1 dBFS, 1 ms lookahead, 5 ms release) preventing inter-sample clipping on digital outputs.
 
 #### 2. Dolby Speaker DSP (`effect_input.Dolby_Speaker`)
 Powered by `asus-speaker-dsp.service` running a dedicated, low-overhead filter-chain instance isolated on CPU affinity 0–11:
 * **Hardware FIR Convolver**: Direct convolution using factory-extracted Windows DAX3 impulse responses (`Dolby_Speaker.irs`), correcting chassis resonance and frequency response nulls inherent to laptop bottom-firing speakers.
-* **16-Band Parametric EQ**: Frequency-tailored per voicing (`music` audiophile flat baseline, `dynamic`, `balanced`, `custom`, `experimental`).
+* **16-Band Parametric EQ**: Frequency-tailored per voicing (`custom`, `dynamic`, `balanced`, `music`, `tuned`, `tuned-old`, `experimental`; historical voicings archived in `archive/`).
 * **Multiband Compression & Loudness Limiter**: Maximizes perceived loudness and clarity from laptop drivers without causing distortion or excursion rattle.
 * **Voicing Management**: Live-swappable on the fly via `rofi-speaker-dsp` or `spk` without restarting system audio.
+* **Main-Graph Client Scheduling (verified 2026-10-17)**: `asus-speaker-dsp.service` runs `pipewire -c active-runner.conf`, which connects to the default server as a client and exports `effect_input/output.Dolby_Speaker` into the primary graph (confirmed via `pw-top` + client-PID match). The chain is therefore scheduled by the main server clock: 48 kHz, quantum 512. No separate clock tuning in `runner.conf` is required or effective.
 
 #### 3. Strict Mutual Exclusion Routing (`dax-speaker-route.lua`)
 WirePlumber dynamically monitors physical ALSA jack routes and Bluetooth states:
@@ -289,11 +290,11 @@ Formerly, creative effects ran in a secondary filter chain (`41-mic-fx.conf`). I
    * Built-in laptop chassis speakers (`analog-output-speaker`) are suppressed to protect the hardware and user against high-frequency acoustic feedback loops, while 3.5mm wired headphones (`analog-output-headphones`) and Bluetooth endpoints (`bluez_output.*`) are fully supported.
 4. **27 Production Presets**:
    * *Natural Clean, Deep Voice, Radio Announcer, Higher Voice, Gruff Growl, Chipmunk, Darth Vader, Megatron, Giant, Goblin, Child, Robot, Cylon, Daft Punk, Kraftwerk, Dalek, Walkie Talkie, Old Telephone, Megaphone, Cave, Stadium Echo, Sci-Fi Alien, Ghost, Demon, Cyber Chopper, Underwater, Lo-Fi Static.*
-3. **Preset Level & Gain Architecture**:
+5. **Preset Level & Gain Architecture**:
    * **Isolated Quiet Voice Boost (+4 dB)**: Pre-FX compressor threshold lowering and +7.0 dB makeup gain is strictly isolated to **Natural Clean**, lifting soft conversational speech into nominal broadcast range.
    * **Creative Preset Isolation**: Creative presets inherit **0.0 dB** compressor makeup gain to prevent noise floor amplification, with a clean **+2.0 dB** boost applied post-effect at the limiter output stage (`limiter:Output gain = 1.2589 G`).
    * **Zero Repeating Voice / Echo Elimination**: SWH Delayorama `Dry/wet mix` is hard-coded to `0.0` on all 25 non-echo presets. Only dedicated delay presets (*Cave*, *Stadium Echo*) activate the delay tap matrix.
-4. **Runtime Preset Hot Reloading**:
+6. **Runtime Preset Hot Reloading**:
    * **TUI Hotkey**: Press **`F5`** or **`Ctrl+R`** in the MicStudio TUI to reload `~/.config/micstudio/presets.toml` from disk into memory without restarting PipeWire or MicStudio.
    * **CLI Command**: Run `mic preset reload` or `micstudio preset reload`.
 

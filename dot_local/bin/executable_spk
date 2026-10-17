@@ -139,10 +139,10 @@ apply_voicing() {
     local active_type="${active_info%%:*}"
     local active_sink="${active_info#*:}"
 
-    # Deploy active runner profile
+    # Deploy active runner profile (symlink-only).
+    # runner.conf embeds the profile IR path directly, so this symlink is the
+    # single live artifact; ACTIVE_VOICING in $STATE_FILE records the selection.
     ln -sf "$CONF_BASE/$voicing/runner.conf" "$CONF_BASE/active-runner.conf"
-    cp "$src_conf" "$CONF_BASE/active.conf"
-    cp "$src_irs" "$CONF_BASE/active.irs"
 
     # Update state
     sed -i '/^ACTIVE_VOICING=/d' "$STATE_FILE"

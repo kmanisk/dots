@@ -4,7 +4,7 @@
 **Target Hardware:** ASUS TUF Gaming F16 FX608JH (Intel i5-13450HX + NVIDIA RTX 5050 Mobile)  
 **Audio Codec:** Realtek ALC256 (HDA Intel PCH)  
 **Audio Framework:** Native PipeWire 1.6.9 + WirePlumber 0.5  
-**Document Location:** `~/docs/audio/2026-10-16_GAMING_AUDIO_BASELINE.md`
+**Document Location:** `~/.local/share/chezmoi/docs/audio/2026-10-16_GAMING_AUDIO_BASELINE.md`
 
 ---
 
@@ -95,3 +95,12 @@ Key issues resolved:
 - `~/.config/pipewire/asus-tuf-dax/*/runner.conf` (`dot_config/pipewire/asus-tuf-dax/*/runner.conf`)
 - `~/docs/audio/AUDIO_ARCHITECTURE.md` (`docs/audio/AUDIO_ARCHITECTURE.md`)
 - `~/docs/audio/2026-10-16_GAMING_AUDIO_BASELINE.md` (`docs/audio/2026-10-16_GAMING_AUDIO_BASELINE.md`)
+
+---
+
+## 6. Addendum (2026-10-17 Follow-up Audit)
+
+- Speaker profiles expanded beyond the 4 listed at baseline: `tuned`, `tuned-old`, and `experimental` are now available; historical voicings archived in `~/.config/pipewire/asus-tuf-dax/archive/`.
+- Redundant state copies (`active.conf`, `active.irs`) removed. Profile deploy is now symlink-only (`active-runner.conf` -> `<profile>/runner.conf`), with the selection recorded in `~/.config/asus-speakers/state.conf`.
+- The DAX3 speaker DSP chain is verified to run as a client of the main PipeWire server (`pw-top` + client PID match with `asus-speaker-dsp.service`), scheduled by the main clock: 48 kHz, quantum 512. No separate clock configuration is required or effective in `runner.conf`.
+- LSP `cr_0` confirmed as compression ratio via the installed plugin metadata (`/usr/lib/lv2/lsp-plugins.lv2/mb_compressor_stereo.ttl`: `a lv2:CompressorPlugin`, `cr_0` = "Ratio 1", minimum 1.0). The headphone multiband stage (`cr_0 = 2.0`) is therefore 2:1 compression, not expansion.
