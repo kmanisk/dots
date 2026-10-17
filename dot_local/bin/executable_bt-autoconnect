@@ -9,6 +9,7 @@ Features:
   - Event-driven via system D-Bus (GLib mainloop)
   - 0 CPU overhead when connected (dormant event listening)
   - Non-blocking asynchronous connection attempts when disconnected
+  - Exponential backoff between failed scan cycles (20s base, 300s cap)
   - Immediate reconnection on adapter power-on and system resume from sleep
   - Desktop notification on connection
 """
@@ -47,6 +48,7 @@ def save_target_devices(devices):
         json.dump(devices, f, indent=2)
 
 POLL_INTERVAL_SEC = 20
+MAX_POLL_INTERVAL_SEC = 300
 
 class BluetoothAutoConnector:
     def __init__(self, verbose=False):
@@ -58,6 +60,8 @@ class BluetoothAutoConnector:
             "org.freedesktop.DBus.ObjectManager"
         )
         self.timer_id = None
+        self.current_interval = POLL_INTERVAL_SEC
+        self.daemon_mode = False
         self.connecting_devices = set()
 
         # Listen for Device property changes (Connected, etc.)
@@ -125,7 +129,8 @@ class BluetoothAutoConnector:
         targets = self.get_target_device_objects()
         if not targets:
             self.log("No configured target devices found in BlueZ database.")
-            return True
+            self.schedule_next_scan()
+            return False
 
         for addr, (path, dev_iface, props) in targets.items():
             name = self.targets.get(addr, addr)
@@ -164,18 +169,34 @@ class BluetoothAutoConnector:
                 timeout=15
             )
 
-        return True  # Keep GLib timer active if not connected
-
-    def start_poll_timer(self):
-        if self.timer_id is None:
-            self.log(f"Starting auto-connect scan cycle (interval: {POLL_INTERVAL_SEC}s)...")
-            self.timer_id = GLib.timeout_add_seconds(POLL_INTERVAL_SEC, self.attempt_connect_all_disconnected)
+        self.schedule_next_scan()
+        return False  # Re-armed explicitly via schedule_next_scan() with backoff
 
     def stop_poll_timer(self):
         if self.timer_id is not None:
             self.log("Stopping scan cycle (target device connected; entering dormant state).")
             GLib.source_remove(self.timer_id)
             self.timer_id = None
+
+    def schedule_next_scan(self):
+        """Re-arm the scan timer with exponential backoff after a failed cycle."""
+        if not self.daemon_mode or self.timer_id is not None:
+            return
+        self.log(f"No target connected. Next scan in {self.current_interval}s...")
+        self.timer_id = GLib.timeout_add_seconds(self.current_interval, self.on_scan_timer)
+        self.current_interval = min(self.current_interval * 2, MAX_POLL_INTERVAL_SEC)
+
+    def on_scan_timer(self):
+        """One-shot timer callback: single attempt, re-armed by the attempt itself."""
+        self.timer_id = None
+        self.attempt_connect_all_disconnected()
+        return False
+
+    def one_shot_scan(self):
+        """Immediate single scan after an event (disconnect/resume/adapter-on), resetting backoff."""
+        self.current_interval = POLL_INTERVAL_SEC
+        self.attempt_connect_all_disconnected()
+        return False
 
     def on_properties_changed(self, interface, changed, invalidated, path):
         if interface == "org.bluez.Device1":
@@ -192,19 +213,18 @@ class BluetoothAutoConnector:
                             self.stop_poll_timer()
                         else:
                             self.log(f"{name} disconnected. Resuming scan cycle.")
-                            self.start_poll_timer()
-                            # Immediate quick check for other device
-                            GLib.timeout_add_seconds(2, self.attempt_connect_all_disconnected)
+                            # One-shot immediate check, backoff resets from base interval
+                            GLib.timeout_add_seconds(2, self.one_shot_scan)
 
         elif interface == "org.bluez.Adapter1":
             if "Powered" in changed and bool(changed["Powered"]):
                 self.log("Bluetooth adapter powered ON. Triggering auto-connect...")
-                GLib.timeout_add_seconds(1, self.attempt_connect_all_disconnected)
+                GLib.timeout_add_seconds(1, self.one_shot_scan)
 
     def on_prepare_for_sleep(self, going_to_sleep):
         if not going_to_sleep:
             self.log("System resumed from sleep. Triggering auto-connect in 2s...")
-            GLib.timeout_add_seconds(2, self.attempt_connect_all_disconnected)
+            GLib.timeout_add_seconds(2, self.one_shot_scan)
 
     def status(self):
         targets = self.get_target_device_objects()
@@ -221,6 +241,7 @@ class BluetoothAutoConnector:
 
     def run_daemon(self):
         self.log("Starting bt-autoconnect daemon...")
+        self.daemon_mode = True
         # Initial check
         connected = self.is_any_target_connected()
         if connected:
@@ -228,7 +249,6 @@ class BluetoothAutoConnector:
         else:
             self.log("No target device connected. Initiating first connect attempt...")
             self.attempt_connect_all_disconnected()
-            self.start_poll_timer()
 
         loop = GLib.MainLoop()
         try:
