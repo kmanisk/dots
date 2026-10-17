@@ -119,17 +119,88 @@ def get_theme_cache_path(theme_name):
     return next((c for c in candidates if os.path.exists(c)), None)
 
 
-def generate_preview_hud(theme_name):
+def _rel_luma(hex_color):
+    h = (hex_color.lstrip("#"))[:6]
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    try:
+        r, g, b = (int(h[i * 2:i * 2 + 2], 16) / 255 for i in range(3))
+    except ValueError:
+        return 0.0
+    f = lambda c: c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+
+
+def _contrast(a, b):
+    la, lb = _rel_luma(a), _rel_luma(b)
+    hi, lo = max(la, lb), min(la, lb)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def load_active_palette(current):
+    """Read the compiled JSON of the ACTIVE theme. Its chrome (inputbar/hint
+    rows in the message bar) is drawn in this palette, so status text must
+    contrast against the same background-alt the rofi chrome uses (base30
+    one_bg). Palette values below a contrast floor fall back to the theme's
+    readable foreground instead of hard-coded hexes."""
+    d = None
+    path = get_theme_cache_path(current)
+    if path:
+        try:
+            with open(path, "r", encoding="utf-8") as jf:
+                d = json.load(jf)
+        except Exception:
+            d = None
+    if not isinstance(d, dict):
+        return {}
+
+    sem = d.get("semantic") or d.get("derived", {}).get("semantic") or {}
+    b16 = d.get("base_16") or d.get("palette", {}).get("base_16") or {}
+    b30 = d.get("base_30") or d.get("derived", {}).get("base_30") or {}
+    bar = b30.get("one_bg") or b16.get("BASE01") or "#20242c"
+    fg = sem.get("foreground") or b16.get("BASE05") or "#d8dce3"
+
+    def pick(key16, default):
+        c = sem.get(key16) or default
+        if c and _contrast(c, bar) >= 3.0:
+            return c
+        return fg
+
+    return {
+        "ok": pick("success", b16.get("BASE0B")),
+        "err": pick("error", b16.get("BASE08")),
+        "info": pick("info", b16.get("BASE0D")),
+        "accent": pick("accent", d.get("accent") or b16.get("BASE0D")),
+        "muted": sem.get("muted") if (sem.get("muted") and _contrast(sem.get("muted"), bar) >= 2.0) else fg,
+        "fg": fg,
+        "bg": sem.get("background") or b16.get("BASE00") or "#16181e",
+    }
+
+
+def status_span(pal, key, extra="weight='bold'"):
+    """Pango span opener; color only when the palette can serve it, so the
+    fallback inherits the chrome text color (always readable)."""
+    c = (pal or {}).get(key)
+    if c and str(c).startswith("#"):
+        return f"<span foreground='{c}' {extra}>"
+    return f"<span {extra}>"
+
+
+def generate_preview_hud(theme_name, active_pal):
     clean = theme_name[8:] if theme_name.startswith("omarchy-") else theme_name
     target_path = get_theme_cache_path(clean)
     if not target_path:
-        return f"<span foreground='#ea6962' weight='bold'>No compiled metadata found for '{html.escape(clean)}'</span>"
+        return f"{status_span(active_pal,'err')}No compiled metadata found for '{html.escape(clean)}'</span>"
 
     try:
         with open(target_path, "r", encoding="utf-8") as jf:
             d = json.load(jf)
     except Exception as e:
-        return f"<span foreground='#ea6962'>Error parsing metadata: {html.escape(str(e))}</span>"
+        return f"{status_span(active_pal,'err')}Error parsing metadata: {html.escape(str(e))}</span>"
+
+    # Chrome colors come from the ACTIVE palette (the bar the HUD sits on);
+    # selected-theme colors are kept only inside self-backgrounded blocks.
+    bk = (active_pal or {}).get("bg") or "#20242c"
 
     b16 = d.get("palette", {}).get("base_16", {}) or d.get("base_16", {})
     sem = d.get("derived", {}).get("semantic", {}) or d.get("semantic", {})
@@ -159,8 +230,8 @@ def generate_preview_hud(theme_name):
     b0E = b16.get("BASE0E", "#c3c8d0")
     b0F = b16.get("BASE0F", "#6a3030")
 
-    row1 = " ".join([f"<span foreground='{c}'>██</span>" for c in [b00, b01, b02, b03, b04, b05, b06, b07]])
-    row2 = " ".join([f"<span foreground='{c}'>██</span>" for c in [b08, b09, b0A, b0B, b0C, b0D, b0E, b0F]])
+    row1 = " ".join([f"<span background='{bk}' foreground='{c}'>██</span>" for c in [b00, b01, b02, b03, b04, b05, b06, b07]])
+    row2 = " ".join([f"<span background='{bk}' foreground='{c}'>██</span>" for c in [b08, b09, b0A, b0B, b0C, b0D, b0E, b0F]])
 
     display_name = d.get("display_name") or d.get("name") or clean
     author = d.get("source", {}).get("author") or "Unknown"
@@ -173,10 +244,13 @@ def generate_preview_hud(theme_name):
     safe_type = html.escape(str(theme_type))
     safe_id = html.escape(str(clean))
 
+    span_title = status_span(active_pal, "accent", "weight='bold' size='large'")
+    span_muted = status_span(active_pal, "muted")
+    span_small = status_span(active_pal, "muted", "weight='normal' size='small'")
     lines = [
-        f"<span weight='bold' size='large' foreground='{accent}'>{safe_name.upper()}</span>  <span size='small' foreground='{muted}'>by {safe_author} ({safe_provider} • {safe_type})</span>  │  <span foreground='{accent}' size='small'>[Ctrl+I: Hide HUD]</span>",
-        f"  <span foreground='{bg}'>██</span> Bg: {bg}   <span foreground='{fg}'>██</span> Fg: {fg}   <span foreground='{accent}'>██</span> Accent: {accent}   <span foreground='{sel_bg}'>██</span> Sel: {sel_bg}",
-        f"  <span size='small' foreground='{muted}'>Base16:</span> {row1}  <span size='small' foreground='{muted}'>00-07</span>   {row2}  <span size='small' foreground='{muted}'>08-0F</span>",
+        f"{span_title}{safe_name.upper()}</span>  {span_muted}{safe_author} ({safe_provider} • {safe_type})</span>  │  {span_small}[Ctrl+I: Hide HUD]</span>",
+        f"  <span background='{bk}' foreground='{bg}'>██</span> Bg: {bg}   <span background='{bk}' foreground='{fg}'>██</span> Fg: {fg}   <span background='{bk}' foreground='{accent}'>██</span> Accent: {accent}   <span background='{bk}' foreground='{sel_bg}'>██</span> Sel: {sel_bg}",
+        f"  {status_span(active_pal,'muted')}Base16:</span> {row1}  {status_span(active_pal,'muted')}00-07</span>   {row2}  {status_span(active_pal,'muted')}08-0F</span>",
         f"  <span background='{bg}' foreground='{fg}'> <span foreground='{b0E}' weight='bold'>fn</span> <span foreground='{b0D}'>main</span>() {{ <span foreground='{b08}'>println!</span>(<span foreground='{b0B}'>&quot;Hello, {safe_name}!&quot;</span>); }} </span>  <span background='{accent}' foreground='{bg}' weight='bold'> NORMAL </span><span background='{sel_bg}' foreground='{sel_fg}'> {safe_id}.rs </span>",
     ]
 
@@ -272,6 +346,7 @@ def main():
     # 2. Inside Rofi script mode: dispatch based on ROFI_RETV
     retv = os.environ.get("ROFI_RETV", "0")
     current = get_current_theme()
+    pal = load_active_palette(current)
 
     # Initial invocation: render rows and default hint header
     if retv == "0":
@@ -322,7 +397,7 @@ def main():
 
         # Active theme safety rule
         if clean == current or target == current:
-            msg = f"<span foreground='#ea6962' weight='bold'>⚠ Cannot delete active theme '{clean}'! Switch themes first.</span>"
+            msg = f"{status_span(pal, 'err')}⚠ Cannot delete active theme '{clean}'! Switch themes first.</span>"
             output_mode_header(msg, "")
             output_theme_rows(current)
             return 0
@@ -349,11 +424,11 @@ def main():
                     start_new_session=True,
                     close_fds=True,
                 )
-                msg = f"<span foreground='#a7c080' weight='bold'>✓ Deleted '{clean}' ({source_type})</span>"
+                msg = f"{status_span(pal, 'ok')}✓ Deleted '{clean}' ({source_type})</span>"
             except Exception as e:
-                msg = f"<span foreground='#ea6962' weight='bold'>Error deleting '{clean}': {e}</span>"
+                msg = f"{status_span(pal, 'err')}Error deleting '{clean}': {e}</span>"
         else:
-            msg = f"<span foreground='#ea6962' weight='bold'>Theme '{clean}' not found in any source directory.</span>"
+            msg = f"{status_span(pal, 'err')}Theme '{clean}' not found in any source directory.</span>"
 
         output_mode_header(msg, "")
         output_theme_rows(current)
@@ -363,7 +438,8 @@ def main():
     if retv == "11":
         subprocess.run([THEME_SYNC], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         current = get_current_theme()
-        msg = "<span foreground='#7daea3' weight='bold'>✓ Themes synchronized and cache recompiled</span>"
+        pal = load_active_palette(current)
+        msg = f"{status_span(pal, 'info')}✓ Themes synchronized and cache recompiled</span>"
         output_mode_header(msg, "")
         output_theme_rows(current)
         return 0
@@ -384,7 +460,7 @@ def main():
             new_data = ""
         else:
             # Toggled ON or switched to newly selected theme
-            msg = generate_preview_hud(clean)
+            msg = generate_preview_hud(clean, pal)
             new_data = clean
 
         output_mode_header(msg, new_data)

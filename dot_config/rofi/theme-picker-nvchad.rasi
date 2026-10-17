@@ -1,48 +1,53 @@
 /**
- * NvChad Base46 / Omarchy Theme Picker — minimal flat style (2026-10-18).
- * Visual language matches the compact launcher look: single thin border,
- * no boxed header/hint blocks, muted hint row, flat rows with accent fill.
- * Functionality unchanged: search (fzf fuzzy), Enter Apply, Ctrl+D Delete,
- * Ctrl+R Sync, Ctrl+I Preview HUD, [ACTIVE] badge, spectrum swatches.
+ * NvChad Base46 / Omarchy Theme Picker — strong frame (2026-10-18).
+ * Rebuilt for visibility after feedback that the old chrome was too weak
+ * (1px border, unboxed rows, 10pt muted hints, invisible text on some
+ * themes). Now conforms to the system baseline in system.rasi: 860px wide,
+ * 2px accent border, boxed search row and hint/HUD row with a 4px accent
+ * leading edge, 12pt hint text in the chrome foreground.
+ * Functionality unchanged: Enter Apply, Ctrl+D Delete, Ctrl+R Sync,
+ * Ctrl+I Preview HUD, [ACTIVE] badge, spectrum swatches.
  */
 @import "~/.config/rofi/system.rasi"
 
 configuration {
-    show-icons:             false;
-    kb-remove-char-forward: "Delete";
-    kb-custom-1:            "Control+d,Control+Shift+D";
-    kb-custom-2:            "Control+r";
-    kb-custom-3:            "Control+i";
-    sort:                   true;
-    sorting-method:         "fzf";
-    matching:               "fuzzy";
+    show-icons:     false;
+    kb-custom-1:    "Control+d,Control+Shift+D";
+    kb-custom-2:    "Control+r";
+    kb-custom-3:    "Control+i";
+    sort:           true;
+    sorting-method: "fzf";
+    matching:       "fuzzy";
 }
 
 window {
     background-color:    @background;
     text-color:          @foreground;
-    border:              1px;
+    border:              2px;
     border-color:        @border-focus;
     border-radius:       0px;
-    width:               720px;
+    width:               860px;
     location:            center;
     anchor:              center;
-    padding:             12px 14px;
+    padding:             16px 20px;
 }
 
 mainbox {
     background-color:    transparent;
     children:            [ inputbar, message, listview ];
-    spacing:             8px;
+    spacing:             10px;
 }
 
-/* Flat search row: no box, accent label carries the hierarchy */
+/* Search row: primary slot fill + 4px accent leading edge */
 inputbar {
-    background-color:    transparent;
-    border:              0px;
-    padding:             2px 6px 8px;
+    background-color:    @background-alt;
+    text-color:          @foreground;
+    border:              0px 0px 0px 4px;
+    border-color:        @border-focus;
+    border-radius:       0px;
+    padding:             12px 16px;
     children:            [ prompt, entry ];
-    spacing:             12px;
+    spacing:             14px;
 }
 
 prompt {
@@ -55,28 +60,30 @@ entry {
     background-color:    transparent;
     text-color:          @foreground;
     placeholder:         "Search themes...";
-    placeholder-color:   @foreground-alt;
+    placeholder-color:   @gruvbox-fg2;
     font:                "VictorMono Nerd Font Mono 14";
 }
 
-/* Hint row: quiet and muted, no border */
+/* Hint / HUD row: same boxed language, fill only */
 message {
-    background-color:    transparent;
+    background-color:    @background-alt;
+    text-color:          @foreground;
     border:              0px;
-    padding:             0px 6px 2px;
+    border-radius:       0px;
+    padding:             10px 16px;
 }
 
 textbox {
     background-color:    transparent;
-    text-color:          @foreground-alt;
-    font:                "VictorMono Nerd Font Mono 10";
+    text-color:          @foreground;
+    font:                "VictorMono Nerd Font Mono 12";
 }
 
 listview {
     background-color:    transparent;
     columns:             1;
-    lines:               8;
-    spacing:             3px;
+    lines:               9;
+    spacing:             4px;
     cycle:               true;
     dynamic:             true;
     layout:              vertical;
@@ -89,7 +96,7 @@ element {
     orientation:         horizontal;
     background-color:    transparent;
     text-color:          @foreground;
-    padding:             9px 10px;
+    padding:             10px 14px;
     border-radius:       0px;
     border:              0px;
     children:            [ element-text ];
@@ -98,7 +105,8 @@ element {
 element selected {
     background-color:    @accent;
     text-color:          @selected-foreground;
-    border:              0px;
+    border:              0px 0px 0px 4px;
+    border-color:        @selected-foreground;
     border-radius:       0px;
 }
 
