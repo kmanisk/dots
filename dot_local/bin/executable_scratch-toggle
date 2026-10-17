@@ -46,13 +46,10 @@ if [ -n "${SWAYSOCK:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
     IPC_CMD="swaymsg"
 fi
 
-# Game guard: bindings that collide with gameplay (e.g. Control+space =
-# crouch-jump in FPS games) set SCRATCH_GAME_GUARD=1. When set, the toggle
-# is a silent no-op while a game window is focused. Deterministic and
-# compositor-independent (does not rely on shortcuts_inhibitor timing).
-# Game patterns mirror the fullscreen/game for_window rules in sway config.
-if [ -n "${SCRATCH_GAME_GUARD:-}" ]; then
-    if $IPC_CMD -t get_tree 2>/dev/null | python3 -c '
+# Workspace 4 & Game Guard:
+# Scratchpad must never open on Workspace 4 (gaming workspace) or while a game window is focused.
+# Scratchpad is allowed on all other workspaces (including Workspace 3 - Steam, and empty workspaces).
+if $IPC_CMD -t get_tree 2>/dev/null | python3 -c '
 import json, sys
 pats = ("steam_app_", "cs2", "gamescope", "eldenring", "steam_proton",
         "farcry3", "gtaiv")
@@ -60,24 +57,36 @@ try:
     tree = json.load(sys.stdin)
 except Exception:
     sys.exit(1)
-stack, focused = [tree], None
-while stack:
-    n = stack.pop()
-    if isinstance(n, dict):
-        if n.get("focused"):
-            focused = n
-        stack.extend(n.get("nodes", []) + n.get("floating_nodes", []))
-if not isinstance(focused, dict):
-    sys.exit(1)
-wp = focused.get("window_properties") or {}
-hay = " ".join((focused.get("app_id") or "", wp.get("class") or "",
-                wp.get("instance") or "")).lower()
-if any(p in hay for p in pats) or focused.get("fullscreen_mode"):
+
+def find_focused_info(node, current_ws=None):
+    if node.get("type") == "workspace":
+        current_ws = node.get("name")
+    if node.get("focused"):
+        return current_ws, node
+    for child in node.get("nodes", []) + node.get("floating_nodes", []):
+        res = find_focused_info(child, current_ws)
+        if res is not None:
+            return res
+    return None
+
+res = find_focused_info(tree)
+focused_ws, focused = res if res is not None else (None, None)
+
+# Block in Workspace 4
+if focused_ws == "4" or (focused_ws and str(focused_ws).startswith("4")):
     sys.exit(0)
+
+# Block if focused on a game window
+if isinstance(focused, dict) and focused.get("type") in ("con", "floating_con"):
+    wp = focused.get("window_properties") or {}
+    hay = " ".join((focused.get("app_id") or "", wp.get("class") or "",
+                    wp.get("instance") or "")).lower()
+    if any(p in hay for p in pats):
+        sys.exit(0)
+
 sys.exit(1)
 '; then
-        exit 0
-    fi
+    exit 0
 fi
 
 # Reports where the window is: missing | visible | hidden (scratchpad).
@@ -123,7 +132,8 @@ show_it() {
         # Enforce border pixel 2 and geometry on show
         # shellcheck disable=SC2086
         swaymsg "[app_id=\"$instance\"] border pixel 2, resize set $geom, move position center" >/dev/null 2>&1 || \
-        swaymsg "[class=\"(?i)$instance\"] border pixel 2, resize set $geom, move position center" >/dev/null 2>&1
+        swaymsg "[class=\"(?i)$instance\"] border pixel 2, resize set $geom, move position center" >/dev/null 2>&1 || \
+        swaymsg "[instance=\"$instance\"] border pixel 2, resize set $geom, move position center" >/dev/null 2>&1
     else
         i3-msg "[instance=\"$instance\"] scratchpad show" >/dev/null 2>&1 || \
         i3-msg "[class=\"(?i)$instance\"] scratchpad show" >/dev/null 2>&1
