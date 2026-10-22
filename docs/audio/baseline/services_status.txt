@@ -64,7 +64,7 @@ Oct 10 00:00:20 maniskg wireplumber[101545]: pw.node: (bluez_output.9E_74_98_79_
 Oct 10 00:00:20 maniskg wireplumber[101545]: spa.bluez5: Failure in Bluetooth audio transport /org/bluez/hci0/dev_9E_74_98_79_5D_15/sep1/fd0
 
 ● asus-speaker-dsp.service - ASUS TUF Speaker DSP (DAX3 Filter Chain)
-     Loaded: loaded (/home/manisk/.config/systemd/user/asus-speaker-dsp.service; enabled; preset: enabled)
+     Loaded: loaded (/home/onyx/.config/systemd/user/asus-speaker-dsp.service; enabled; preset: enabled)
      Active: active (running) since Sat 2026-10-10 01:43:09 IST; 9min ago
  Invocation: 99ea52e81d9d476884574442be794896
    Main PID: 279586 (pipewire)
@@ -72,4 +72,4 @@ Oct 10 00:00:20 maniskg wireplumber[101545]: spa.bluez5: Failure in Bluetooth au
      Memory: 8.5M (peak: 9.5M)
         CPU: 225ms
      CGroup: /user.slice/user-1000.slice/user@1000.service/app.slice/asus-speaker-dsp.service
-             └─279586 /usr/bin/pipewire -c /home/manisk/.config/pipewire/asus-tuf-dax/active-runner.conf
+             └─279586 /usr/bin/pipewire -c /home/onyx/.config/pipewire/asus-tuf-dax/active-runner.conf

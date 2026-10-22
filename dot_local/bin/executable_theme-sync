@@ -65,8 +65,9 @@ def parse_with_regex(filepath):
     return None
 
 def parse_with_nvim(filepath):
+    home_dir = os.path.expanduser("~")
     lua_code = f"""
-package.path = package.path .. ";/home/manisk/.config/theme/base46/lua/?.lua;/home/manisk/.config/theme/base46/lua/?/init.lua"
+package.path = package.path .. ";{home_dir}/.config/theme/base46/lua/?.lua;{home_dir}/.config/theme/base46/lua/?/init.lua"
 package.loaded["base46"] = {{
   override_theme = function(m, name) return m end
 }}

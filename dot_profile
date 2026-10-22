@@ -1,5 +1,6 @@
 export BROWSER=cachy-browser
-export EDITOR=/usr/bin/vim
+export EDITOR=nvim
+export VISUAL=nvim
 export MAIL=thunderbird
 export TERMINAL=alacritty
 export QT_QPA_PLATFORMTHEME="qt5ct:qt6ct"

@@ -35,7 +35,7 @@ if [ ! -f "$HOME/.config/chezmoi/chezmoi.toml" ]; then
     cat > "$HOME/.config/chezmoi/chezmoi.toml" <<'EOF'
 encryption = "age"
 [age]
-    identity = "/home/manisk/.config/chezmoi/key.txt"
+    identity = "/home/onyx/.config/chezmoi/key.txt"
     recipient = "age1shu7a5lx3puszpg9r9e39u2t2a6yl3mvnfezhsulfze8335k9fhslf8x78"
 
 [data]

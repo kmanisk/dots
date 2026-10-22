@@ -4,19 +4,18 @@ return {
 	dependencies = {
 		"nvim-lua/plenary.nvim",
 	},
+	keys = {
+		{ "<leader>oy", "<cmd>Yazi<CR>", desc = "Open Yazi file manager" },
+	},
 	cond = function()
 		return not vim.g.vscode
 	end,
 	opts = {
-		-- Open yazi instead of netrw for directories
+		-- Keep netrw out of directory handling; Oil remains the default explorer.
 		open_for_directories = false,
-		-- Use floating window
 		floating_window_scaling_factor = 0.9,
-		-- Yazi's log level
 		log_level = vim.log.levels.OFF,
-		-- Use the system yazi (already themed by theme-set)
-		yazi_floating_window_border = "rounded",
-		-- Keep yazi's own config (we manage the theme separately)
+		yazi_floating_window_border = "single",
 		set_keymappings_function = nil,
 	},
 }

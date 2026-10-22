@@ -59,8 +59,8 @@ All future keybinding modifications across **i3**, **xremap**, **Zed**, **Alacri
     - Window Close (Graceful): `Caps + q` only (Two-Handed)
     - Window Force Kill: `Caps + BackSpace` (maps to `Win + BackSpace` force-kill)
     - Process Killer Menu: `Caps + w` (App-level aggregator & terminator; formerly `Win + Shift + e`)
-    - Steam Launch (DGPU): `Caps + e` (Steam on WS 3 via `STEAM_DGPU=1 steam-workspace`; migrated from `Alt + Shift + S`, 2026-10-18)
-    - Kill Steam & Games: `Caps + r` (Emergency terminator for Steam, Proton games & Wine processes)
+    - Steam Launch (DGPU, background): `Caps + e` (spawns Steam and routes its window to WS 3 without switching the viewport; `STEAM_DGPU=1 steam-workspace`; migrated from `Alt + Shift + S`, 2026-10-18; background-routing rewrite 2026-10-18)
+    - Kill Steam & Games: `Caps + r` (Emergency terminator for Steam, Proton games & Wine processes; flock-guarded - repeat presses escalate a hard sweep without stacking compositor reloads, 2026-10-18)
     - Virtual F-Keys: `Caps + 1..0, -, =` (`F1..F12`)
 
 - **Tier 3: Application Leader (Zed) — Buffer & File Operations:**

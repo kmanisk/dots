@@ -382,7 +382,7 @@
         },
         "Java": {
             "formatter": "language_server",
-            "tab_size": 2,
+            "tab_size": 4,
             "hard_tabs": false
         }
     },

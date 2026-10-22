@@ -1,0 +1,282 @@
+#!/bin/bash
+# ==============================================================================
+# bt-select — Modern Terminal UI for Bluetooth Audio Auto-Connect Selection
+# ==============================================================================
+# Modern Bash TUI with full Vim keybindings (j/k, Space, Enter, q/Esc).
+#
+#   Checked   [x] -> Unblocked & allowed to auto-connect (connected if in range).
+#   Unchecked [ ] -> Blocked & disconnected (refused durably in BlueZ).
+#
+# Non-audio devices (e.g. Katana S K2 keyboard) are strictly excluded.
+# ==============================================================================
+
+set -u
+
+TOGGLE="${HOME}/.local/bin/bt-refuse-toggle"
+SELECTION_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/bt-autoconnect/selection.txt"
+
+if [[ ! -x "$TOGGLE" ]]; then
+    printf 'bt-select: %s not found or not executable\n' "$TOGGLE" >&2
+    exit 1
+fi
+
+is_connected() {
+    bluetoothctl info "$1" 2>/dev/null | grep -q 'Connected: yes'
+}
+
+declare -A PRE_SELECTED=()
+while read -r mac; do
+    [ -n "$mac" ] && PRE_SELECTED[${mac^^}]=1
+done < <("$TOGGLE" --selected 2>/dev/null)
+
+declare -a DEVS_MAC=() DEVS_NAME=() DEVS_BLOCKED=() DEVS_CONN=() DEVS_CHECKED=()
+count=0
+
+while IFS=$'\t' read -r mac name blocked conn; do
+    [ -n "$mac" ] || continue
+    DEVS_MAC+=("$mac")
+    DEVS_NAME+=("$name")
+    DEVS_BLOCKED+=("$blocked")
+    DEVS_CONN+=("$conn")
+    if [[ -n "${PRE_SELECTED[${mac^^}]:-}" ]]; then
+        DEVS_CHECKED+=(1)
+    else
+        DEVS_CHECKED+=(0)
+    fi
+    count=$((count + 1))
+done < <("$TOGGLE" --list 2>/dev/null)
+
+if (( count == 0 )); then
+    printf 'bt-select: No paired audio devices found.\n'
+    exit 0
+fi
+
+# Terminal colors & styling
+BOLD="\033[1m"
+DIM="\033[2m"
+CYAN="\033[36m"
+GREEN="\033[32m"
+YELLOW="\033[33m"
+RED="\033[31m"
+RESET="\033[0m"
+HL_BG="\033[48;5;236m"
+
+cursor=0
+
+cleanup() {
+    tput cnorm 2>/dev/null || true
+    tput rmcup 2>/dev/null || true
+    stty echo icanon 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
+render() {
+    # Move cursor to top-left of alternate buffer
+    tput cup 0 0 2>/dev/null || clear
+
+    local width=72
+    local term_cols
+    term_cols=$(tput cols 2>/dev/null || echo 80)
+    (( term_cols < width )) && width=$term_cols
+
+    printf "%b\n" "${CYAN}╭────────────────────────────────────────────────────────────────────────╮${RESET}"
+    printf "%b\n" "${CYAN}│${RESET}  ${BOLD}BLUETOOTH AUDIO SELECTOR${RESET}                                              ${CYAN}│${RESET}"
+    printf "%b\n" "${CYAN}│${RESET}  ${DIM}Select devices allowed to auto-connect (unblocked vs refused)${RESET}         ${CYAN}│${RESET}"
+    printf "%b\n" "${CYAN}╰────────────────────────────────────────────────────────────────────────╯${RESET}"
+    printf "\n"
+
+    for i in "${!DEVS_MAC[@]}"; do
+        local mac="${DEVS_MAC[$i]}"
+        local name="${DEVS_NAME[$i]}"
+        local blocked="${DEVS_BLOCKED[$i]}"
+        local conn="${DEVS_CONN[$i]}"
+        local checked=${DEVS_CHECKED[$i]}
+
+        local pointer="  "
+        local line_prefix=""
+        local line_suffix=""
+        if (( i == cursor )); then
+            pointer="${CYAN}❯ ${RESET}"
+            line_prefix="${HL_BG}"
+            line_suffix="${RESET}"
+        fi
+
+        local box="${DIM}[ ]${RESET}"
+        if (( checked == 1 )); then
+            box="${BOLD}${GREEN}[x]${RESET}"
+        fi
+
+        local state_str="${CYAN}auto-connect${RESET}"
+        [[ "$blocked" == "yes" ]] && state_str="${RED}refused${RESET}"
+
+        local conn_str="${DIM}disconnected${RESET}"
+        [[ "$conn" == "yes" ]] && conn_str="${BOLD}${GREEN}connected${RESET}"
+
+        printf "%b%b%b %b%b\n" "$pointer" "$line_prefix" "$box" "${BOLD}$name${RESET}" "$line_suffix"
+        printf "      ${DIM}%s  │  %b  │  %b${RESET}\n\n" "$mac" "$state_str" "$conn_str"
+    done
+
+    printf "%b\n" "${DIM}──────────────────────────────────────────────────────────────────────────${RESET}"
+    printf "  ${BOLD}j/k, ↑/↓${RESET} Navigate   ${BOLD}Space${RESET} Toggle   ${BOLD}a${RESET} All   ${BOLD}Enter${RESET} Apply   ${BOLD}q/Esc${RESET} Cancel\n"
+}
+
+# Enter alternate screen buffer & hide cursor
+tput smcup 2>/dev/null || true
+tput civis 2>/dev/null || true
+stty -echo -icanon min 1 time 0 2>/dev/null || true
+
+trap 'render' WINCH
+
+applied=0
+
+while true; do
+    render
+
+    # Read raw key
+    key=""
+    IFS= read -rsn1 key || break
+    if [[ $key == $'\x1b' ]]; then
+        rest=""
+        read -rsn2 -t 0.05 rest 2>/dev/null || true
+        key+="$rest"
+    fi
+
+    case "$key" in
+        # Vim down / Down arrow
+        j|$'\x1b[B'|$'\x1bOB')
+            cursor=$(( (cursor + 1) % count ))
+            ;;
+        # Vim up / Up arrow
+        k|$'\x1b[A'|$'\x1bOA')
+            cursor=$(( (cursor - 1 + count) % count ))
+            ;;
+        # Toggle checkbox
+        ' ')
+            if (( DEVS_CHECKED[cursor] == 1 )); then
+                DEVS_CHECKED[cursor]=0
+            else
+                DEVS_CHECKED[cursor]=1
+            fi
+            ;;
+        # Toggle all
+        a|A)
+            all_checked=1
+            for c in "${DEVS_CHECKED[@]}"; do
+                (( c == 0 )) && all_checked=0 && break
+            done
+            for idx in "${!DEVS_CHECKED[@]}"; do
+                if (( all_checked )); then
+                    DEVS_CHECKED[idx]=0
+                else
+                    DEVS_CHECKED[idx]=1
+                fi
+            done
+            ;;
+        # Enter / Apply
+        ''|$'\n'|$'\r')
+            applied=1
+            break
+            ;;
+        # Quit / Cancel
+        q|Q|$'\x1b')
+            applied=0
+            break
+            ;;
+    esac
+done
+
+# Restore screen and terminal before applying output
+cleanup
+
+if (( applied == 0 )); then
+    exit 0
+fi
+
+declare -a CHOSEN_MACS=()
+for i in "${!DEVS_MAC[@]}"; do
+    if (( DEVS_CHECKED[i] == 1 )); then
+        CHOSEN_MACS+=("${DEVS_MAC[$i]}")
+    fi
+done
+
+# Persist selection to selection.txt
+mkdir -p "$(dirname "$SELECTION_FILE")"
+if (( ${#CHOSEN_MACS[@]} )); then
+    printf '%s\n' "${CHOSEN_MACS[@]}" | sort > "$SELECTION_FILE"
+else
+    : > "$SELECTION_FILE"
+fi
+
+printf '%bApplying Bluetooth selection...%b\n\n' "${BOLD}" "${RESET}"
+
+on_names=()
+off_names=()
+
+# 1. Unchecked devices: block and disconnect
+for i in "${!DEVS_MAC[@]}"; do
+    mac="${DEVS_MAC[$i]}"
+    name="${DEVS_NAME[$i]}"
+    if (( DEVS_CHECKED[i] == 0 )); then
+        printf '  %b[REFUSING]%b     %s (%s)\n' "${RED}" "${RESET}" "$name" "$mac"
+        bluetoothctl block "$mac" >/dev/null 2>&1
+        bluetoothctl disconnect "$mac" >/dev/null 2>&1
+        off_names+=("$name")
+    fi
+done
+
+# 2. Checked devices: unblock and attempt connection
+for i in "${!DEVS_MAC[@]}"; do
+    mac="${DEVS_MAC[$i]}"
+    name="${DEVS_NAME[$i]}"
+    if (( DEVS_CHECKED[i] == 1 )); then
+        bluetoothctl unblock "$mac" >/dev/null 2>&1
+        if ! is_connected "$mac"; then
+            printf '  %b[CONNECTING]%b   %s (%s)...\n' "${CYAN}" "${RESET}" "$name" "$mac"
+            timeout 5 bluetoothctl connect "$mac" >/dev/null 2>&1 || true
+            if is_connected "$mac"; then
+                printf '  %b[CONNECTED]%b    %s\n' "${GREEN}" "${RESET}" "$name"
+            else
+                printf '  %b[ALLOWED]%b      %s (offline / waiting for power-on)\n' "${YELLOW}" "${RESET}" "$name"
+            fi
+        else
+            printf '  %b[ACTIVE]%b       %s already connected\n' "${GREEN}" "${RESET}" "$name"
+        fi
+        on_names+=("$name")
+    fi
+done
+
+# 3. Audio routing: if exactly one device is checked and connected, ensure default sink
+if (( ${#CHOSEN_MACS[@]} == 1 )); then
+    mac="${CHOSEN_MACS[0]}"
+    if is_connected "$mac"; then
+        sink="bluez_output.${mac//:/_}.1"
+        for _ in {1..8}; do
+            if pactl list short sinks 2>/dev/null | cut -f2 | grep -qx "$sink"; then
+                pactl set-default-sink "$sink" >/dev/null 2>&1
+                while read -r id; do
+                    pactl move-sink-input "$id" "$sink" >/dev/null 2>&1
+                done < <(pactl list short sink-inputs 2>/dev/null | cut -f1)
+                break
+            fi
+            sleep 0.25
+        done
+    fi
+fi
+
+join_names() {
+    local out=""
+    local n
+    for n in "$@"; do
+        out+="${out:+, }$n"
+    done
+    printf '%s' "${out:-none}"
+}
+
+notify-send -a Bluetooth \
+    -h string:x-canonical-private-synchronous:bt-refuse \
+    -i preferences-system-bluetooth -t 3500 \
+    "Bluetooth selection applied" \
+    "ON: $(join_names "${on_names[@]}")  |  OFF: $(join_names "${off_names[@]}")" \
+    2>/dev/null || true
+
+printf '\n%bSelection applied successfully.%b\n' "${GREEN}" "${RESET}"

@@ -57,6 +57,10 @@ case "$GPU_MODE" in
     AsusMuxDgpu)
         # Allow proprietary NVIDIA scanout on direct dGPU mode
         export SWAY_UNSUPPORTED_GPU=true
+        # Use Vulkan renderer: wlroots Vulkan path handles linux-drm-syncobj-v1 explicit sync
+        # with NVIDIA correctly; the default OpenGL renderer can produce protocol violation
+        # (error 3: Acquire point set but no buffer attached) crashing Wayland clients like CS2.
+        export WLR_RENDERER=vulkan
         ;;
 esac
 

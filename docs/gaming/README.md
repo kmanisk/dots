@@ -47,3 +47,5 @@ This directory contains battle-tested configurations, root-cause analyses, bench
    - i3wm window rule: `for_window [class="^steam_app_.*$"] fullscreen enable`.
 3. **Storage & Btrfs Safety:**
    - Steam libraries reside on `/mnt/Games/SteamLibrary` with snapshot protection.
+4. **Steam Launch Options & Runtime Portability:**
+   - [Steam Portable Launch Options & Architecture](./steam.md) — Standard `sh -c 'exec "$HOME/.local/bin/<script>" "$@"' -- %command%` pattern to resolve `$HOME` dynamically, avoiding Steam container `$PATH` stripping and eliminating hardcoded paths.

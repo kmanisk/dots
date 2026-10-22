@@ -8,7 +8,7 @@ scale 1.0 (`nearest`) · Gamescope off · vkBasalt off · MSAA untouched
 
 **Launch option (Steam):**
 ```text
-/home/manisk/.local/bin/cs2-launch %command%
+/home/onyx/.local/bin/cs2-launch %command%
 ```
 
 ---

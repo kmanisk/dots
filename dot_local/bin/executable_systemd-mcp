@@ -6,16 +6,19 @@ import sys
 
 def get_user_env():
     env = os.environ.copy()
-    env["XDG_RUNTIME_DIR"] = "/run/user/1000"
-    env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/run/user/1000/bus"
+    uid = os.geteuid() if os.geteuid() != 0 else 1000
+    env["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
+    env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{uid}/bus"
     return env
 
 def run_cmd(cmd, user=False, timeout=20):
     try:
         env = get_user_env() if user else os.environ.copy()
         if user and os.geteuid() == 0:
-            # Running as root, execute as user manisk
-            full_cmd = ["runuser", "-u", "manisk", "--", "env", "XDG_RUNTIME_DIR=/run/user/1000", "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus"] + cmd
+            import pwd
+            target_user = os.environ.get("SUDO_USER") or pwd.getpwuid(1000).pw_name
+            uid = pwd.getpwnam(target_user).pw_uid
+            full_cmd = ["runuser", "-u", target_user, "--", "env", f"XDG_RUNTIME_DIR=/run/user/{uid}", f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus"] + cmd
         else:
             full_cmd = cmd
             

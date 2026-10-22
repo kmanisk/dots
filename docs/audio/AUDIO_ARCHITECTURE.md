@@ -1,5 +1,44 @@
 # CachyOS & PipeWire Unified Audio Architecture
 
+> Verified update, 2026-10-23: MicStudio now selects physical capture inputs using
+> the existing WirePlumber process. User and model gain are applied before the
+> final limiter, whose output gain remains unity. Earlier descriptions of an
+> exclusive fixed input or post-limiter boosts are historical. See the
+> [audit](../system/workstation-audit-2026-10-23.md) for measurements and rollback.
+
+## 2026-10-23 input selection and restart verification
+
+- `micstudio input` lists physical inputs; `micstudio input <node.name>` saves a
+  preference. `micstudio input auto` restores automatic selection. Press `i` in
+  the TUI to select with `j`/`k` and `Enter`.
+- Policy sources: `~/.config/wireplumber/wireplumber.conf.d/51-micstudio-input.conf`
+  and `~/.local/share/wireplumber/scripts/micstudio-input.lua`, both managed by
+  chezmoi. WirePlumber saves `micstudio.input`; no resident helper was added.
+- Synthetic-source integration verified selection, preference after a
+  WirePlumber restart, fallback on disappearance, and restoration on reconnect.
+  The final physical capture input remains the laptop analog microphone.
+- Installed-LADSPA sine probe: +5 dB after the limiter produced +3.00 dBFS;
+  the same boost before it produced -2.00 dBFS. `~/micstudio/src/config.rs` and
+  `src/presets.rs` now set limiter input gain and force output gain to 1.0.
+  This measures the limiter, not subjective speech quality or true-peak behavior.
+- `asus-speaker-dsp.service` now has `PartOf=pipewire.service` and is wanted by
+  PipeWire. Restarting PipeWire restored speaker DSP, gaming sink, and the
+  single virtual microphone without duplicate paths.
+- Silent streams verified CS2 identification routes to `sink.peace_gaming`;
+  a desktop stream routes through `effect_input.Dolby_Speaker`. `audio doctor`
+  returned zero errors and warnings. A2DP-only policy is preserved.
+- Clock quantum 512 at 48 kHz represents a 10.67 ms processing period, not a
+  measurement of end-to-end latency. Speech quality, Bluetooth reconnect audio,
+  and suspend/resume were not tested in this audit.
+- `51-micstudio-restore.conf` now runs `micstudio restore` once after graph
+  creation, without a resident helper. Saved +5 dB gain and unity limiter output
+  returned after repeated PipeWire restarts. Use an explicit argument array in
+  `context.exec`; the initial shell-string form did not restore the values.
+
+The custom setting uses the upstream [WirePlumber settings API](https://pipewire.pages.freedesktop.org/wireplumber/scripting/lua_api/lua_settings_api.html).
+Limiter behavior was tested against the installed plugin; its controls are
+documented in the [LSP limiter manual](https://lsp-plug.in/?page=manuals&section=limiter_mono).
+
 **Target System:** CachyOS rolling · Sway (Wayland) / i3wm · Intel i5-13450HX + RTX 5050 Mobile (AsusMuxDgpu / Hybrid)  
 **Primary Codec:** Realtek ALC256 HD Audio · Bluetooth A2DP (Soundcore Q20i)  
 **Audio Framework:** Native PipeWire 1.6.9 + WirePlumber 0.5 (100% Daemonless & Headless DSP)  
@@ -59,7 +98,7 @@ flowchart TD
 
 ## 3. Core PipeWire Clock & Latency Policies
 
-Configured in [`~/.config/pipewire/pipewire.conf.d/10-low-latency.conf`](file:///home/manisk/.config/pipewire/pipewire.conf.d/10-low-latency.conf) and [`10-denormals.conf`](file:///home/manisk/.config/pipewire/pipewire.conf.d/10-denormals.conf):
+Configured in [`~/.config/pipewire/pipewire.conf.d/10-low-latency.conf`](file:///home/onyx/.config/pipewire/pipewire.conf.d/10-low-latency.conf) and [`10-denormals.conf`](file:///home/onyx/.config/pipewire/pipewire.conf.d/10-denormals.conf):
 
 ```spa-json
 context.properties = {
@@ -79,7 +118,7 @@ context.properties = {
 ## 4. WirePlumber 0.5 Routing Policies & Device Switching
 
 ### A. Strict Bluetooth A2DP Policy (RULE 10 Enforcement)
-File: [`~/.config/wireplumber/wireplumber.conf.d/11-bluetooth-policy.conf`](file:///home/manisk/.config/wireplumber/wireplumber.conf.d/11-bluetooth-policy.conf)
+File: [`~/.config/wireplumber/wireplumber.conf.d/11-bluetooth-policy.conf`](file:///home/onyx/.config/wireplumber/wireplumber.conf.d/11-bluetooth-policy.conf)
 
 ```spa-json
 wireplumber.settings = {
@@ -113,7 +152,7 @@ monitor.bluez.rules = [
   * Voice input is always supplied by the internal laptop microphone through `ghelper-audio`.
 
 ### B. ALSA Hardware Jack Policy
-File: [`~/.config/wireplumber/wireplumber.conf.d/10-alsa-policy.conf`](file:///home/manisk/.config/wireplumber/wireplumber.conf.d/10-alsa-policy.conf)
+File: [`~/.config/wireplumber/wireplumber.conf.d/10-alsa-policy.conf`](file:///home/onyx/.config/wireplumber/wireplumber.conf.d/10-alsa-policy.conf)
 
 ```spa-json
 monitor.alsa.rules = [
@@ -145,8 +184,8 @@ When multiple playback devices are connected, WirePlumber resolves sinks by `pri
 ## 5. Output Playback DSP Pipelines
 
 ### A. Competitive Gaming Low-Latency Pipeline
-File: [`~/.config/pipewire/pipewire.conf.d/30-peace-gaming.conf`](file:///home/manisk/.config/pipewire/pipewire.conf.d/30-peace-gaming.conf)  
-Script: [`~/.local/share/wireplumber/scripts/gaming-audio-route.lua`](file:///home/manisk/.local/share/wireplumber/scripts/gaming-audio-route.lua)
+File: [`~/.config/pipewire/pipewire.conf.d/30-peace-gaming.conf`](file:///home/onyx/.config/pipewire/pipewire.conf.d/30-peace-gaming.conf)  
+Script: [`~/.local/share/wireplumber/scripts/gaming-audio-route.lua`](file:///home/onyx/.local/share/wireplumber/scripts/gaming-audio-route.lua)
 
 * **Virtual Sink**: `sink.peace_gaming` (`Audio/Sink`, description: "Gaming Audio")
 * **DSP Processing**:
@@ -171,12 +210,12 @@ Script: [`~/.local/share/wireplumber/scripts/gaming-audio-route.lua`](file:///ho
 ### B. Device-Agnostic Dolby Enhancement & ASUS DAX3 Speaker DSP
 
 Files & Services:
-* [`~/.config/pipewire/pipewire.conf.d/42-dolby-headphones.conf`](file:///home/manisk/.config/pipewire/pipewire.conf.d/42-dolby-headphones.conf) (Dolby Headphone Filter Chain)
-* [`~/.config/systemd/user/asus-speaker-dsp.service`](file:///home/manisk/.config/systemd/user/asus-speaker-dsp.service) (ASUS DAX3 Speaker Filter-Chain Runner)
-* [`~/.config/pipewire/asus-tuf-dax/`](file:///home/manisk/.config/pipewire/asus-tuf-dax/) (`active-runner.conf` symlink + per-profile directories; profile selection recorded in `~/.config/asus-speakers/state.conf`)
-* [`~/.config/wireplumber/wireplumber.conf.d/40-dax-speaker-route.conf`](file:///home/manisk/.config/wireplumber/wireplumber.conf.d/40-dax-speaker-route.conf) (WirePlumber 0.5 module trigger)
-* [`~/.local/share/wireplumber/scripts/dax-speaker-route.lua`](file:///home/manisk/.local/share/wireplumber/scripts/dax-speaker-route.lua) (Live dynamic hardware-route switcher)
-* [`~/.local/bin/rofi-speaker-dsp`](file:///home/manisk/.local/bin/rofi-speaker-dsp) & [`~/.local/bin/asus-speaker-doctor`](file:///home/manisk/.local/bin/asus-speaker-doctor) (Interactive voicing switcher & diagnostics)
+* [`~/.config/pipewire/pipewire.conf.d/42-dolby-headphones.conf`](file:///home/onyx/.config/pipewire/pipewire.conf.d/42-dolby-headphones.conf) (Dolby Headphone Filter Chain)
+* [`~/.config/systemd/user/asus-speaker-dsp.service`](file:///home/onyx/.config/systemd/user/asus-speaker-dsp.service) (ASUS DAX3 Speaker Filter-Chain Runner)
+* [`~/.config/pipewire/asus-tuf-dax/`](file:///home/onyx/.config/pipewire/asus-tuf-dax/) (`active-runner.conf` symlink + per-profile directories; profile selection recorded in `~/.config/asus-speakers/state.conf`)
+* [`~/.config/wireplumber/wireplumber.conf.d/40-dax-speaker-route.conf`](file:///home/onyx/.config/wireplumber/wireplumber.conf.d/40-dax-speaker-route.conf) (WirePlumber 0.5 module trigger)
+* [`~/.local/share/wireplumber/scripts/dax-speaker-route.lua`](file:///home/onyx/.local/share/wireplumber/scripts/dax-speaker-route.lua) (Live dynamic hardware-route switcher)
+* [`~/.local/bin/rofi-speaker-dsp`](file:///home/onyx/.local/bin/rofi-speaker-dsp) & [`~/.local/bin/asus-speaker-doctor`](file:///home/onyx/.local/bin/asus-speaker-doctor) (Interactive voicing switcher & diagnostics)
 
 #### 1. Dolby Headphone Enhancement (`effect_input.Dolby_Headphones`)
 Activated automatically whenever Bluetooth (e.g. Soundcore Q20i) or 3.5mm wired headphones are connected:
@@ -210,7 +249,7 @@ WirePlumber dynamically monitors physical ALSA jack routes and Bluetooth states:
 
 ## 6. Krisp-Grade Microphone Stack (`40-mic.conf`)
 
-Configured in [`~/.config/pipewire/pipewire.conf.d/40-mic.conf`](file:///home/manisk/.config/pipewire/pipewire.conf.d/40-mic.conf):
+Configured in [`~/.config/pipewire/pipewire.conf.d/40-mic.conf`](file:///home/onyx/.config/pipewire/pipewire.conf.d/40-mic.conf):
 
 ### A. Processing Stages & Verified Parameters
 
@@ -403,11 +442,21 @@ Rather than relying on heavy GNOME or KDE Bluetooth daemons, the system uses **`
   * Device property inspection (battery percentage, MAC address, supported UUIDs).
   * Consumes 0.0% CPU and zero RAM when closed.
 
-### B. Bluetooth Automation Scripts & Daemons
-* **`bt-auto-trust` (`~/.local/bin/bt-auto-trust`)**:
-  * Event-driven Python D-Bus hook that monitors BlueZ `org.bluez.Device1` interfaces.
-  * Automatically sets `Trusted = True` on all paired audio peripherals so they never hang on connection authorization prompts.
-  * Instantly sets the newly connected Bluetooth device as the default audio sink.
+### B. Bluetooth Control Model (Daemonless, Manual-Only)
+Since 2026-10-19 there are **no Bluetooth automation services**: `bt-autoconnect.service` and `bt-auto-trust.service` were stopped, disabled, deleted from disk, and removed from chezmoi. No `bt-*` unit files or processes remain; BlueZ block state replaces every background dialer.
+
+* **`bt-select` (`~/.local/bin/bt-select`)** - manual whiptail picker, audio devices only (input devices such as the Katana S K2 keyboard are never listed):
+  * Checked = `bluetoothctl unblock`, then foreground `timeout 12 bluetoothctl connect` if not connected; a single checked device also becomes the default sink and current streams are moved to it.
+  * Unchecked = `bluetoothctl block` + disconnect if connected.
+  * The checked set is written to `~/.config/bt-autoconnect/selection.txt` (one MAC per line). Off is applied before on so two devices are never connected at once on purpose.
+* **`bt-refuse-toggle` (`~/.local/bin/bt-refuse-toggle`)** - foreground toggle, bound to `$mod + Shift + Return` (section 13):
+  * All selected devices blocked -> unblock + foreground connect (auto-connect ON).
+  * Otherwise -> block + disconnect the whole selection (auto-connect OFF).
+  * Helper modes: `--list`, `--selected`, `--dry-run`. Missing selection file = all paired audio devices; present but empty = nothing is toggled.
+* **Retired scripts (kept on disk, not installed as services, no references found in sway, systemd, fish, zsh, udev, or autostart configs)**:
+  * `bt-autoconnect` and `bt-auto-trust` - former D-Bus dialers whose services were deleted because they fought manual control.
+  * `bt-profile` - one-shot PulseAudio card profile inspector.
+  * `~/.config/bt-autoconnect/devices.json` - used only by the retired manual script.
 * **`bt-battery-notify` (`~/.local/bin/bt-battery-notify`)**:
   * Dual-layer battery query tool: checks UPower `/org/freedesktop/UPower/devices/headset_*` first, falling back to `bluetoothctl info` battery percentages.
   * Dispatches desktop notifications via Mako with zero dropped devices.
@@ -425,6 +474,18 @@ Rather than relying on heavy GNOME or KDE Bluetooth daemons, the system uses **`
     4. USB DAC / External HDMI
 * **`bt-profile` (`~/.local/bin/bt-profile`)**:
   * One-shot script to inspect or switch active PulseAudio card profiles.
+
+### C. A2DP Stability - Applied and Pending Changes (2026-10-20)
+Full session log: [`2026-10-20_BLUETOOTH_AUDIO_STUTTER.md`](file:///home/onyx/docs/audio/2026-10-20_BLUETOOTH_AUDIO_STUTTER.md)
+
+| Status | Change | Detail |
+| :--- | :--- | :--- |
+| Applied 2026-10-19 | WiFi power save off (A1) | `sudo iw dev wlan0 set power_save off` plus NetworkManager `802-11-wireless.powersave 2` on profile UUID `2787a05e-c867-4d75-b138-155aa8446e90` (persistent, re-applies on every connect) |
+| Proposed, not applied | Prefer SBC over AAC (A2) | Set `bluez5.codecs = [ sbc sbc_xq aac ]` in [`11-bluetooth-policy.conf`](file:///home/onyx/.config/wireplumber/wireplumber.conf.d/11-bluetooth-policy.conf); drop `aac` entirely if it is still negotiated; requires a WirePlumber restart and a reconnect |
+| Proposed, not applied | rtw89 power-state options (B) | `/etc/modprobe.d/rtw89.conf`: `disable_ps_mode=y` (`rtw89_core`), `disable_aspm_l1=y`, `disable_aspm_l1ss=y`, `disable_clkreq=y` (`rtw89_pci`) |
+| Proposed, not applied | btusb autosuspend off (B) | `/etc/modprobe.d/btusb.conf`: `options btusb enable_autosuspend=N`, or a device-specific udev rule setting `power/control=on` |
+
+Context: the RTL8852CE is a WiFi/Bluetooth combo sharing one 2.4 GHz front end. The pre-fix stutter signature was `hci0: link tx timeout` / `killing stalled connection` in the kernel plus `Missing completion reports for packet ... Bluetooth adapter firmware bug?` in WirePlumber. A1 is the only change applied so far; the rule during testing is one change at a time. All pending `modprobe` parameter names were verified with `modinfo` on kernel 7.2.11-1-cachyos, and neither `rtw89` nor `btusb` is in the initramfs, so a reboot is enough (no `mkinitcpio -P`).
 
 ---
 
@@ -444,7 +505,7 @@ Rather than relying on heavy GNOME or KDE Bluetooth daemons, the system uses **`
 
 ## 13. System Keybindings & Hotkeys Matrix (Sway / i3wm)
 
-Configured in [`~/.config/sway/config.d/40-keybindings.conf`](file:///home/manisk/.config/sway/config.d/40-keybindings.conf):
+Configured in [`~/.config/sway/config.d/40-keybindings.conf`](file:///home/onyx/.config/sway/config.d/40-keybindings.conf):
 
 | Shortcut | Bound Command | Functional Action |
 | :--- | :--- | :--- |
@@ -454,6 +515,7 @@ Configured in [`~/.config/sway/config.d/40-keybindings.conf`](file:///home/manis
 | **`$mod + Alt + O`** | `~/.local/bin/rofi-speaker-dsp` | Open ASUS DAX3 Dolby Speaker Voicing Menu (mnemonic) |
 | **`Alt + Shift + O`** | `~/.local/bin/toggle-audio-sink` | Seamlessly cycle active audio sink (Speakers / 3.5mm / BT) |
 | **`$mod + Ctrl + M`** | `~/.local/bin/toggle-headset-mic` | Toggle Bluetooth Mode (Hi-Fi AAC Stereo ↔ Headset mSBC Mic) |
+| **`$mod + Shift + Return`** | `~/.local/bin/bt-refuse-toggle` | Toggle auto-connect refusal for the selected Bluetooth audio devices (foreground, no daemon) |
 | **`XF86AudioRaiseVolume`** | `~/.local/bin/volume-notify up` | Volume Up (+5%) with Mako OSD |
 | **`XF86AudioLowerVolume`** | `~/.local/bin/volume-notify down` | Volume Down (-5%) with Mako OSD |
 | **`XF86AudioMute`** | `~/.local/bin/volume-notify mute` | Toggle Audio Output Mute with Mako OSD |

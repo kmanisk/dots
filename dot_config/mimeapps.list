@@ -13,6 +13,7 @@ application/x-extension-xhtml=brave-browser.desktop
 application/x-extension-xht=brave-browser.desktop
 text/plain=nvim.desktop
 text/markdown=nvim.desktop
+text/x-markdown=nvim.desktop
 application/json=nvim.desktop
 application/x-shellscript=nvim.desktop
 application/toml=nvim.desktop
@@ -76,6 +77,15 @@ x-scheme-handler/fdm=freedownloadmanager_fdm_up.desktop
 x-scheme-handler/magnet=freedownloadmanager_magnet_up.desktop
 application/x-bittorrent=freedownloadmanager_torrent.desktop
 x-scheme-handler/nxm=amethystmodmanager-nxm.desktop
+application/vnd.openxmlformats-officedocument.wordprocessingml.document=ai.storyteller.wordcraft.desktop
+application/vnd.ms-word.document.macroEnabled.12=ai.storyteller.wordcraft.desktop
+application/vnd.openxmlformats-officedocument.wordprocessingml.template=ai.storyteller.wordcraft.desktop
+application/vnd.ms-word.template.macroEnabled.12=ai.storyteller.wordcraft.desktop
+application/msword=ai.storyteller.wordcraft.desktop
+application/msword-template=ai.storyteller.wordcraft.desktop
+application/rtf=ai.storyteller.wordcraft.desktop
+text/rtf=ai.storyteller.wordcraft.desktop
+application/vnd.oasis.opendocument.text=ai.storyteller.wordcraft.desktop
 
 [Added Associations]
 video/mp4=mpv.desktop;vlc.desktop;fr.handbrake.ghb.desktop;

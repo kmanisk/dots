@@ -16,27 +16,27 @@ keymap:
     remap:
       # Brightness (CapsLock + [ for up, ' for down)
       CapsLock-LEFTBRACE:
-        launch: ["/home/manisk/.local/bin/change-brightness", "+5%"]
+        launch: ["/home/onyx/.local/bin/change-brightness", "+5%"]
       CapsLock-APOSTROPHE:
-        launch: ["/home/manisk/.local/bin/change-brightness", "5%-"]
+        launch: ["/home/onyx/.local/bin/change-brightness", "5%-"]
       # Volume (CapsLock + ] for up, \ for down)
       CapsLock-RIGHTBRACE:
-        launch: ["/home/manisk/.local/bin/volume-notify", "up"]
+        launch: ["/home/onyx/.local/bin/volume-notify", "up"]
       CapsLock-BACKSLASH:
-        launch: ["/home/manisk/.local/bin/volume-notify", "down"]
+        launch: ["/home/onyx/.local/bin/volume-notify", "down"]
       # NVIDIA Vibrance (CapsLock + x for up, z for down)
       CapsLock-x:
-        launch: ["/home/manisk/.local/bin/nvibrant-ctl", "up"]
+        launch: ["/home/onyx/.local/bin/nvibrant-ctl", "up"]
       CapsLock-z:
-        launch: ["/home/manisk/.local/bin/nvibrant-ctl", "down"]
+        launch: ["/home/onyx/.local/bin/nvibrant-ctl", "down"]
       # Fullscreen Screenshot (Workspace 3 & 4 save to Screenshots/Gaming; other workspaces save to Screenshots + clipboard)
       CapsLock-Space:
-        launch: ["/home/manisk/.local/bin/screenshot-fullscreen"]
+        launch: ["/home/onyx/.local/bin/screenshot-fullscreen"]
       # Emergency kill game
       CapsLock-r:
-        launch: ["/home/manisk/.local/bin/killgame"]
+        launch: ["/home/onyx/.local/bin/killgame"]
       CapsLock-Shift-r:
-        launch: ["/home/manisk/.local/bin/killgame"]
+        launch: ["/home/onyx/.local/bin/killgame"]
 
   # --- CapsLock layer ---
   - name: CapsLock layer
@@ -50,8 +50,10 @@ keymap:
       CapsLock-l: Right
       CapsLock-o: C-Left
       CapsLock-p: C-Right
-      CapsLock-Alt-j: { launch: ["/home/manisk/.local/bin/xscroll", "down"] }
-      CapsLock-Alt-k: { launch: ["/home/manisk/.local/bin/xscroll", "up"] }
+      CapsLock-Alt-j: { launch: ["/home/onyx/.local/bin/xscroll", "down"] }
+      CapsLock-Alt-k: { launch: ["/home/onyx/.local/bin/xscroll", "up"] }
+      CapsLock-Ctrl-j: { launch: ["/home/onyx/.local/bin/xscroll", "down"] }
+      CapsLock-Ctrl-k: { launch: ["/home/onyx/.local/bin/xscroll", "up"] }
       # Actions
       CapsLock-n: Enter
       CapsLock-SEMICOLON: [End, Enter]
@@ -82,7 +84,7 @@ keymap:
       # Screenshots:
       # - CapsLock + s: Region selection -> saved to ~/Pictures/Screenshots + clipboard
       CapsLock-s:
-        launch: ["/home/manisk/.local/bin/screenshot-region", "--save"]
+        launch: ["/home/onyx/.local/bin/screenshot-region", "--save"]
 
       # Window Close & Kill (Sway native integration):
       # - CapsLock + q: Graceful close (Win+q = polite WM_DELETE)
@@ -92,9 +94,10 @@ keymap:
 
       # Process Killer Menu (formerly Win+Shift+e):
       CapsLock-w:
-        launch: ["/home/manisk/.local/bin/rofi-pkill"]
+        launch: ["/home/onyx/.local/bin/rofi-pkill"]
 
-      # Steam Launch (was Alt+Shift+S):
+      # Steam Launch (was Alt+Shift+S): spawns Steam and routes its window
+      # to WS 3 in the background - never switches the viewport.
       CapsLock-e:
         launch: ["/bin/sh", "-c", "STEAM_DGPU=1 ~/.local/bin/steam-workspace"]
 
@@ -105,33 +108,17 @@ keymap:
       CapsLock-t: t
       # Clipboard image viewer (clipboard image -> imv)
       CapsLock-v:
-        launch: ["/home/manisk/.local/bin/clipboard-view"]
-
-  # --- Terminal Scrollback (agy & foot terminals) ---
-  # Inline CLI tools like agy and standard shell sessions use Foot's native scrollback keys.
-  - name: Terminal scrollback
-    application:
-      only: ["foot", "footclient", "scratch-term", "scratch-notes"]
-    window:
-      not: ["/OC \\|/"]
-    exact_match: true
-    remap:
-      Alt-Ctrl-j: [C-S-j, C-S-j, C-S-j]
-      Ctrl-Alt-j: [C-S-j, C-S-j, C-S-j]
-      Alt-Ctrl-k: [C-S-k, C-S-k, C-S-k]
-      Ctrl-Alt-k: [C-S-k, C-S-k, C-S-k]
-      CapsLock-Alt-j: [C-S-j, C-S-j, C-S-j]
-      CapsLock-Alt-k: [C-S-k, C-S-k, C-S-k]
+        launch: ["/home/onyx/.local/bin/clipboard-view"]
 
   # --- Mouse scroll (Alt+Ctrl layer, vim-style: j=down, k=up) ---
-  # Operates on opencode, Brave, and other GUI apps via persistent uinput wheel emulator.
+  # Operates universally on Foot, OpenCode, Brave, and other GUI apps via persistent uinput wheel emulator.
   - name: Scroll emulation
     exact_match: true
     remap:
-      Alt-Ctrl-j: { launch: ["/home/manisk/.local/bin/xscroll", "down"] }
-      Ctrl-Alt-j: { launch: ["/home/manisk/.local/bin/xscroll", "down"] }
-      Alt-Ctrl-k: { launch: ["/home/manisk/.local/bin/xscroll", "up"] }
-      Ctrl-Alt-k: { launch: ["/home/manisk/.local/bin/xscroll", "up"] }
+      Alt-Ctrl-j: { launch: ["/home/onyx/.local/bin/xscroll", "down"] }
+      Ctrl-Alt-j: { launch: ["/home/onyx/.local/bin/xscroll", "down"] }
+      Alt-Ctrl-k: { launch: ["/home/onyx/.local/bin/xscroll", "up"] }
+      Ctrl-Alt-k: { launch: ["/home/onyx/.local/bin/xscroll", "up"] }
 
   # --- Katana Sub-legends on Right Alt (brightness) ---
   # REMOVED 2026-10-02: RightAlt-q/w entries were dead — modmap converts

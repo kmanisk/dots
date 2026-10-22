@@ -55,7 +55,7 @@ Only native C++ and modern Complete Edition bridges are compatible. Every compon
 | **Liberty's Legacy Trainer** | **v2.4.1** | [Nexus Mods #100](https://www.nexusmods.com/gta4/mods/100) | **Native Mod Menu.** Copy `Liberty's Legacy.asi` and `Liberty's Legacy/` into `GTAIV/`. Full 60% keyboard layout support. |
 
 ### Liberty's Legacy Configuration (60% Keyboard & Controller)
-In [`GTAIV/Liberty's Legacy/Liberty's Legacy.ini`](file:///home/manisk/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/Liberty's%20Legacy/Liberty's%20Legacy.ini):
+In [`GTAIV/Liberty's Legacy/Liberty's Legacy.ini`](file:///home/onyx/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/Liberty's%20Legacy/Liberty's%20Legacy.ini):
 ```ini
 [config]
 Trainer key = F11
@@ -142,7 +142,7 @@ You can rebind the button combination used to toggle Liberty's Legacy open/close
 
 ## 3. Visual & World Enhancements (Gillian's Modpack)
 
-The following modules from Gillian's Modpack ([`1.2 archive.7z`](file:///home/manisk/Downloads/1.2%20archive.7z)) are installed non-destructively into [`GTAIV/update/`](file:///home/manisk/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/update/) via Fusion Overloader (totaling **1.9 GB**):
+The following modules from Gillian's Modpack ([`1.2 archive.7z`](file:///home/onyx/Downloads/1.2%20archive.7z)) are installed non-destructively into [`GTAIV/update/`](file:///home/onyx/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/update/) via Fusion Overloader (totaling **1.9 GB**):
 
 | Folder / Module | Uncompressed Size | Visual Improvements |
 | :--- | :--- | :--- |
@@ -403,7 +403,7 @@ This reference defines exactly where each file belongs, required configuration p
 To run GTA IV at a fluid 165Hz / 165 FPS on native Linux without the common 75Hz / 150 FPS ceiling:
 
 ### File 1: `commandline.txt`
-Create [`GTAIV/commandline.txt`](file:///home/manisk/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/commandline.txt):
+Create [`GTAIV/commandline.txt`](file:///home/onyx/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/commandline.txt):
 ```text
 -width 1920
 -height 1200
@@ -420,7 +420,7 @@ To eliminate Vulkan shader compilation microstutters and remove the 75Hz present
 * **`vulkan.dll`:** Drop into `GTAIV/` (replaces stock DXVK DLL).
 * **`GTAIV.dxvk-cache`:** Drop into `GTAIV/` (contains 99 KB of pre-compiled Vulkan pipeline states for FusionFix 5.0).
 
-Configure [`GTAIV/dxvk.conf`](file:///home/manisk/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/dxvk.conf):
+Configure [`GTAIV/dxvk.conf`](file:///home/onyx/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/dxvk.conf):
 ```ini
 # DXVK 2.6.2 GPLAsync & Uncap Configuration for GTA IV Complete Edition
 # Author: ValentynL / Ph42oN GPLAsync build + Custom 165Hz uncap
@@ -451,7 +451,7 @@ dxvk.tearFree = True
 
 
 ### File 3: FusionFix Config
-In [`GTAIV/plugins/GTAIV.EFLC.FusionFix.cfg`](file:///home/manisk/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/plugins/GTAIV.EFLC.FusionFix.cfg):
+In [`GTAIV/plugins/GTAIV.EFLC.FusionFix.cfg`](file:///home/onyx/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/plugins/GTAIV.EFLC.FusionFix.cfg):
 ```ini
 [FRAMELIMIT]
 FpsLimitPreset = 0    # Set to 0 (Off) to disable FusionFix's internal half-refresh limiter

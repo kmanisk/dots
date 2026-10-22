@@ -1,16 +1,26 @@
-// Installed from community preset: /usr/share/fastfetch/presets/examples/13.jsonc
-// (catnap-inspired boxed layout). Row colors {#31}-{#36} follow the terminal
-// palette, so they pick up the Gruvbox Alacritty theme automatically.
+// Fastfetch - boxed layout for CachyOS (i5-13450HX + RTX 5050 Mobile).
+// GPU row is static hardware info (no nvidia-smi), so it never wakes the dGPU.
+// Source of truth is chezmoi: dot_config/fastfetch/config.jsonc.
 {
     "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
     "logo": {
-        "source": "~/.config/fastfetch/penguin.txt",
+        "type": "builtin",
+        "source": "Windows",
+        "color": {
+            "1": "#FF4A17",
+            "2": "#9DE500",
+            "3": "#FFC61A",
+            "4": "#00B4FF"
+        },
         "padding": {
             "top": 1
         }
     },
     "display": {
-        "separator": " "
+        "separator": " ",
+        "color": {
+            "keys": "#00D4FF"
+        }
     },
     "modules": [
         {
@@ -18,73 +28,69 @@
             "type": "custom"
         },
         {
-            "key": "│ {#31} user    {#keys}│",
+            "key": "│ {##FF5C57} user    {#keys}│",
             "type": "title",
-            "format": "{user-name}"
+            "format": "{user-name}@{host-name}"
         },
         {
-            "key": "│ {#32}󰇅 hname   {#keys}│",
-            "type": "title",
-            "format": "{host-name}"
-        },
-        {
-            "key": "│ {#33}󰅐 uptime  {#keys}│",
+            "key": "│ {##FFD166}󰅐 uptime  {#keys}│",
             "type": "uptime"
         },
         {
-            "key": "│ {#34}{icon} distro  {#keys}│",
-            "type": "os"
+            "key": "│ {##57C7FF}{icon} distro  {#keys}│",
+            "type": "os",
+            "format": "{pretty-name}"
         },
         {
-            "key": "│ {#35} kernel  {#keys}│",
-            "type": "kernel"
+            "key": "│ {##FF6AC1} kernel  {#keys}│",
+            "type": "kernel",
+            "format": "{release}"
         },
         {
-            "key": "│ {#36}󰇄 desktop {#keys}│",
-            "type": "de"
+            "key": "│ {##00E5FF}󰇄 wm      {#keys}│",
+            "type": "wm"
         },
         {
-            "key": "│ {#31} term    {#keys}│",
-            "type": "terminal"
-        },
-        {
-            "key": "│ {#32} shell   {#keys}│",
+            "key": "│ {##5AF78E} shell   {#keys}│",
             "type": "shell"
         },
         {
-            "key": "│ {#33}󰍛 cpu     {#keys}│",
+            "key": "│ {##FFD166}󰍛 cpu     {#keys}│",
             "type": "cpu",
-            // i5-13450HX = 6P+4E physical. fastfetch groups LOGICAL cpus by
-            // clock (12 P-threads @4.6 + 4 E @3.4), so {core-types} wrongly
-            // prints (12+4). Hardcode the physical split (single-machine config).
-            "format": "{name} (6+4) @ {freq-max}"
+            // 6P+4E physical cores; fastfetch groups logical CPUs, so hardcode the split.
+            "format": "i5-13450HX (6+4) @ {freq-max}"
         },
         {
-            "key": "│ {#35} memory  {#keys}│",
+            "key": "│ {##9DE500} gpu     {#keys}│",
+            "type": "custom",
+            "format": "RTX 5050 (2560 CUDA) · 8 GB GDDR7"
+        },
+        {
+            "key": "│ {##FF6AC1} memory  {#keys}│",
             "type": "memory"
         },
         {
-            "key": "│ {#34}󰉉 linux   {#keys}│",
+            "key": "│ {##57C7FF}󰉉 linux   {#keys}│",
             "type": "disk",
             "folders": "/"
         },
         {
-            "key": "│ {#32}󰉉 games   {#keys}│",
+            "key": "│ {##5AF78E}󰉉 games   {#keys}│",
             "type": "disk",
             "folders": "/mnt/Games"
         },
         {
-            "key": "│ {#31}󰉉 windows {#keys}│",
+            "key": "│ {##FF5C57}󰉉 windows {#keys}│",
             "type": "disk",
             "folders": "/mnt/windows"
         },
         {
-            "key": "│ {#36}󰩟 network {#keys}│",
+            "key": "│ {##00E5FF}󰩟 network {#keys}│",
             "type": "localip",
             "format": "{ipv4} ({ifname})"
         },
         {
-            "key": "│ {#31}󰁹 batt    {#keys}│",
+            "key": "│ {##FF5C57}󰁹 batt    {#keys}│",
             "type": "command",
             "text": "cap=$(cat /sys/class/power_supply/BAT0/capacity); st=$(cat /sys/class/power_supply/BAT0/status); f=$((cap/10)); e=$((10-f)); bar=\"$(printf '▰%.0s' $(seq 1 $f 2>/dev/null))$(printf '▱%.0s' $(seq 1 $e 2>/dev/null))\"; if [ \"$cap\" -ge 50 ]; then c=32; elif [ \"$cap\" -ge 20 ]; then c=33; else c=31; fi; if [ \"$st\" = Discharging ]; then tag=\"Discharging\"; else tag=\"AC\"; fi; printf '\\033[%sm%s\\033[0m %s%% · %s\\n' \"$c\" \"$bar\" \"$cap\" \"$tag\""
         },

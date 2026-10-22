@@ -1,0 +1,122 @@
+[[plugin.deps]]
+use = "yazi-rs/plugins:smart-enter"
+rev = "9166202"
+hash = "187cc58ba7ac3befd49c342129e6f1b6"
+
+[[plugin.deps]]
+use = "yazi-rs/plugins:smart-paste"
+rev = "9166202"
+hash = "5be02722d97561b6f7aec22429aa00be"
+
+[[plugin.deps]]
+use = "yazi-rs/plugins:jump-to-char"
+rev = "9166202"
+hash = "7a4b4237223aaa94e589d1c01a23542a"
+
+[[plugin.deps]]
+use = "yazi-rs/plugins:mount"
+rev = "9166202"
+hash = "b95f898e6dc60b52edbc415952e14395"
+
+[[plugin.deps]]
+use = "yazi-rs/plugins:git"
+rev = "9166202"
+hash = "347cc6b190eb0c2fd60513cc7ae37412"
+
+[[plugin.deps]]
+use = "yazi-rs/plugins:toggle-pane"
+rev = "9166202"
+hash = "5b2fbef7d1513ce38ff72623a071a5e"
+
+[[plugin.deps]]
+use = "yazi-rs/plugins:zoom"
+rev = "9166202"
+hash = "558bbb58e3dd36d488280a8f10e7b904"
+
+[[plugin.deps]]
+use = "yazi-rs/plugins:diff"
+rev = "9166202"
+hash = "14558d2829c0aa05e99c57de8f74d199"
+
+[[plugin.deps]]
+use = "Sonico98/exifaudio"
+rev = "4506f9d"
+hash = "4761fffb60a12d37096c34a356380cdf"
+
+[[plugin.deps]]
+use = "Reledia/glow"
+rev = "bd3eaa5"
+hash = "92b5c58159a51c567f82b618cee2b78"
+
+[[plugin.deps]]
+use = "Reledia/hexyl"
+rev = "016a09b"
+hash = "50da29476e744dba37d77fb209328fd1"
+
+[[plugin.deps]]
+use = "ndtoan96/ouch"
+rev = "596b666"
+hash = "c2f4f4aca257dcceafa9e3b828dbf1c9"
+
+[[plugin.deps]]
+use = "yazi-rs/plugins:chmod"
+rev = "9166202"
+hash = "87472b05a8c420100f6a2b9cde1e7746"
+
+[[plugin.deps]]
+use = "yazi-rs/plugins:visual-pivot"
+rev = "9166202"
+hash = "11e7b50ca963cc9a7779ddccd217ab7e"
+
+[[plugin.deps]]
+use = "yazi-rs/plugins:smart-filter"
+rev = "9166202"
+hash = "d6f7351ea25a43c9b5f4315fa1e23935"
+
+[[plugin.deps]]
+use = "yazi-rs/plugins:vcs-files"
+rev = "9166202"
+hash = "4f2a05edce73aef2bceb2ee2c134c8f2"
+
+[[plugin.deps]]
+use = "yazi-rs/plugins:full-border"
+rev = "9166202"
+hash = "f281261ff04ad7ec867c3f802a50835f"
+
+[[plugin.deps]]
+use = "yazi-rs/plugins:mime-ext"
+rev = "9166202"
+hash = "7d3b7f99e600fd7e77ebc5eb8423a897"
+
+[[plugin.deps]]
+use = "h-hg/yamb"
+rev = "971b858"
+hash = "da4534745930e827a44d4585bbd965eb"
+
+[[plugin.deps]]
+use = "ownself/search-leave"
+rev = "15242dc"
+hash = "94aef99b73c4c925b722e6c1004f7209"
+
+[[plugin.deps]]
+use = "pirafrank/what-size"
+rev = "1cb456f"
+hash = "7699acf73a1079f8a4afef5cec84ce73"
+
+[[plugin.deps]]
+use = "Ape/reflink"
+rev = "00f0fd0"
+hash = "4a64788e4802ad27c75a9977c29f0e55"
+
+[[plugin.deps]]
+use = "AnirudhG07/plugins-yazi:copy-file-contents"
+rev = "3f4f1a3"
+hash = "421263a8558fbd2fdb07a75f074cc6e3"
+
+[[plugin.deps]]
+use = "MasouShizuka/projects"
+rev = "181ebaf"
+hash = "ae9710a3a76e48c1db50f5ed6fe6dc23"
+
+[flavor]
+deps = []

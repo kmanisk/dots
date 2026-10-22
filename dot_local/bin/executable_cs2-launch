@@ -51,12 +51,26 @@ export PIPEWIRE_NODE="sink.peace_gaming"
 export PULSE_SINK="sink.peace_gaming"
 
 # Native explicit sync (linux-drm-syncobj-v1) enabled by default on NVIDIA 555+ / wlroots 0.18.
-# Forcing __NV_DISABLE_EXPLICIT_SYNC=1 causes Vulkan swapchain timeouts (VK_TIMEOUT) and NVRM NV_ERR_NO_MEMORY leaks.
-[ "${CS2_DISABLE_EXPLICIT_SYNC:-0}" = "1" ] && export __NV_DISABLE_EXPLICIT_SYNC=1
+# In AsusMuxDgpu + wayland mode, SDL2 inside the Sniper container sends a wp_linux_drm_syncobj
+# acquire point before attaching a buffer — Sway treats this as a protocol violation (error 3)
+# and kills the Wayland connection, crashing CS2. Disabling explicit sync at the NVIDIA KMS level
+# prevents the protocol from being advertised to SDL, avoiding the race.
+# VK_TIMEOUT / NV_ERR_NO_MEMORY risks apply only when toggling explicit sync mid-session;
+# disabling it from process start (clean launch) is safe for CS2's Vulkan/Sniper pipeline.
+if [ "${CS2_DISABLE_EXPLICIT_SYNC:-0}" = "1" ] || \
+   { [ "${GPU_MODE}" = "AsusMuxDgpu" ] && [ "${CS2_MODE:-wayland}" = "wayland" ]; }; then
+    export __NV_DISABLE_EXPLICIT_SYNC=1
+fi
 export ENABLE_VKBASALT=0
 
 if [ -z "${WAYLAND_DISPLAY:-}" ]; then
-    export WAYLAND_DISPLAY="$(ls -1 /run/user/$(id -u)/wayland-[0-9]* 2>/dev/null | head -n 1 | xargs -r basename || echo "wayland-1")"
+    for wayland_socket in "${XDG_RUNTIME_DIR:-/run/user/$UID}"/wayland-[0-9]*; do
+        if [ -S "$wayland_socket" ]; then
+            WAYLAND_DISPLAY="${wayland_socket##*/}"
+            break
+        fi
+    done
+    export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-1}"
 fi
 
 # --- resolution ---
@@ -81,7 +95,8 @@ case "$CS2_MODE" in
         export SDL_VIDEO_WAYLAND_ALLOW_TEARING=1
         # Strip gameoverlayrenderer.so to prevent Steam CEF overlay crash loop on Wayland/NVIDIA
         if [ -n "${LD_PRELOAD:-}" ]; then
-            export LD_PRELOAD="$(echo "$LD_PRELOAD" | tr ':' '\n' | grep -v 'gameoverlayrenderer' | paste -sd ':' -)"
+            LD_PRELOAD="$(echo "$LD_PRELOAD" | tr ':' '\n' | { grep -v 'gameoverlayrenderer' || true; } | paste -sd ':' -)"
+            export LD_PRELOAD
         fi
         ;;
     x11|gamescope)
@@ -104,15 +119,24 @@ fi
 CS2_FLAGS=(-vulkan -fullscreen -w "$TARGET_W" -h "$TARGET_H" -threads 6 -nojoy -novid +fps_max 0 +fps_max_ui 0 +clientport "${CS2_CLIENTPORT:-27006}")
 
 # --- asusctl performance profile switching ---
+previous_profile="$(cat /sys/firmware/acpi/platform_profile 2>/dev/null || true)"
 if command -v asusctl >/dev/null 2>&1; then
     asusctl profile set Performance >/dev/null 2>&1 || true
 fi
 
 # --- ananicy-cpp conflict resolution (AGENTS.md Rule 2) ---
 ananicy_was_active=0
+gamemode_command=()
 if systemctl is-active --quiet ananicy-cpp.service 2>/dev/null; then
-    ananicy_was_active=1
-    sudo systemctl stop ananicy-cpp.service 2>/dev/null || true
+    if sudo -n systemctl stop ananicy-cpp.service 2>/dev/null && \
+       ! systemctl is-active --quiet ananicy-cpp.service 2>/dev/null; then
+        ananicy_was_active=1
+    else
+        echo "WARNING: ananicy-cpp remains active; launching without GameMode." >&2
+    fi
+fi
+if ! systemctl is-active --quiet ananicy-cpp.service 2>/dev/null; then
+    gamemode_command=(gamemoderun)
 fi
 
 # --- sway gaming mode ---
@@ -120,11 +144,15 @@ if [ -n "${SWAYSOCK:-}" ] && command -v swaymsg >/dev/null 2>&1; then
     swaymsg 'mode "gaming"' >/dev/null 2>&1 || true
 fi
 cleanup() {
-    if command -v asusctl >/dev/null 2>&1; then
-        asusctl profile set Balanced >/dev/null 2>&1 || true
+    if command -v asusctl >/dev/null 2>&1 && [ -n "$previous_profile" ]; then
+        case "$previous_profile" in
+            quiet|low-power) asusctl profile set Quiet >/dev/null 2>&1 || true ;;
+            balanced) asusctl profile set Balanced >/dev/null 2>&1 || true ;;
+            performance) asusctl profile set Performance >/dev/null 2>&1 || true ;;
+        esac
     fi
     if [ "$ananicy_was_active" = "1" ]; then
-        sudo systemctl start ananicy-cpp.service 2>/dev/null || true
+        sudo -n systemctl start ananicy-cpp.service 2>/dev/null || true
     fi
     if [ -n "${SWAYSOCK:-}" ] && command -v swaymsg >/dev/null 2>&1; then
         swaymsg 'mode "default"' >/dev/null 2>&1 || true
@@ -139,7 +167,7 @@ if [ "$CS2_MODE" = "gamescope" ]; then
     taskset -c 0-11 gamescope \
         -w "$TARGET_W" -h "$TARGET_H" -W 1920 -H 1200 \
         -f -S stretch -F nearest --force-grab-cursor \
-        -- gamemoderun "$@" "${CS2_FLAGS[@]}"
+        -- "${gamemode_command[@]}" "$@" "${CS2_FLAGS[@]}"
 else
-    taskset -c 0-11 gamemoderun "$@" "${CS2_FLAGS[@]}"
+    taskset -c 0-11 "${gamemode_command[@]}" "$@" "${CS2_FLAGS[@]}"
 fi

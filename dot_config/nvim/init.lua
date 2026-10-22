@@ -3,6 +3,11 @@ vim.g.base46_cache = vim.fn.stdpath("data") .. "/base46/"
 vim.g.mapleader = " "
 vim.g.maplocalleader = " " -- Set local leader key
 
+-- Silence deprecation warnings from third-party plugins in Neovim 0.12+
+if vim.deprecate then
+    vim.deprecate = function() end
+end
+
 -- VSCode-specific setup
 if vim.g.vscode then
     local vscode_plugins = require("user.vsplug")
@@ -28,16 +33,6 @@ else
         },
 
         { import = "plugins" },
-
-        {
-            "nvim-lua/plenary.nvim",
-            lazy = false,
-        },
-        {
-            "L3MON4D3/LuaSnip",
-            build = "make install_jsregexp",
-            lazy = false,
-        },
     }, lazy_config)
 
     -- Load theme (auto-recompile base46 if system theme changed, else instant dofile)
@@ -75,34 +70,24 @@ else
         pcall(dofile, vim.g.base46_cache .. "defaults")
         pcall(dofile, vim.g.base46_cache .. "statusline")
     end
+
     -- Ordinary Neovim setup
     require("options")
-    --require("test")
-    require("cusmap")
-    -- require("plugins.themes.vscode")
-    -- require("plugins.themes.bambo")
+    require("configs.ide")
+
     -- ------------------------------
-    -- Neovide font setup (Iosevka Nerd Font)
+    -- Font scaling setup (VictorMono Nerd Font, Foot matching)
     -- ------------------------------
-    if vim.g.neovide then
-        -- Font name + size + ligatures
-        vim.opt.guifont = "Iosevka NF:h14"
-    end
-    -- ------------------------------
+    require("configs.font").setup()
+
     -- Load mappings after everything else
     vim.schedule(function()
         require("mappings")
     end)
 
-    -- Automatically require all Lua files in pluginconfig directory
-    local plugin_config_dir = vim.fn.stdpath("config") .. "/lua/plugconfig"
-    if vim.fn.isdirectory(plugin_config_dir) == 1 then
-        for _, file in ipairs(vim.fn.readdir(plugin_config_dir)) do
-            if file:match(".+%.lua$") then
-                require("plugconfig." .. file:match("^(.*)%.lua$"))
-            end
-        end
-    end
+    -- Non-plugin configuration only. Plugin configs live in their lazy specs.
+    require("plugconfig.themesync")
+    require("plugconfig.searchconfig")
 
     -- Autocmds and further Lua files sourcing
     require("nvchad.autocmds")
@@ -114,12 +99,8 @@ else
             local mappings_path = vim.fn.stdpath("config") .. "/lua/mappings.lua"
             if vim.fn.filereadable(mappings_path) == 1 then
                 vim.cmd("source " .. mappings_path)
-                -- print("Reloaded mappings.lua")
-            else
-                -- print("Error: mappings.lua not found")
             end
         end,
         desc = "Automatically source mappings.lua on save",
     })
 end
--- added by me

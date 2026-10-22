@@ -1,37 +1,55 @@
 #!/bin/bash
 # ==============================================================================
-# bt-refuse-toggle — toggle auto-connect refusal for the soundcore Q20i
+# bt-refuse-toggle — toggle auto-connect refusal for selected audio devices
 # ==============================================================================
-# Refused (Blocked=yes): the kernel rejects incoming connections from the
-#   device and the bt-autoconnect / bt-auto-trust daemons skip it entirely.
-# Allowed (Blocked=no) : normal auto-connect behavior returns (daemons plus
-#   the one-shot boot connect from bt-auto-trust).
+# Selection (edited by the bt-select TUI):
+#   ~/.config/bt-autoconnect/selection.txt — one MAC per line, '#' comments.
+#   Missing file      -> every paired audio device is used (legacy behavior).
+#   Present but empty -> nothing is toggled (notifies instead).
+#   Only audio-capable devices are acted on. Non-audio devices (e.g. Katana
+#   keyboard) are never blocked or disconnected.
 #
-# Bound in sway to $mod+Shift+Return. Pass --dry-run to preview the action.
-# To cover more devices, loop over a MAC:NAME list here.
+# Modes:
+#   (no args)          toggle the selection (zero lag, background connect)
+#   --dry-run, -n      preview without changing state
+#   --list             MAC<TAB>NAME<TAB>blocked<TAB>connected for every audio device
+#   --selected         effective selection, one MAC per line (used by bt-select)
+#   -h, --help
+#
+# Bound in sway to $mod+Shift+Return.
 # ==============================================================================
 
 set -u
 
-MAC="B0:38:E2:78:9B:FE"
-NAME="soundcore Q20i"
-
+MODE=toggle
 DRY_RUN=0
-case "${1:-}" in
-    --dry-run|-n) DRY_RUN=1 ;;
-    -h|--help)
-        printf 'usage: %s [--dry-run]\n' "${0##*/}"
-        printf 'Toggles auto-connect refusal (BlueZ block) for %s (%s).\n' "$NAME" "$MAC"
-        exit 0
-        ;;
-esac
+SELECTION_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/bt-autoconnect/selection.txt"
 
-bt_state() {
-    bluetoothctl info "$MAC" 2>/dev/null | awk -F': ' '/Blocked:/ {print $2; exit}'
+usage() {
+    printf 'usage: %s [--dry-run] [--list|--selected]\n' "${0##*/}"
+    printf 'Toggles auto-connect refusal (BlueZ block) for selected audio devices.\n'
+    printf 'Selection: %s (edit it with the bt-select TUI).\n' "$SELECTION_FILE"
 }
 
-bt_connected() {
-    bluetoothctl info "$MAC" 2>/dev/null | grep -q "Connected: yes"
+while (($#)); do
+    case "$1" in
+        --dry-run|-n) DRY_RUN=1 ;;
+        --list)       MODE=list ;;
+        --selected)   MODE=selected ;;
+        -h|--help)    usage; exit 0 ;;
+        *)            printf '%s: unknown option %s\n' "${0##*/}" "$1" >&2; usage >&2; exit 2 ;;
+    esac
+    shift
+done
+
+notify() {
+    if (( DRY_RUN )); then
+        printf 'dry-run: notify-send %s | %s\n' "$1" "$2"
+        return 0
+    fi
+    notify-send -a Bluetooth \
+        -h string:x-canonical-private-synchronous:bt-refuse \
+        -i "${3:-audio-headphones}" -t 4000 "$1" "$2" 2>/dev/null || true
 }
 
 run_bt() {
@@ -42,50 +60,134 @@ run_bt() {
     bluetoothctl "$@" >/dev/null 2>&1
 }
 
-notify() {
-    if (( DRY_RUN )); then
-        printf 'dry-run: notify-send %s | %s\n' "$1" "$2"
-        return 0
-    fi
-    notify-send -a Bluetooth \
-        -h string:x-canonical-private-synchronous:bt-refuse \
-        -i "${3:-audio-headphones}" -t 3000 "$1" "$2" 2>/dev/null || true
+# Inspect paired devices in a single fast pass.
+# Outputs: MAC<TAB>NAME<TAB>BLOCKED<TAB>CONNECTED for audio devices only.
+audio_devices_with_state() {
+    local mac name info icon class uuids is_audio blocked conn
+    while IFS=$'\t' read -r mac name; do
+        [ -n "$mac" ] || continue
+        info=$(bluetoothctl info "$mac" 2>/dev/null) || continue
+
+        icon=$(printf '%s\n' "$info" | awk -F': ' '/Icon:/ {print $2; exit}')
+        class=$(printf '%s\n' "$info" | awk -F'[()]' '/Class:/ {print $2; exit}')
+        uuids=$(printf '%s\n' "$info" | awk -F'[()]' '/UUID:/ {print $2}')
+
+        is_audio=0
+        if printf '%s\n' "$uuids" | grep -qiE '0000110[abd]|0000111e|00001108'; then
+            is_audio=1
+        elif [[ "$icon" == audio-* ]]; then
+            is_audio=1
+        elif [[ -n "$class" ]] && (( ((class >> 8) & 0x1f) == 4 )); then
+            is_audio=1
+        fi
+
+        (( is_audio )) || continue
+
+        blocked="no"
+        printf '%s\n' "$info" | grep -q 'Blocked: yes' && blocked="yes"
+        conn="no"
+        printf '%s\n' "$info" | grep -q 'Connected: yes' && conn="yes"
+
+        printf '%s\t%s\t%s\t%s\n' "$mac" "$name" "$blocked" "$conn"
+    done < <(bluetoothctl devices Paired | awk '{mac=$2; line=$0; sub(/^Device [^ ]+ /, "", line); print mac "\t" line}')
 }
 
-case "$(bt_state)" in
-    yes)  # currently refused -> allow auto-connect again
-        run_bt unblock "$MAC"
-        if ! bt_connected; then
-            if (( DRY_RUN )); then
-                printf 'dry-run: bluetoothctl connect %s (background)\n' "$MAC"
-            else
-                bluetoothctl connect "$MAC" >/dev/null 2>&1 &
-            fi
-        fi
-        want=no
-        title="Bluetooth auto-connect ON"
-        body="$NAME may connect automatically again"
-        icon="audio-headphones"
+# MACs listed in selection.txt (uppercased), comments and blanks ignored.
+configured_selection() {
+    [ -f "$SELECTION_FILE" ] || return 0
+    awk -F'#' '{print $1}' "$SELECTION_FILE" \
+        | tr -d ' \t' \
+        | grep -E '^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$' \
+        | tr 'a-f' 'A-F'
+}
+
+declare -A SEL_SET=()
+while read -r mac; do
+    [ -n "$mac" ] && SEL_SET[${mac^^}]=1
+done < <(configured_selection)
+
+declare -a ALL_AUDIO_MACS=() ALL_AUDIO_NAMES=() ALL_AUDIO_BLOCKED=() ALL_AUDIO_CONN=()
+declare -a SEL=() SEL_NAMES=() SEL_BLOCKED=() SEL_CONN=()
+
+while IFS=$'\t' read -r mac name blocked conn; do
+    [ -n "$mac" ] || continue
+    ALL_AUDIO_MACS+=("$mac")
+    ALL_AUDIO_NAMES+=("$name")
+    ALL_AUDIO_BLOCKED+=("$blocked")
+    ALL_AUDIO_CONN+=("$conn")
+
+    if [[ ! -f "$SELECTION_FILE" ]] || [[ -n "${SEL_SET[${mac^^}]:-}" ]]; then
+        SEL+=("$mac")
+        SEL_NAMES+=("$name")
+        SEL_BLOCKED+=("$blocked")
+        SEL_CONN+=("$conn")
+    fi
+done < <(audio_devices_with_state)
+
+case "$MODE" in
+    list)
+        for i in "${!ALL_AUDIO_MACS[@]}"; do
+            printf '%s\t%s\t%s\t%s\n' \
+                "${ALL_AUDIO_MACS[$i]}" \
+                "${ALL_AUDIO_NAMES[$i]}" \
+                "${ALL_AUDIO_BLOCKED[$i]}" \
+                "${ALL_AUDIO_CONN[$i]}"
+        done
+        exit 0
         ;;
-    no)   # currently allowed -> refuse
-        run_bt block "$MAC"
-        if bt_connected; then
-            run_bt disconnect "$MAC"
-        fi
-        want=yes
-        title="Bluetooth auto-connect OFF"
-        body="$NAME is refused and stays disconnected"
-        icon="audio-volume-muted"
-        ;;
-    *)
-        notify "Bluetooth toggle failed" "Cannot read Blocked state for $NAME ($MAC)" dialog-error
-        exit 1
+    selected)
+        for mac in "${SEL[@]}"; do
+            printf '%s\n' "$mac"
+        done
+        exit 0
         ;;
 esac
 
-if (( DRY_RUN )) || [[ "$(bt_state)" == "$want" ]]; then
-    notify "$title" "$body" "$icon"
-else
-    notify "Bluetooth toggle failed" "Expected Blocked=$want for $NAME ($MAC)" dialog-error
-    exit 1
+total=${#SEL[@]}
+if (( total == 0 )); then
+    if [[ -f "$SELECTION_FILE" ]] && [[ -z "$(configured_selection)" ]]; then
+        notify "Bluetooth toggle" "No devices selected - run bt-select" dialog-information
+    else
+        notify "Bluetooth toggle" "No paired audio devices found" dialog-information
+    fi
+    exit 0
 fi
+
+refused=0
+for b in "${SEL_BLOCKED[@]}"; do
+    [[ "$b" == yes ]] && refused=$((refused + 1))
+done
+
+joined=""
+for name in "${SEL_NAMES[@]}"; do
+    joined+="${joined:+, }$name"
+done
+
+if (( refused == total )); then
+    # All selected devices are refused -> allow auto-connect again
+    for mac in "${SEL[@]}"; do
+        run_bt unblock "$mac"
+        if (( DRY_RUN )); then
+            printf 'dry-run: bluetoothctl connect %s &\n' "$mac"
+        else
+            # Background connect attempt: zero lag for the toggle action
+            ( timeout 6 bluetoothctl connect "$mac" >/dev/null 2>&1 ) &
+        fi
+    done
+    title="Bluetooth auto-connect ON"
+    body="Audio devices may connect again: $joined"
+    icon="audio-headphones"
+else
+    # Anything currently allowed -> refuse the whole selection
+    for i in "${!SEL[@]}"; do
+        mac="${SEL[$i]}"
+        run_bt block "$mac"
+        run_bt disconnect "$mac"
+    done
+    title="Bluetooth auto-connect OFF"
+    body="Refused and disconnected: $joined"
+    icon="audio-volume-muted"
+fi
+
+notify "$title" "$body" "$icon"
+exit 0

@@ -4,6 +4,12 @@ After=graphical-session.target
 
 [Service]
 Nice=-10
+# Launch actions (Caps+E -> steam-workspace) spawn GUI apps that would otherwise
+# inherit this unit's cgroup; bt-autoconnect restarts xremap on keyboard
+# reconnect, and the default KillMode=control-group would SIGKILL Steam and any
+# running game with it. Only ever signal xremap itself.
+KillMode=process
+TimeoutStopSec=5
 ExecStart=/usr/bin/xremap --device "Katana S K1 Keyboard" --device "Katana S K2 Keyboard" --device "AT Translated Set 2 keyboard" --watch=config,device --allow-launch true %h/.config/xremap/config.yml
 Restart=always
 RestartSec=2

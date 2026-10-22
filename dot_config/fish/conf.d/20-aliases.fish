@@ -90,6 +90,7 @@ alias theme_set="theme-set"
 alias thmenu="rofi-theme"
 alias thsync="theme-sync"
 alias theme_sync="theme-sync"
+alias neo="neo --colormode=32 -C ~/.config/neo/colors"
 
 # Gaming & Performance Aliases
 alias prun="gamemoderun prime-run"

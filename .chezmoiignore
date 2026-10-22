@@ -6,6 +6,7 @@
 **/*history*
 **/*.tmp
 **/*.log
+docs/personal/**
 .config/chezmoi/key.txt
 key.txt
 

@@ -84,7 +84,7 @@ GTA IV (`GTAIV.exe`) is a 32-bit Windows binary. Frame generation under Linux re
 
 ### 3.1 Installation & Package
 * Installed via AUR: `aur/lib32-lsfg-vk`
-* Shared Library Target: `/home/manisk/.config/lsfg-vk/lsfg-vk.dll`
+* Shared Library Target: `/home/onyx/.config/lsfg-vk/lsfg-vk.dll`
 * Vulkan Layer JSON: `/usr/share/vulkan/implicit_layer.d/lib32-lsfg-vk.json`
 
 ### 3.2 Dedicated Configuration (`~/.config/lsfg-vk/conf.toml`)
@@ -93,7 +93,7 @@ version = 2
 
 [global]
 allow_fp16 = true
-dll = "/home/manisk/.config/lsfg-vk/lsfg-vk.dll"
+dll = "/home/onyx/.config/lsfg-vk/lsfg-vk.dll"
 log_level = "info"
 
 [[profile]]
@@ -161,9 +161,9 @@ effects = cas:vibrance
 
 casSharpness = 0.40
 
-vibrance = /home/manisk/.config/vkBasalt/reshade-shaders/Shaders/Vibrance.fx
-reshadeTexturePath = /home/manisk/.config/vkBasalt/reshade-shaders/Textures
-reshadeIncludePath = /home/manisk/.config/vkBasalt/reshade-shaders/Shaders
+vibrance = /home/onyx/.config/vkBasalt/reshade-shaders/Shaders/Vibrance.fx
+reshadeTexturePath = /home/onyx/.config/vkBasalt/reshade-shaders/Textures
+reshadeIncludePath = /home/onyx/.config/vkBasalt/reshade-shaders/Shaders
 
 toggleKey = Home
 ```

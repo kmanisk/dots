@@ -25,7 +25,7 @@ The objective of this engineering initiative was to achieve a **dynamic, hot-swa
 1. **Virtualization Toolchain & Environment:**
    * Installed `qemu-desktop`, `qemu-system-x86`, `qemu-img` (11.1.1), `libvirt` (12.7.0), `virt-manager`, `virt-viewer`, `edk2-ovmf`, `swtpm`, and `libvirt-python`.
    * Activated `libvirtd.socket`, `virtlogd.socket`, and the default NAT network bridge (`virbr0`, `192.168.122.0/24`).
-   * Configured user permissions (`libvirt` group + polkit) and filesystem ACL (`setfacl -m u:libvirt-qemu:rx /home/manisk`) so QEMU can read install media safely.
+   * Configured user permissions (`libvirt` group + polkit) and filesystem ACL (`setfacl -m u:libvirt-qemu:rx /home/onyx`) so QEMU can read install media safely.
 
 2. **Windows 10 Guest Provisioning & Driver Integration:**
    * Disk created at `/mnt/Games/Others/windows10.qcow2` (64 GiB, `preallocation=metadata`) on the NTFS3 partition.
@@ -82,7 +82,7 @@ The objective of this engineering initiative was to achieve a **dynamic, hot-swa
 4. **Systemd & Polkit:**
    * `libvirtd.socket`, `virtlogd.socket`, and libvirt `default` network enabled.
    * User `manisk` added to `libvirt` group.
-   * ACL set on `/home/manisk` (`u:libvirt-qemu:rx`).
+   * ACL set on `/home/onyx` (`u:libvirt-qemu:rx`).
 
 ### C. User Scripts & Configurations
 1. **`~/.local/bin/windows-vm-start`**: Wrapper for pre-flight, GPU bind, hostdev attachment, and domain start.
@@ -94,7 +94,7 @@ The objective of this engineering initiative was to achieve a **dynamic, hot-swa
 ### D. VM Disk & Media Storage
 1. **`/mnt/Games/Others/windows10.qcow2`**: 64 GiB QCOW2 virtual disk.
 2. **`/mnt/Games/Others`**: Directory on NTFS3 partition.
-3. **`/home/manisk/.local/share/libvirt/images/virtio-win.iso`**: VirtIO driver ISO (837 MiB).
+3. **`/home/onyx/.local/share/libvirt/images/virtio-win.iso`**: VirtIO driver ISO (837 MiB).
 4. **`/var/lib/libvirt/qemu/nvram/windows10-vfio_VARS.fd`**: Private UEFI NVRAM vars file.
 
 ---
@@ -118,7 +118,7 @@ To return the host to its exact pre-virtualization baseline:
    ```bash
    rm -f /mnt/Games/Others/windows10.qcow2
    rmdir /mnt/Games/Others
-   rm -rf /home/manisk/.local/share/libvirt
+   rm -rf /home/onyx/.local/share/libvirt
    ```
 4. **Remove Automation Scripts & Configurations:**
    ```bash
@@ -130,7 +130,7 @@ To return the host to its exact pre-virtualization baseline:
    ```
 5. **Revert Browser Changes & Home ACLs:**
    * Restore `~/.local/bin/brave-origin` to chezmoi tracking.
-   * `setfacl -x u:libvirt-qemu /home/manisk`
+   * `setfacl -x u:libvirt-qemu /home/onyx`
    * Remove `manisk` from `libvirt` group: `sudo gpasswd -d manisk libvirt`.
 6. **Remove Virtualization Packages:**
    ```bash

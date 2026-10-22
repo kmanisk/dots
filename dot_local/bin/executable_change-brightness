@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Adjust Brightness: Hardware Backlight (0% - 100%) + Sub-Zero Software Dimming
+# Adjust Brightness: Hardware Backlight (0% - 100%) + Below-Zero Software Dimming
 # Allows dimming below 0% for dark room usage without screen flashing or lag.
 # Software dimming uses wl-gammarelay-rs (Wayland wlr-gamma-control via D-Bus).
 # Works uniformly in both Hybrid (intel_backlight) and AsusMuxDgpu (nvidia_wmi_ec_backlight).
@@ -63,7 +63,7 @@ if [[ "$DIRECTION" == "down" ]]; then
             ICON="display-brightness"
         fi
     else
-        # 2. Sub-Zero Software Dimming (Hardware backlight is at 0%)
+        # 2. Below-Zero Software Dimming (Hardware backlight is at 0%)
         NEW_SW=$(( SW_PCT - STEP ))
         # Minimum safe software floor: 15% (avoids complete blackout)
         if (( NEW_SW < 15 )); then
@@ -74,14 +74,14 @@ if [[ "$DIRECTION" == "down" ]]; then
         busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Brightness d "$FLOAT_VAL" 2>/dev/null || true
 
         SUB_PERCENT=$(( 100 - NEW_SW ))
-        OSD_LABEL="Sub-Zero: -${SUB_PERCENT}%"
+        OSD_LABEL="Brightness: -${SUB_PERCENT}%"
         OSD_VAL="$NEW_SW"
         ICON="weather-clear-night"
     fi
 else
     # DIRECTION == "up"
     if (( SW_PCT < 100 )); then
-        # 1. Recovering from Sub-Zero Software Dimming up to 0% (SW 1.0)
+        # 1. Recovering from Below-Zero Software Dimming up to 0% (SW 1.0)
         NEW_SW=$(( SW_PCT + STEP ))
         if (( NEW_SW >= 100 )); then
             NEW_SW=100
@@ -93,7 +93,7 @@ else
             FLOAT_VAL=$(awk -v val="$NEW_SW" 'BEGIN { printf "%.2f", val / 100 }')
             busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Brightness d "$FLOAT_VAL" 2>/dev/null || true
             SUB_PERCENT=$(( 100 - NEW_SW ))
-            OSD_LABEL="Sub-Zero: -${SUB_PERCENT}%"
+            OSD_LABEL="Brightness: -${SUB_PERCENT}%"
             OSD_VAL="$NEW_SW"
             ICON="weather-clear-night"
         fi

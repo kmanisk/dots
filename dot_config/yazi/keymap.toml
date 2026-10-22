@@ -17,6 +17,8 @@ keymap = [
 	# Hop around
 	{ on = "k",      run = "arrow prev", desc = "Previous file" },
 	{ on = "j",      run = "arrow next", desc = "Next file" },
+	{ on = "<C-k>",  run = "arrow prev", desc = "Previous file" },
+	{ on = "<C-j>",  run = "arrow next", desc = "Next file" },
 	{ on = "<Up>",   run = "arrow prev", desc = "Previous file" },
 	{ on = "<Down>", run = "arrow next", desc = "Next file" },
 
@@ -36,11 +38,11 @@ keymap = [
 	{ on = "<PageDown>",   run = "arrow 100%",  desc = "Move cursor down one page" },
 
 	# Navigation
-	{ on = "h", run = "leave", desc = "Back to the parent directory" },
-	{ on = "l", run = "plugin smart-enter", desc = "Enter dir or open file" },
+	{ on = "h", run = "plugin search-leave", desc = "Leave directory (preserves searched target)" },
+	{ on = "l", run = "plugin smart-enter",  desc = "Enter dir or open file" },
 
-	{ on = "<Left>",  run = "leave", desc = "Back to the parent directory" },
-	{ on = "<Right>", run = "enter", desc = "Enter the child directory" },
+	{ on = "<Left>",  run = "plugin search-leave", desc = "Leave directory (preserves searched target)" },
+	{ on = "<Right>", run = "enter",               desc = "Enter the child directory" },
 
 	{ on = "H", run = "tab_switch -1 --relative", desc = "Switch to previous tab" },
 	{ on = "L", run = "tab_switch 1 --relative",  desc = "Switch to next tab" },
@@ -66,12 +68,16 @@ keymap = [
 	# Operation
 	{ on = "o",         run = "open",                        desc = "Open selected files" },
 	{ on = "O",         run = "open --interactive",          desc = "Open selected files interactively" },
-	{ on = "<Enter>",   run = "open",                        desc = "Open selected files" },
+	{ on = "<Enter>",   run = "plugin smart-enter",          desc = "Enter dir or open file" },
 	{ on = "<S-Enter>", run = "open --interactive",          desc = "Open selected files interactively" },
+	{ on = "<A-o>",     run = "plugin visual-pivot",         desc = "Pivot visual selection to other end" },
+	{ on = "u",         run = "plugin visual-pivot",         desc = "Pivot visual selection to other end" },
 	{ on = "y",         run = "yank",                        desc = "Yank selected files (copy)" },
 	{ on = "x",         run = "yank --cut",                  desc = "Yank selected files (cut)" },
 	{ on = "p",         run = "plugin smart-paste",          desc = "Paste into hovered dir or CWD" },
 	{ on = "P",         run = "paste --force",               desc = "Paste yanked files (overwrite if the destination exists)" },
+	{ on = [ "p", "r" ], run = "plugin reflink",             desc = "Reflink (Btrfs CoW clone) yanked files" },
+	{ on = [ "_", "r" ], run = "plugin reflink",             desc = "Reflink (Btrfs CoW clone) yanked files" },
 	{ on = "-",         run = "link",                        desc = "Symlink the absolute path of yanked files" },
 	{ on = "_",         run = "link --relative",             desc = "Symlink the relative path of yanked files" },
 	{ on = "<C-->",     run = "hardlink",                    desc = "Hardlink yanked files" },
@@ -80,12 +86,14 @@ keymap = [
 	{ on = "C",         run = "plugin ouch",                 desc = "Compress with ouch" },
 
 	# Official plugins (yazi-rs/plugins)
-	{ on = "F",         run = "plugin jump-to-char",         desc = "Jump to file by first char" },
-	{ on = "M",         run = "plugin mount",                desc = "Mount/unmount disks" },
-	{ on = "T",         run = "plugin toggle-pane max-preview", desc = "Maximize/restore preview" },
-	{ on = "+",         run = "plugin zoom 1",               desc = "Zoom preview in" },
-	{ on = "=",         run = "plugin zoom -1",              desc = "Zoom preview out" },
+	{ on = "F",          run = "plugin jump-to-char",         desc = "Jump to file by first char" },
+	{ on = "M",          run = "plugin mount",                desc = "Mount/unmount disks" },
+	{ on = "T",          run = "plugin toggle-pane max-preview", desc = "Maximize/restore preview" },
+	{ on = [ "t", "p" ], run = "plugin toggle-pane min-preview", desc = "Toggle preview pane" },
+	{ on = "+",          run = "plugin zoom 1",               desc = "Zoom preview in" },
+	{ on = "=",          run = "plugin zoom -1",              desc = "Zoom preview out" },
 	{ on = [ "g", "d" ], run = "plugin diff",                desc = "Diff selected with hovered" },
+	{ on = [ "g", "v" ], run = "plugin vcs-files",            desc = "Show VCS (Git) file changes" },
 	{ on = "d",         run = "remove",                      desc = "Trash selected files" },
 	{ on = "D",         run = "remove --permanently",        desc = "Permanently delete selected files" },
 	{ on = "a",         run = "create",                      desc = "Create a file (ends with / for directories)" },
@@ -94,11 +102,11 @@ keymap = [
 	{ on = ";",         run = "shell --interactive",         desc = "Run a shell command" },
 	{ on = ":",         run = "shell --block --interactive", desc = "Run a shell command (block until finishes)" },
 	{ on = ".",         run = "hidden toggle",               desc = "Toggle the visibility of hidden files" },
-	{ on = "s",         run = "plugin fd",                   desc = "Search files by name via fd" },
-	{ on = "S",         run = "plugin rg",                   desc = "Search files by content via ripgrep" },
+	{ on = "s",         run = "search --via=fd",             desc = "Search files by name via fd" },
+	{ on = "S",         run = "search --via=rg",             desc = "Search files by content via ripgrep" },
 	{ on = "<C-s>",     run = "escape --search",             desc = "Cancel the ongoing search" },
-	{ on = "z",         run = "plugin fzf",                  desc = "Jump to a file/directory via fzf" },
-	{ on = "Z",         run = "plugin zoxide",               desc = "Jump to a directory via zoxide" },
+	{ on = "z",         run = "plugin zoxide",               desc = "Jump to a directory via zoxide" },
+	{ on = "Z",         run = "plugin fzf",                  desc = "Jump to a file/directory via fzf" },
 
 	# Linemode
 	{ on = [ "m", "s" ], run = "linemode size",        desc = "Linemode: size" },
@@ -114,10 +122,13 @@ keymap = [
 	{ on = [ "c", "d" ], run = "copy dirpath",          desc = "Copy directory path" },
 	{ on = [ "c", "D" ], run = "copy dirurl",           desc = "Copy directory URL" },
 	{ on = [ "c", "f" ], run = "copy filename",         desc = "Copy filename" },
-	{ on = [ "c", "n" ], run = "copy name_without_ext", desc = "Copy filename without extension" },
+	{ on = [ "c", "m" ], run = "plugin chmod",                          desc = "Chmod on selected files" },
+	{ on = [ "c", "y" ], run = "plugin copy-file-contents -- plain",    desc = "Copy file content to clipboard" },
+	{ on = [ "c", "Y" ], run = "plugin copy-file-contents -- multi",    desc = "Copy file content with code fence" },
+	{ on = [ "c", "s" ], run = "plugin what-size",                      desc = "Calculate size of selection or CWD" },
 
 	# Filter
-	{ on = "f", run = "filter --smart", desc = "Filter files" },
+	{ on = "f", run = "plugin smart-filter", desc = "Smart filter (live interactive filter)" },
 
 	# Find
 	{ on = "/", run = "find --smart",            desc = "Find next file" },
@@ -143,15 +154,36 @@ keymap = [
 	# Goto
 	{ on = [ "g", "h" ],       run = "cd ~",             desc = "Go home" },
 	{ on = [ "g", "c" ],       run = "cd ~/.config",     desc = "Go to ~/.config" },
-	{ on = [ "g", "d" ],       run = "cd ~/Downloads",   desc = "Go to ~/Downloads" },
-	{ on = [ "g", "t" ],       run = "plugin trash",     desc = "Go to trash bin" },
+	{ on = [ "g", "D" ],       run = "cd ~/Downloads",   desc = "Go to ~/Downloads" },
+	{ on = [ "g", "p" ],       run = "cd ~/Pictures",    desc = "Go to ~/Pictures" },
+	{ on = [ "g", "V" ],       run = "cd ~/Videos",      desc = "Go to ~/Videos" },
+	{ on = [ "g", "x" ],       run = "plugin trash",     desc = "Go to trash bin" },
 	{ on = [ "g", "<Space>" ], run = "cd --interactive", desc = "Jump interactively" },
-	{ on = [ "g", "f" ],       run = "follow",           desc = "Follow hovered symlink" },
+	{ on = [ "g", "f" ],       run = "follow",                   desc = "Follow hovered symlink" },
+	{ on = [ "g", "r" ],       run = "shell 'sudo fm \"$0\"' --block", desc = "Open root Yazi in hovered directory" },
 
-	# Tabs
+	# Bookmarks (yamb & Vim marks)
+	{ on = "'",          run = "plugin yamb -- jump_by_key",   desc = "Jump to bookmark by key" },
+	{ on = [ "'", "'" ], run = "plugin yamb -- jump_by_fzf",   desc = "Jump to bookmark by fzf" },
+	{ on = [ "b", "a" ], run = "plugin yamb -- save",          desc = "Add current directory to bookmarks" },
+	{ on = [ "b", "b" ], run = "plugin yamb -- jump_by_key",   desc = "Jump to bookmark by key" },
+	{ on = [ "b", "f" ], run = "plugin yamb -- jump_by_fzf",   desc = "Jump to bookmark by fzf" },
+	{ on = [ "b", "d" ], run = "plugin yamb -- delete_by_key", desc = "Delete bookmark by key" },
+	{ on = [ "b", "D" ], run = "plugin yamb -- delete_by_fzf", desc = "Delete bookmark by fzf" },
+	{ on = [ "b", "r" ], run = "plugin yamb -- rename_by_key", desc = "Rename bookmark by key" },
+
+	# Tabs & Projects
+	{ on = [ "g", "t" ], run = "tab_switch 1 --relative",  desc = "Switch to next tab" },
+	{ on = [ "g", "T" ], run = "tab_switch -1 --relative", desc = "Switch to previous tab" },
 	{ on = [ "t", "t" ], run = "tab_create --current",     desc = "Create a new tab in CWD" },
 	{ on = [ "t", "r" ], run = "tab_rename --interactive", desc = "Rename current tab" },
+	{ on = [ "t", "c" ], run = "close",                    desc = "Close current tab" },
+	{ on = [ "t", "s" ], run = "plugin projects save",      desc = "Save current project/tabs" },
+	{ on = [ "t", "l" ], run = "plugin projects load",      desc = "Load project/tabs" },
+	{ on = [ "t", "L" ], run = "plugin projects load_last", desc = "Load last project/tabs" },
+	{ on = [ "t", "d" ], run = "plugin projects delete",    desc = "Delete project" },
 
+	# Tab Switching (1-9)
 	{ on = "1", run = "tab_switch 0", desc = "Switch to first tab" },
 	{ on = "2", run = "tab_switch 1", desc = "Switch to second tab" },
 	{ on = "3", run = "tab_switch 2", desc = "Switch to third tab" },
@@ -184,8 +216,10 @@ keymap = [
 	{ on = "<C-c>", run = "close", desc = "Close task manager" },
 	{ on = "w",     run = "close", desc = "Close task manager" },
 
-	{ on = "k", run = "arrow prev", desc = "Previous task" },
-	{ on = "j", run = "arrow next", desc = "Next task" },
+	{ on = "k",     run = "arrow prev", desc = "Previous task" },
+	{ on = "j",     run = "arrow next", desc = "Next task" },
+	{ on = "<C-k>", run = "arrow prev", desc = "Previous task" },
+	{ on = "<C-j>", run = "arrow next", desc = "Next task" },
 
 	{ on = "<Up>",   run = "arrow prev", desc = "Previous task" },
 	{ on = "<Down>", run = "arrow next", desc = "Next task" },
@@ -206,8 +240,10 @@ keymap = [
 	{ on = "<C-c>", run = "close", desc = "Close the spot" },
 	{ on = "<Tab>", run = "close", desc = "Close the spot" },
 
-	{ on = "k", run = "arrow prev", desc = "Previous line" },
-	{ on = "j", run = "arrow next", desc = "Next line" },
+	{ on = "k",     run = "arrow prev", desc = "Previous line" },
+	{ on = "j",     run = "arrow next", desc = "Next line" },
+	{ on = "<C-k>", run = "arrow prev", desc = "Previous line" },
+	{ on = "<C-j>", run = "arrow next", desc = "Next line" },
 	{ on = "h", run = "swipe prev", desc = "Swipe to previous file" },
 	{ on = "l", run = "swipe next", desc = "Swipe to next file" },
 
@@ -349,8 +385,10 @@ keymap = [
 	{ on = "n", run = "close",          desc = "Cancel the confirm" },
 	{ on = "y", run = "close --submit", desc = "Submit the confirm" },
 
-	{ on = "k", run = "arrow prev", desc = "Previous line" },
-	{ on = "j", run = "arrow next", desc = "Next line" },
+	{ on = "k",     run = "arrow prev", desc = "Previous line" },
+	{ on = "j",     run = "arrow next", desc = "Next line" },
+	{ on = "<C-k>", run = "arrow prev", desc = "Previous line" },
+	{ on = "<C-j>", run = "arrow next", desc = "Next line" },
 
 	{ on = "<Up>",   run = "arrow prev", desc = "Previous line" },
 	{ on = "<Down>", run = "arrow next", desc = "Next line" },
@@ -390,8 +428,10 @@ keymap = [
 	{ on = "<Enter>", run = "close --submit", desc = "Close help menu and run selected action(s)" },
 
 	# Navigation
-	{ on = "k", run = "arrow prev", desc = "Previous line" },
-	{ on = "j", run = "arrow next", desc = "Next line" },
+	{ on = "k",     run = "arrow prev", desc = "Previous line" },
+	{ on = "j",     run = "arrow next", desc = "Next line" },
+	{ on = "<C-k>", run = "arrow prev", desc = "Previous line" },
+	{ on = "<C-j>", run = "arrow next", desc = "Next line" },
 
 	{ on = "<Up>",   run = "arrow prev", desc = "Previous line" },
 	{ on = "<Down>", run = "arrow next", desc = "Next line" },

@@ -97,7 +97,7 @@ WINEDLLOVERRIDES="dinput8=n,b" LSFGVK_PROFILE="gta4" prime-run mangohud %command
 
 ### 3.4 Active Low-Latency & Uncap Overrides
 
-#### [`GTAIV/commandline.txt`](file:///home/manisk/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/commandline.txt):
+#### [`GTAIV/commandline.txt`](file:///home/onyx/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/commandline.txt):
 ```text
 -width 1920
 -height 1200
@@ -109,7 +109,7 @@ WINEDLLOVERRIDES="dinput8=n,b" LSFGVK_PROFILE="gta4" prime-run mangohud %command
 -noprecache
 ```
 
-#### [`GTAIV/dxvk.conf`](file:///home/manisk/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/dxvk.conf):
+#### [`GTAIV/dxvk.conf`](file:///home/onyx/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/dxvk.conf):
 ```ini
 dxvk.allowFse = true
 dxvk.enableAsync = true
@@ -150,7 +150,7 @@ Any AI agent or developer modifying this game on Linux must understand these cor
 **NEVER switch the "Graphics API" setting to "Vulkan" inside the FusionFix pause menu.** 
 * DXVK already translates D3D9 to Vulkan at the Proton layer. 
 * Changing that menu toggle creates a Windows-only `d3d9.cfg` file that attempts to load `vulkan.dll` directly inside Wine, causing an immediate crash on launch (`0xc0000005`). 
-* Keep `GraphicsAPI = 0` in [`plugins/GTAIV.EFLC.FusionFix.cfg`](file:///home/manisk/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/plugins/GTAIV.EFLC.FusionFix.cfg).
+* Keep `GraphicsAPI = 0` in [`plugins/GTAIV.EFLC.FusionFix.cfg`](file:///home/onyx/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/plugins/GTAIV.EFLC.FusionFix.cfg).
 
 ---
 
@@ -285,7 +285,7 @@ To transform Liberty City into a sharp, rain-slicked, neon-drenched metropolis w
    * Cubemap reflection shaders applied to all transparent surfaces in the game world.
    * Illuminated neon signs and passing car headlights reflect realistically off office towers, bus shelters, telephone booths, and restaurant windows.
 2. **Emissive Shaders & Bloom Calibration:**
-   * In [`plugins/GTAIV.EFLC.FusionFix.ini`](file:///home/manisk/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/plugins/GTAIV.EFLC.FusionFix.ini):
+   * In [`plugins/GTAIV.EFLC.FusionFix.ini`](file:///home/onyx/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/plugins/GTAIV.EFLC.FusionFix.ini):
      ```ini
      [SHADOWS]
      ExtraDynamicShadows = 2
@@ -527,7 +527,7 @@ Before applying any mod or modifying configuration files, verify this checklist:
 
 ### Sharpening & Post-Processing Architecture:
 * **Active Injector:** Single-pipeline `vkBasalt` enabled in launch options via `ENABLE_VKBASALT=1`.
-* **Configuration:** Dedicated per-game config created at [`GTAIV/vkBasalt.conf`](file:///home/manisk/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/vkBasalt.conf) to isolate GTA IV without altering system-wide CS2 settings.
+* **Configuration:** Dedicated per-game config created at [`GTAIV/vkBasalt.conf`](file:///home/onyx/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/vkBasalt.conf) to isolate GTA IV without altering system-wide CS2 settings.
 * **Effects Stack:**
   - `casSharpness = 0.40` (AMD Contrast Adaptive Sharpening, built natively into vkBasalt).
   - `vibrance` (`Vibrance.fx` ReShade shader).
@@ -541,13 +541,13 @@ Before applying any mod or modifying configuration files, verify this checklist:
 To instruct any other AI agent (Claude Code, Cursor, Gemini, etc.) to immediately understand all milestones, goals, invariants, and active architecture:
 
 **Point the AI directly to this single directory:**
-> **`/home/manisk/docs/gaming/gta-iv/`**
+> **`/home/onyx/docs/gaming/gta-iv/`**
 
 ### Recommended Prompt for Another AI Agent:
 ```text
 You are assisting with my modded GTA IV Complete Edition 1.2.0.59 installation on CachyOS (Linux/Proton).
 Before doing or proposing anything, read all markdown files in:
-/home/manisk/docs/gaming/gta-iv/
+/home/onyx/docs/gaming/gta-iv/
 Specifically:
 1. ai-agent-handoff-and-visual-overhaul.md (Single Source of Truth, all milestones, invariants, runbook)
 2. community-restoration-roadmap.md (Active modules, load order, exclusions)
@@ -575,7 +575,7 @@ CRITICAL INVARIANTS:
 
 ### 1. Final Load Order (`update/` Fusion Overloader)
 
-The modular load order in [`GTAIV/update/`](file:///home/manisk/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/update/) is strictly maintained without invasive overwrites:
+The modular load order in [`GTAIV/update/`](file:///home/onyx/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/update/) is strictly maintained without invasive overwrites:
 
 | Order / Priority | Folder Name | Component / Description | Status |
 | :--- | :--- | :--- | :--- |
@@ -631,7 +631,7 @@ The modular load order in [`GTAIV/update/`](file:///home/manisk/.local/share/Ste
 * **First Person Mod:** C06alt First Person v1.3
 * **Status:** **INSTALLED & VERIFIED ACTIVE**
 * **Binary Details:**
-  - File: [`GTAIV/FirstPerson.asi`](file:///home/manisk/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/FirstPerson.asi)
+  - File: [`GTAIV/FirstPerson.asi`](file:///home/onyx/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/FirstPerson.asi)
   - Size: 420,352 bytes (Replacing the obsolete 140,800-byte v1.1/v1.2 build)
   - SHA256: `72e29cd16e50b292a49b62aa64aaa79ae3a4ff56ca935805a5189c79d7b8154e`
 * **Dependencies:** `ScriptHook.dll` (0.5.1, 336 KB) + `aCompleteEditionHook.asi` (CE 1.2.0.59 bridge). Zero dependency on IV-SDK .NET or ScriptHookDotNet.
@@ -704,7 +704,7 @@ Disassembly of `FirstPerson.asi` v1.3 (`/tmp/fpp_disasm.txt`) revealed the exact
 ### 6. Sharpening & Post-Processing Architecture Report
 
 * **Active Injector:** `vkBasalt` via `ENABLE_VKBASALT=1` in Steam launch options.
-* **Game Configuration:** [`GTAIV/vkBasalt.conf`](file:///home/manisk/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/vkBasalt.conf)
+* **Game Configuration:** [`GTAIV/vkBasalt.conf`](file:///home/onyx/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/vkBasalt.conf)
 * **Effects Stack:**
   - `casSharpness = 0.40` (AMD Contrast Adaptive Sharpening, built natively into vkBasalt).
   - `vibrance` (`Vibrance.fx` ReShade shader).
@@ -765,9 +765,9 @@ sudo snapper -c home rollback 31
      - Raise **Brightness** by +2 to +4 ticks.
      - Lower **Contrast** by -1 to -2 ticks.
      - *Effect:* Immediately lifts the shadow floor without blowing out specular streetlamp highlights.
-  2. **Option B (FusionFix Console Gamma Curve):** In [`plugins/GTAIV.EFLC.FusionFix.cfg`](file:///home/manisk/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/plugins/GTAIV.EFLC.FusionFix.cfg), set `ConsoleGamma = 1` (or toggle "Console Gamma" to On in FusionFix Display settings).
+  2. **Option B (FusionFix Console Gamma Curve):** In [`plugins/GTAIV.EFLC.FusionFix.cfg`](file:///home/onyx/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/plugins/GTAIV.EFLC.FusionFix.cfg), set `ConsoleGamma = 1` (or toggle "Console Gamma" to On in FusionFix Display settings).
      - *Effect:* Replaces PC linear sRGB with the Xbox 360 gamma curve, gently elevating ambient night bounce lighting and road textures while retaining rich black levels.
-  3. **Option C (Standby Timecycle Alternative):** Switch to pre-staged **Natural Timecycle by DayL** in [`standby_mods/dayl_natural/`](file:///home/manisk/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/standby_mods/dayl_natural/). DayL's profile provides naturally illuminated urban nights with higher ambient sky bounce.
+  3. **Option C (Standby Timecycle Alternative):** Switch to pre-staged **Natural Timecycle by DayL** in [`standby_mods/dayl_natural/`](file:///home/onyx/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/standby_mods/dayl_natural/). DayL's profile provides naturally illuminated urban nights with higher ambient sky bounce.
 
 ### 2. Alek List Decision Matrix (18 Mods)
 | Mod Name | Category | Current Status | Compatibility Verdict | Decision & Technical Justification |
@@ -809,10 +809,10 @@ sudo snapper -c home rollback 31
   - **Snapshot #34:** `before-solitude-night-fix`
 
 ### 1. Root Cause & Diagnostic Findings
-* **Root Cause:** Solitude 3 v1.1.5's changelog specifically notes that its lighting was balanced and re-authored around the Xbox 360 gamma curve (`ConsoleGamma = 1`). In [`plugins/GTAIV.EFLC.FusionFix.cfg`](file:///home/manisk/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/plugins/GTAIV.EFLC.FusionFix.cfg), `ConsoleGamma` was set to `0` (linear PC sRGB). This caused midnight ambient lighting (00:00–05:00) to crush below readable thresholds, rendering asphalt and car paint pitch black while streetlights remained prominent.
+* **Root Cause:** Solitude 3 v1.1.5's changelog specifically notes that its lighting was balanced and re-authored around the Xbox 360 gamma curve (`ConsoleGamma = 1`). In [`plugins/GTAIV.EFLC.FusionFix.cfg`](file:///home/onyx/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/plugins/GTAIV.EFLC.FusionFix.cfg), `ConsoleGamma` was set to `0` (linear PC sRGB). This caused midnight ambient lighting (00:00–05:00) to crush below readable thresholds, rendering asphalt and car paint pitch black while streetlights remained prominent.
 * **Non-Destructive Fix Applied:**
-  - Set `ConsoleGamma = 1` in [`plugins/GTAIV.EFLC.FusionFix.cfg`](file:///home/manisk/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/plugins/GTAIV.EFLC.FusionFix.cfg).
-  - Preserved [`update/pc/data/timecyc.dat`](file:///home/manisk/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/update/pc/data/timecyc.dat) completely unmodified (SHA256: `e83b35cd8210b0f82db66e590ad735746b90c69f6a19325c9528aecae52cf94d`).
+  - Set `ConsoleGamma = 1` in [`plugins/GTAIV.EFLC.FusionFix.cfg`](file:///home/onyx/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/plugins/GTAIV.EFLC.FusionFix.cfg).
+  - Preserved [`update/pc/data/timecyc.dat`](file:///home/onyx/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/update/pc/data/timecyc.dat) completely unmodified (SHA256: `e83b35cd8210b0f82db66e590ad735746b90c69f6a19325c9528aecae52cf94d`).
   - Zero timecycle replacements, zero second timecycle injection, zero post-processing overhead.
 
 ### 2. Solitude 3 Author-Required Settings Verification

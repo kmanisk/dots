@@ -1,18 +1,38 @@
 #!/bin/sh
 # ==============================================================================
-# steam-workspace - Smart Steam Launcher & Focuser (Workspace 3)
+# steam-workspace - Background Steam Launcher & Workspace 3 Router
 # ==============================================================================
-# - Cold boot: launches steam, lands on ws3, locks focus when window maps.
-# - Background/tray: re-opens main window via steam://open/main, focuses on ws3.
-# - Already visible: immediately switches to ws3 and focuses the window.
+# 2026-10-18 rewrite (Caps+E): Steam is spawned and PUSHED to workspace 3 in
+# the background. The current viewport is never switched and focus is never
+# stolen; switch to ws3 yourself (Win+o) when ready.
+#
+# - Cold boot: launches Steam (DGPU env honored), routes window to ws3 on map.
+# - Background/tray: re-opens the main window via steam://open/main, routes
+#   it to ws3 without switching the view.
+# - Window already visible: silently re-routes it to ws3 if it sits elsewhere.
+# - Legacy flags (e.g. --silent) are accepted and ignored: launching is now
+#   always background / silent with respect to workspace focus.
 # ==============================================================================
 set -u
+
+# ---- detach from the caller's cgroup -----------------------------------------
+# Caps+E runs this through xremap.service, so Steam (and every game it starts)
+# used to inherit that unit's cgroup. bt-autoconnect restarts xremap.service on
+# every Bluetooth keyboard reconnect, and the default KillMode=control-group
+# SIGKILLs the whole cgroup - Steam and CS2 died with it. Re-exec once inside a
+# transient user scope so Steam always lives in its own cgroup.
+if [ "${STEAM_WORKSPACE_SCOPED:-0}" != "1" ] && command -v systemd-run >/dev/null 2>&1; then
+    export STEAM_WORKSPACE_SCOPED=1
+    if systemd-run --user --scope --quiet --collect -p KillMode=process -- "$0" "$@"; then
+        exit 0
+    fi
+fi
 
 WS=3
 
 # Compositor IPC: swaymsg on Wayland, i3-msg on X11
 IPC_CMD="i3-msg"
-if [ -n "$SWAYSOCK" ] || [ -n "$WAYLAND_DISPLAY" ]; then
+if [ -n "${SWAYSOCK:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
     IPC_CMD="swaymsg"
 fi
 
@@ -20,22 +40,28 @@ has_window() {
     $IPC_CMD -t get_tree 2>/dev/null | grep -qE '"instance": ?"steamwebhelper"'
 }
 
+# Push every Steam UI window to ws3. Never focuses, never switches viewport.
+route_to_ws3() {
+    $IPC_CMD "[instance=\"steamwebhelper\"] move to workspace number $WS" >/dev/null 2>&1 || true
+}
+
+# Backstop: poll until the Steam window maps, then route it to ws3.
+# Runs detached so the launcher itself exits immediately.
+watch_and_route() {
+    i=0
+    while [ "$i" -lt "$1" ]; do
+        sleep "$2"
+        if has_window; then
+            route_to_ws3
+            return
+        fi
+        i=$((i + 1))
+    done
+}
+
 if [ -n "${SWAYSOCK:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
     export STEAM_FORCE_DESKTOPUI_SCALING="${STEAM_FORCE_DESKTOPUI_SCALING:-1}"
     export GDK_SCALE=1
-fi
-
-# Parse arguments
-SILENT=0
-for arg in "$@"; do
-    case "$arg" in
-        --silent|-s) SILENT=1 ;;
-    esac
-done
-
-if [ "$SILENT" -eq 0 ]; then
-    # Switch to workspace 3 when not launched in background
-    $IPC_CMD "workspace number $WS" >/dev/null 2>&1
 fi
 
 if ! pgrep -x steam >/dev/null 2>&1; then
@@ -51,34 +77,12 @@ if ! pgrep -x steam >/dev/null 2>&1; then
         export __NV_PRIME_RENDER_OFFLOAD=1 __VK_LAYER_NV_optimus=NVIDIA_only __GLX_VENDOR_LIBRARY_NAME=nvidia
     fi
     nohup steam -silent >/dev/null 2>&1 &
-    if [ "$SILENT" -eq 0 ]; then
-        (
-            for _ in $(seq 1 30); do
-                sleep 0.5
-                if has_window; then
-                    $IPC_CMD "[instance=\"steamwebhelper\"] focus; workspace number $WS" >/dev/null 2>&1
-                    break
-                fi
-            done
-        ) &
-    fi
+    watch_and_route 30 0.5 &
 elif ! has_window; then
     # 2. Process is running in background/tray, but window is closed/hidden
     nohup steam steam://open/main >/dev/null 2>&1 &
-    if [ "$SILENT" -eq 0 ]; then
-        (
-            for _ in $(seq 1 15); do
-                sleep 0.2
-                if has_window; then
-                    $IPC_CMD "[instance=\"steamwebhelper\"] focus; workspace number $WS" >/dev/null 2>&1
-                    break
-                fi
-            done
-        ) &
-    fi
+    watch_and_route 15 0.2 &
 else
-    # 3. Window already exists
-    if [ "$SILENT" -eq 0 ]; then
-        $IPC_CMD "[instance=\"steamwebhelper\"] focus; workspace number $WS" >/dev/null 2>&1
-    fi
+    # 3. Window already exists: make sure it lives on ws3 (no focus change)
+    route_to_ws3
 fi

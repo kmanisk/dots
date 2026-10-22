@@ -1,4 +1,4 @@
-general.import = ["/home/manisk/.local/state/theme/alacritty.toml"]
+general.import = ["~/.local/state/theme/alacritty.toml"]
 
 [font]
 size = 19.5

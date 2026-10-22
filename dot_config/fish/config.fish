@@ -11,3 +11,16 @@
 
 # CachyOS default integrations
 source /usr/share/cachyos-fish-config/cachyos-config.fish 2>/dev/null || true
+
+# Profile-aware greeting: suppress fastfetch inside Neovim, IDEs, or small embedded splits
+function fish_greeting
+    if set -q NVIM; or set -q VIM; or set -q ZED_TERM; or test "$TERM_PROGRAM" = "vscode"
+        return
+    end
+
+    if test (tput cols 2>/dev/null || echo 100) -lt 80; or test (tput lines 2>/dev/null || echo 24) -lt 15
+        return
+    end
+
+    fastfetch
+end

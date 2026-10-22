@@ -38,7 +38,7 @@ The system bridges Omarchy theme sources (`colors.toml`), Base46/NvChad themes, 
 
 ## 2. Omarchy Theme Importer (`omarchy-import`)
 
-Located at: [`~/.local/bin/omarchy-import`](file:///home/manisk/.local/bin/omarchy-import)
+Located at: [`~/.local/bin/omarchy-import`](file:///home/onyx/.local/bin/omarchy-import)
 
 Omarchy themes (designed for Hyprland/Arch) provide canonical palettes in `colors.toml`. The importer maps them directly into our native Base16 and Base30 schemas.
 
@@ -56,7 +56,7 @@ Omarchy themes (designed for Hyprland/Arch) provide canonical palettes in `color
 
 ## 3. Sub-100ms Atomic Rethemer (`theme-set`)
 
-Located at: [`~/.local/bin/theme-set`](file:///home/manisk/.local/bin/theme-set)
+Located at: [`~/.local/bin/theme-set`](file:///home/onyx/.local/bin/theme-set)
 
 `theme-set` executes in **70ms – 110ms** total wall-clock time.
 

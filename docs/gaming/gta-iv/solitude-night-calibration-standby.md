@@ -22,12 +22,12 @@ When running under standard PC linear gamma (`ConsoleGamma = 0`), deep shadow re
 
 ### Option B: Enable FusionFix Console Gamma
 * In **Pause Menu → Display → Console Gamma: Set to `ON`**
-* Or in [`plugins/GTAIV.EFLC.FusionFix.cfg`](file:///home/manisk/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/plugins/GTAIV.EFLC.FusionFix.cfg):
+* Or in [`plugins/GTAIV.EFLC.FusionFix.cfg`](file:///home/onyx/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/plugins/GTAIV.EFLC.FusionFix.cfg):
   ```ini
   ConsoleGamma = 1
   ```
 * *Effect:* Activates the console-style non-linear sRGB gamma curve, elevating road and shadow details naturally with 0 FPS impact.
 
 ### Option C: Timecycle Swap (DayL's Natural Timecycle)
-* Pre-staged in [`standby_mods/dayl_natural/`](file:///home/manisk/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/standby_mods/dayl_natural/).
+* Pre-staged in [`standby_mods/dayl_natural/`](file:///home/onyx/.local/share/Steam/steamapps/common/Grand%20Theft%20Auto%20IV/GTAIV/standby_mods/dayl_natural/).
 * *Effect:* Provides a brighter, softer urban nighttime sky with naturally higher ambient bounce.

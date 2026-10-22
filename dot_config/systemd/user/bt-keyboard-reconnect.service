@@ -1,0 +1,17 @@
+[Unit]
+Description=Katana S K2 Bluetooth Keyboard Auto-Reconnect Daemon
+Documentation=man:bluetoothd(8)
+After=bluetooth.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/onyx/.local/bin/bt-keyboard-reconnect
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

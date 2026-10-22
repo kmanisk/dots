@@ -75,9 +75,9 @@ synchronized_sync = 1
 
 
 [color]
-# Theme: Synthwave '84 theme for (synthwave84)
+# Theme: gruvbox (gruvbox)
 background = 'default'
-foreground = '#ff00ff'
+foreground = '#749689'
 
 gradient = 0
 

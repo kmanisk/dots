@@ -1,55 +1,71 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Emergency Game / Compositor Termination Script (killgame / kg)
+# ==============================================================================
 # Smart Mode:
-#   - If games / Steam / Proton ARE running -> Force terminate cleanly & notify
-#   - If NOTHING is running already -> Smart action: launch game launcher (rofi-games)
+#   - If games / Steam / Proton ARE running -> SIGKILL sweep + notify + single
+#     compositor refresh
+#   - If NOTHING is running already -> notify "Nothing to Kill" (replaces the
+#     previous notification instead of stacking)
+#
+# Repeat-press responsiveness (2026-10-18):
+#   - flock guard: pressing Caps+R again while a kill burst is in flight only
+#     re-runs the instant SIGKILL sweep; no duplicate notifications and no
+#     stacked compositor reloads (a reload re-runs every exec_always autostart
+#     line, which is what made mashing feel laggy).
+#   - Single pgrep pass replaces the per-PID `cat /proc/*/comm` loop.
+#   - X11 fallback uses i3-msg reload instead of the heavier i3-msg restart.
 # ==============================================================================
 set -euo pipefail
 
 GAME_PATTERNS="cs2|gamescope|gamescopereaper|steam|steamwebhelper|eldenring|gtaiv|darksouls|farcry|wineserver|winedevice|pressure-vessel|Discovery\.exe|HuntGame\.exe|TslGame\.exe|r5apex\.exe|d3ddriverquery|crashpad_handler|modengine2"
+LOCK_FILE="/tmp/killgame.lock"
 
-# Find running game/Steam PIDs (excluding bash/killgame/grep themselves)
-FOUND_PIDS=()
-while read -r pid; do
-    [ -z "$pid" ] && continue
-    comm=$(cat "/proc/$pid/comm" 2>/dev/null || true)
-    if [[ "$comm" != "killgame" && "$comm" != "bash" && "$comm" != "grep" ]]; then
-        FOUND_PIDS+=("$pid")
-    fi
-done < <(pgrep -u "$UID" -f "$GAME_PATTERNS" 2>/dev/null || true)
-
-if [ "${#FOUND_PIDS[@]}" -gt 0 ]; then
-    echo "==> Terminating active game and Steam processes (${#FOUND_PIDS[@]} found)..."
-
-    # 1. Kill Games, Launchers, Wine/Proton processes, and Steam
-    killall -9 -v cs2 gamescope gamescopereaper steam steamwebhelper eldenring.exe GTAIV.exe PlayGTAIV.exe LaunchGTAIV.exe wineserver 2>/dev/null || true
+# Instant SIGKILL sweep over every game / Steam / Wine process of this user.
+hard_sweep() {
+    killall -9 cs2 gamescope gamescopereaper steam steamwebhelper \
+        eldenring.exe GTAIV.exe PlayGTAIV.exe LaunchGTAIV.exe wineserver \
+        2>/dev/null || true
     pkill -9 -u "$UID" -f "$GAME_PATTERNS" 2>/dev/null || true
+}
+
+# Repeat press while a kill burst is still running: escalate and exit fast.
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+    echo "==> Kill burst already running; escalating hard sweep."
+    hard_sweep
+    exit 0
+fi
+
+if pgrep -u "$UID" -f "$GAME_PATTERNS" >/dev/null 2>&1; then
+    echo "==> Terminating active game and Steam processes..."
+
+    hard_sweep
 
     # Session sidecars: ensure restore will never resurrect killed Steam
     mkdir -p "$HOME/.config/sway/session" 2>/dev/null || true
     touch "$HOME/.config/sway/session/steam_was_killed" 2>/dev/null || true
     touch /tmp/steam_killed_by_user 2>/dev/null || true
 
-    # Desktop notification
-    notify-send -a "Game Terminator" -t 2000 -i application-exit \
+    # Desktop notification (fixed replace-id: repeat bursts do not stack)
+    notify-send -r 4241 -a "Game Terminator" -t 2000 -i application-exit \
         "Steam & Games Terminated" "Force-killed all running game and Proton processes" 2>/dev/null || true
 
     # Clean compositor / display refresh only when games were actually killed
     if [ -n "${SWAYSOCK:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
-        swaymsg reload 2>/dev/null || true
+        swaymsg reload >/dev/null 2>&1 || true
     else
         export DISPLAY="${DISPLAY:-:0}"
-        xrandr --output eDP-1 --set "scaling mode" "Full aspect" 2>/dev/null || true
-        xrandr --output eDP-1 --mode 1920x1200 --rate 165.00 2>/dev/null || xrandr --output eDP-1 --auto 2>/dev/null || true
-        [ -f "$HOME/.fehbg" ] && sh "$HOME/.fehbg" 2>/dev/null || true
-        command -v i3-msg >/dev/null 2>&1 && i3-msg restart 2>/dev/null || true
+        xrandr --output eDP-1 --set "scaling mode" "Full aspect" >/dev/null 2>&1 || true
+        xrandr --output eDP-1 --mode 1920x1200 --rate 165.00 >/dev/null 2>&1 || xrandr --output eDP-1 --auto >/dev/null 2>&1 || true
+        [ -f "$HOME/.fehbg" ] && sh "$HOME/.fehbg" >/dev/null 2>&1 || true
+        command -v i3-msg >/dev/null 2>&1 && i3-msg reload >/dev/null 2>&1 || true
     fi
 
     echo "==> Done. Gaming session terminated."
 else
     # NOTHING is running: Caps+R is kill-only, never open the launcher.
     echo "==> No active game or Steam processes found. Nothing to kill."
-    notify-send -a "Game Terminator" -u low -i input-gaming \
+    notify-send -r 4242 -a "Game Terminator" -u low -i input-gaming \
         "Nothing to Kill" "No active games or Steam processes detected" 2>/dev/null || true
 fi

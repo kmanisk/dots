@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Night Light Toggle (Persistent, Flicker-Free)
-# Unified with wl-gammarelay-rs (handles both Night Light and Sub-Zero Brightness)
+# Unified with wl-gammarelay-rs (handles both Night Light and Below-Zero Brightness)
 # Persistent State: ~/.config/nightlight_state
 # Supports: toggle-nightlight [on|off|toggle] [--silent] [--auto]
 # ==============================================================================

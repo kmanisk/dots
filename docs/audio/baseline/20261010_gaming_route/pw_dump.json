@@ -4956,7 +4956,7 @@
         "application.process.id": 1054,
         "application.process.user": "manisk",
         "clock.power-of-two-quantum": true,
-        "config.name": "/home/manisk/.config/pipewire/asus-tuf-dax/active-runner.conf",
+        "config.name": "/home/onyx/.config/pipewire/asus-tuf-dax/active-runner.conf",
         "core.name": "pipewire-manisk-1054",
         "core.version": "1.6.9",
         "cpu.max-align": 32,

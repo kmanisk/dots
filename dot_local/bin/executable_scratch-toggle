@@ -22,12 +22,12 @@ case "$mode" in
     # Order on show is always: resize set W H, then move position center.
     term)
         instance="scratch-term"
-        spawn="footclient --app-id=scratch-term --title=scratch-term -o selection-target=both -o mouse-bindings.primary-paste=none -o mouse-bindings.clipboard-paste=BTN_MIDDLE -o locked-title=yes -o include=/home/manisk/.config/foot/foot-colors.ini 2>>/tmp/scratch-term-err.log"
+        spawn="footclient --app-id=scratch-term --title=scratch-term -o selection-target=both -o mouse-bindings.primary-paste=none -o mouse-bindings.clipboard-paste=BTN_MIDDLE -o mouse-bindings.font-increase=none -o mouse-bindings.font-decrease=none -o mouse-bindings.scrollback-up-mouse=\"BTN_WHEEL_BACK Control+Mod1+BTN_WHEEL_BACK Mod1+Control+BTN_WHEEL_BACK Control+BTN_WHEEL_BACK Mod1+BTN_WHEEL_BACK Mod4+BTN_WHEEL_BACK Control+Mod4+BTN_WHEEL_BACK\" -o mouse-bindings.scrollback-down-mouse=\"BTN_WHEEL_FORWARD Control+Mod1+BTN_WHEEL_FORWARD Mod1+Control+BTN_WHEEL_FORWARD Control+BTN_WHEEL_FORWARD Mod1+BTN_WHEEL_FORWARD Mod4+BTN_WHEEL_FORWARD Control+Mod4+BTN_WHEEL_FORWARD\" -o locked-title=yes -o include=${HOME}/.config/foot/foot-colors.ini 2>>/tmp/scratch-term-err.log"
         geom="1700 1050"
         ;;
     notes)
         instance="scratch-notes"
-        spawn="footclient --app-id=scratch-notes --title=scratch-notes -o selection-target=both -o mouse-bindings.primary-paste=none -o mouse-bindings.clipboard-paste=BTN_MIDDLE -o locked-title=yes -o include=/home/manisk/.config/foot/foot-colors.ini -o font=\"VictorMono Nerd Font:size=20.5:style=Bold\" nvim $HOME/notes.md 2>>/tmp/scratch-notes-err.log"
+        spawn="footclient --app-id=scratch-notes --title=scratch-notes -o selection-target=both -o mouse-bindings.primary-paste=none -o mouse-bindings.clipboard-paste=BTN_MIDDLE -o mouse-bindings.font-increase=none -o mouse-bindings.font-decrease=none -o mouse-bindings.scrollback-up-mouse=\"BTN_WHEEL_BACK Control+Mod1+BTN_WHEEL_BACK Mod1+Control+BTN_WHEEL_BACK Control+BTN_WHEEL_BACK Mod1+BTN_WHEEL_BACK Mod4+BTN_WHEEL_BACK Control+Mod4+BTN_WHEEL_BACK\" -o mouse-bindings.scrollback-down-mouse=\"BTN_WHEEL_FORWARD Control+Mod1+BTN_WHEEL_FORWARD Mod1+Control+BTN_WHEEL_FORWARD Control+BTN_WHEEL_FORWARD Mod1+BTN_WHEEL_FORWARD Mod4+BTN_WHEEL_FORWARD Control+Mod4+BTN_WHEEL_FORWARD\" -o locked-title=yes -o include=${HOME}/.config/foot/foot-colors.ini -o font=\"VictorMono Nerd Font:size=20.5:style=Bold\" nvim $HOME/notes.md 2>>/tmp/scratch-notes-err.log"
         geom="1700 1050"
         ;;
     spotify)
@@ -74,6 +74,10 @@ focused_ws, focused = res if res is not None else (None, None)
 
 # Block in Workspace 4
 if focused_ws == "4" or (focused_ws and str(focused_ws).startswith("4")):
+    sys.exit(0)
+
+# Block if current focused window is in fullscreen (e.g. YouTube, media, presentations)
+if isinstance(focused, dict) and focused.get("fullscreen_mode", 0) > 0:
     sys.exit(0)
 
 # Block if focused on a game window

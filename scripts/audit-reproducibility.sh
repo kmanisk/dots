@@ -34,7 +34,7 @@ check_forbidden() {
 echo "==> Running reproducibility audit on: $ROOT"
 echo "------------------------------------------------------------------"
 
-check_forbidden '/home/manisk' 'Zero hardcoded user home paths (/home/manisk)'
+check_forbidden '/home/onyx' 'Zero hardcoded user home paths (/home/onyx)'
 check_forbidden '875656642' 'Zero hardcoded personal Steam Account IDs (875656642)'
 check_forbidden 'userdata/[0-9]+' 'Zero tracked Steam userdata identity directories'
 
