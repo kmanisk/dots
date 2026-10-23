@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Telegram RS Opener & Single-Instance Handler
+# Handles tg:// and telegram:// URIs, focusing existing Telegram RS instance
+# in Sway/i3 or launching a new one if not currently running.
+# ==============================================================================
+
+set -euo pipefail
+
+# 1. Parse target username / channel / invite code from tg: or t.me: URLs
+target=""
+for arg in "$@"; do
+    if [[ "$arg" =~ domain=([^&]+) ]]; then
+        target="${BASH_REMATCH[1]}"
+        break
+    elif [[ "$arg" =~ invite=([^&]+) ]]; then
+        target="+${BASH_REMATCH[1]}"
+        break
+    elif [[ "$arg" =~ t\.me/\+([^/?#]+) ]]; then
+        target="+${BASH_REMATCH[1]}"
+        break
+    elif [[ "$arg" =~ t\.me/joinchat/([^/?#]+) ]]; then
+        target="+${BASH_REMATCH[1]}"
+        break
+    elif [[ "$arg" =~ t\.me/([^/?#]+) ]]; then
+        target="${BASH_REMATCH[1]}"
+        break
+    fi
+done
+
+# 2. If a specific target was resolved, copy to clipboard & send notification
+if [ -n "$target" ]; then
+    if [ -n "${WAYLAND_DISPLAY:-}" ] && command -v wl-copy >/dev/null 2>&1; then
+        printf "%s" "$target" | wl-copy >/dev/null 2>&1 || true
+    elif [ -n "${DISPLAY:-}" ] && command -v xclip >/dev/null 2>&1; then
+        printf "%s" "$target" | xclip -selection clipboard >/dev/null 2>&1 || true
+    fi
+
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send -a "Telegram RS" -i telegram-rs "Telegram RS" "Target '$target' copied to clipboard" >/dev/null 2>&1 || true
+    fi
+fi
+
+# 3. Focus existing window if Telegram RS is already running
+if pgrep -u "$USER" -x telegram-rs >/dev/null 2>&1; then
+    if [ -n "${SWAYSOCK:-}" ] || [ "${XDG_CURRENT_DESKTOP:-}" = "sway" ]; then
+        if command -v swaymsg >/dev/null 2>&1; then
+            if swaymsg '[title="^Telegram RS$"] focus' >/dev/null 2>&1; then
+                exit 0
+            fi
+        fi
+    elif [ -n "${I3SOCK:-}" ] || [ "${XDG_CURRENT_DESKTOP:-}" = "i3" ]; then
+        if command -v i3-msg >/dev/null 2>&1; then
+            if i3-msg '[title="^Telegram RS$"] focus' >/dev/null 2>&1; then
+                exit 0
+            fi
+        fi
+    fi
+fi
+
+# 4. Otherwise launch Telegram RS
+exec /usr/bin/telegram-rs "$@"

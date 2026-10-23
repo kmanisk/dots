@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Telegram RS
+Comment=Feather-light Telegram client in Rust
+Exec=/home/onyx/.local/bin/telegram-rs-open %u
+Icon=telegram-rs
+Terminal=false
+Categories=Network;Chat;InstantMessaging;
+MimeType=x-scheme-handler/tg;x-scheme-handler/telegram;
+StartupNotify=true
+StartupWMClass=Telegram RS
+Keywords=tg;chat;im;messaging;messenger;telegram;

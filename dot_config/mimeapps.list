@@ -86,6 +86,8 @@ application/msword-template=ai.storyteller.wordcraft.desktop
 application/rtf=ai.storyteller.wordcraft.desktop
 text/rtf=ai.storyteller.wordcraft.desktop
 application/vnd.oasis.opendocument.text=ai.storyteller.wordcraft.desktop
+x-scheme-handler/tg=telegram-rs.desktop
+x-scheme-handler/telegram=telegram-rs.desktop
 
 [Added Associations]
 video/mp4=mpv.desktop;vlc.desktop;fr.handbrake.ghb.desktop;
@@ -100,3 +102,5 @@ x-scheme-handler/ror2mm=amethystmodmanager-ror2mm.desktop
 x-scheme-handler/modl=amethystmodmanager-modl.desktop
 image/vnd.microsoft.icon=imv.desktop
 image/png=imv.desktop;
+x-scheme-handler/tg=telegram-rs.desktop;
+x-scheme-handler/telegram=telegram-rs.desktop;
