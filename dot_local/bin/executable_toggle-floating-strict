@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# toggle-floating-strict - floating toggle that refuses to float browsers.
+#
+# Why this exists:
+#   - sway runs a for_window command once per window, at map time
+#     (view_execute_criteria is guarded by view_has_executed_criteria in
+#     sway/tree/view.c), so "for_window ... floating disable" cannot undo a
+#     later manual float.
+#   - sway's bindsym does not accept criteria (sway/commands/bind.c parses
+#     none), so the chord itself cannot be scoped by app_id.
+#   A browser window that gets floated keeps its previous tiled size, which is
+#   the full output, and sway always paints the floating layer above the tiling
+#   layer: every window opened afterwards is hidden underneath it. Browsers are
+#   therefore force-retiled instead of toggled.
+#
+# Usage:
+#   toggle-floating-strict                 # act on the focused window
+#   toggle-floating-strict <app_id>        # act on a named app (testing)
+#   toggle-floating-strict --dry-run [...] # print the decision only
+
+set -euo pipefail
+
+dry_run=0
+target_app=""
+
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run) dry_run=1 ;;
+        *) target_app="$arg" ;;
+    esac
+done
+
+if [ -z "$target_app" ]; then
+    target_app=$(swaymsg -t get_tree --raw 2>/dev/null \
+        | jq -r '.. | objects | select(.focused? == true) | (.app_id // .window_properties.class // "")' \
+        | head -n1)
+fi
+
+browser_re='^(brave|brave-browser|brave-origin|firefox|librewolf|zen-alpha|qutebrowser|org\.qutebrowser\.qutebrowser)$'
+
+shopt -s nocasematch
+if [[ "$target_app" =~ $browser_re ]]; then
+    action="retile"
+    command="floating disable"
+else
+    action="toggle"
+    command="floating toggle"
+fi
+
+if [ "$dry_run" -eq 1 ]; then
+    printf '%s app_id=%s -> %s\n' "$action" "${target_app:-<none>}" "$command"
+    exit 0
+fi
+
+# shellcheck disable=SC2086
+swaymsg $command >/dev/null 2>&1 || true
