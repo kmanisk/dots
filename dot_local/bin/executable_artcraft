@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# artcraft - Entrypoint for ArtCraft Suite launcher and management
+set -eo pipefail
+
+APPIMAGE="$HOME/.local/opt/artcraft-launcher/artcraft-launcher.AppImage"
+
+if [[ "${1:-}" == "scale" ]]; then
+    shift
+    exec craft-scale "$@"
+fi
+
+exec "$APPIMAGE" "$@"

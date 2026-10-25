@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+"""craft-scale - Adjust UI scaling for all ArtCraft suite applications."""
+
+import json
+import os
+import re
+import sys
+
+APPS = [
+    "FigCraft", "figcraft", "wordcraft", "pdfcraft", "photocraft",
+    "gridcraft", "effectcraft", "filmcraft", "vectorcraft",
+    "lightcraft", "designcraft", "soundcraft", "deckcraft", "cadcraft"
+]
+
+def show_current_scale():
+    home = os.path.expanduser("~")
+    print("ArtCraft Suite UI Scaling Status:")
+    
+    # FigCraft
+    fc_path = os.path.join(home, ".config", "FigCraft", "state.json")
+    if os.path.exists(fc_path):
+        try:
+            d = json.load(open(fc_path))
+            print(f"  FigCraft:    {int(d.get('prefs', {}).get('ui_scale', 1.0) * 100)}% (ui_scale={d.get('prefs', {}).get('ui_scale')})")
+        except Exception:
+            pass
+
+    # WordCraft
+    wc_path = os.path.join(home, ".config", "wordcraft", "ui.json")
+    if os.path.exists(wc_path):
+        try:
+            d = json.load(open(wc_path))
+            print(f"  WordCraft:   {d.get('uiScale', 100)}%")
+        except Exception:
+            pass
+
+    # PdfCraft
+    pc_path = os.path.join(home, ".config", "pdfcraft", "app.ron")
+    if os.path.exists(pc_path):
+        try:
+            m = re.search(r'zoom_factor:\s*([\d.]+)', open(pc_path).read())
+            if m:
+                print(f"  PdfCraft:    {int(float(m.group(1)) * 100)}% (zoom_factor={m.group(1)})")
+        except Exception:
+            pass
+
+    # PhotoCraft
+    ph_pref = os.path.join(home, ".config", "photocraft", "preferences.json")
+    if os.path.exists(ph_pref):
+        try:
+            d = json.load(open(ph_pref))
+            print(f"  PhotoCraft:  {d.get('interface', {}).get('uiScale', 'auto')}%")
+        except Exception:
+            pass
+
+    # GridCraft
+    gc_path = os.path.join(home, ".config", "gridcraft", "ui.json")
+    if os.path.exists(gc_path):
+        try:
+            d = json.load(open(gc_path))
+            print(f"  GridCraft:   {d.get('interfaceScale', 100)}%")
+        except Exception:
+            pass
+
+    # EffectCraft
+    ec_path = os.path.join(home, ".config", "effectcraft", "prefs.json")
+    if os.path.exists(ec_path):
+        try:
+            d = json.load(open(ec_path))
+            print(f"  EffectCraft: {d.get('appearance', {}).get('uiScale', 100)}%")
+        except Exception:
+            pass
+
+    # FilmCraft
+    fm_path = os.path.join(home, ".config", "filmcraft", "preferences.json")
+    if os.path.exists(fm_path):
+        try:
+            d = json.load(open(fm_path))
+            print(f"  FilmCraft:   {d.get('appearance', {}).get('uiScale', 100)}%")
+        except Exception:
+            pass
+
+
+def apply_scale(pct: int):
+    mult = round(pct / 100.0, 4)
+    home = os.path.expanduser("~")
+    applied = []
+
+    for app in APPS:
+        cfg_dir = os.path.join(home, ".config", app)
+        os.makedirs(cfg_dir, exist_ok=True)
+
+        # 1. FigCraft state.json
+        state_json = os.path.join(cfg_dir, "state.json")
+        if os.path.exists(state_json) or app.lower() == "figcraft":
+            try:
+                data = json.load(open(state_json)) if os.path.exists(state_json) else {"prefs": {}}
+                if "prefs" not in data:
+                    data["prefs"] = {}
+                data["prefs"]["ui_scale"] = mult
+                with open(state_json, "w") as f:
+                    json.dump(data, f, indent=2)
+                applied.append((app, "state.json", f"ui_scale={mult}"))
+            except Exception as e:
+                sys.stderr.write(f"Error updating {state_json}: {e}\n")
+
+        # 2. WordCraft / GridCraft ui.json
+        ui_json = os.path.join(cfg_dir, "ui.json")
+        if os.path.exists(ui_json) or app in ["wordcraft", "gridcraft"]:
+            try:
+                data = json.load(open(ui_json)) if os.path.exists(ui_json) else {}
+                if "uiScale" in data or app == "wordcraft":
+                    data["uiScale"] = pct
+                if "interfaceScale" in data or app == "gridcraft":
+                    data["interfaceScale"] = pct
+                with open(ui_json, "w") as f:
+                    json.dump(data, f, indent=2)
+                applied.append((app, "ui.json", f"scale={pct}%"))
+            except Exception as e:
+                sys.stderr.write(f"Error updating {ui_json}: {e}\n")
+
+        # 3. PhotoCraft / FilmCraft preferences.json
+        pref_json = os.path.join(cfg_dir, "preferences.json")
+        if os.path.exists(pref_json) or app in ["photocraft", "filmcraft"]:
+            try:
+                data = json.load(open(pref_json)) if os.path.exists(pref_json) else {}
+                if app == "photocraft":
+                    if "interface" not in data:
+                        data["interface"] = {}
+                    data["interface"]["uiScale"] = str(pct)
+                    data["interface"]["uiFontSize"] = "medium"
+                elif app == "filmcraft":
+                    if "appearance" not in data:
+                        data["appearance"] = {}
+                    data["appearance"]["uiScale"] = str(pct)
+                with open(pref_json, "w") as f:
+                    json.dump(data, f, indent=2)
+                applied.append((app, "preferences.json", f"uiScale={pct}"))
+            except Exception as e:
+                sys.stderr.write(f"Error updating {pref_json}: {e}\n")
+
+        # 4. EffectCraft prefs.json
+        prefs_json = os.path.join(cfg_dir, "prefs.json")
+        if os.path.exists(prefs_json) or app == "effectcraft":
+            try:
+                data = json.load(open(prefs_json)) if os.path.exists(prefs_json) else {}
+                if "appearance" not in data:
+                    data["appearance"] = {}
+                data["appearance"]["uiScale"] = str(pct)
+                with open(prefs_json, "w") as f:
+                    json.dump(data, f, indent=2)
+                applied.append((app, "prefs.json", f"appearance.uiScale={pct}"))
+            except Exception as e:
+                sys.stderr.write(f"Error updating {prefs_json}: {e}\n")
+
+        # 5. egui .ron files (app.ron, ui.ron)
+        for ron_name in ["app.ron", "ui.ron"]:
+            ron_file = os.path.join(cfg_dir, ron_name)
+            if os.path.exists(ron_file):
+                try:
+                    with open(ron_file) as f:
+                        text = f.read()
+                    text_sub = re.sub(r'\\"ui_scale\\":\s*[\d.]+', f'\\"ui_scale\\":{mult}', text)
+                    text_sub = re.sub(r'zoom_factor:\s*[\d.]+', f'zoom_factor:{mult}', text_sub)
+                    with open(ron_file, "w") as f:
+                        f.write(text_sub)
+                    applied.append((app, ron_name, f"zoom_factor={mult}"))
+                except Exception as e:
+                    sys.stderr.write(f"Error updating {ron_file}: {e}\n")
+
+    # Local share for FilmCraft
+    film_share = os.path.join(home, ".local/share/filmcraft")
+    if os.path.isdir(film_share):
+        fc_pref = os.path.join(film_share, "preferences.json")
+        try:
+            data = json.load(open(fc_pref)) if os.path.exists(fc_pref) else {}
+            if "appearance" not in data:
+                data["appearance"] = {}
+            data["appearance"]["uiScale"] = str(pct)
+            with open(fc_pref, "w") as f:
+                json.dump(data, f, indent=2)
+            applied.append(("filmcraft (local/share)", "preferences.json", f"uiScale={pct}"))
+        except Exception as e:
+            sys.stderr.write(f"Error updating {fc_pref}: {e}\n")
+
+    print(f"Applied {pct}% UI scaling across Craft applications:")
+    for item in applied:
+        print(f"  {item[0]}: {item[1]} -> {item[2]}")
+
+
+def main():
+    if len(sys.argv) < 2:
+        show_current_scale()
+        print("\nUsage: craft-scale <percentage>")
+        print("Example: craft-scale 150")
+        return
+
+    arg = sys.argv[1].strip()
+    if arg in ["-h", "--help", "help"]:
+        print("Usage: craft-scale [percentage]")
+        print("Adjust UI scale for all ArtCraft suite applications.")
+        print("Examples:")
+        print("  craft-scale        # Show current scaling")
+        print("  craft-scale 150    # Set 150% UI scaling across all apps")
+        print("  craft-scale 125    # Set 125% UI scaling across all apps")
+        return
+
+    try:
+        pct = int(arg.rstrip("%"))
+    except ValueError:
+        sys.stderr.write(f"craft-scale: invalid percentage '{arg}'. Must be an integer like 125 or 150.\n")
+        sys.exit(1)
+
+    if pct < 50 or pct > 300:
+        sys.stderr.write("craft-scale: percentage must be between 50 and 300.\n")
+        sys.exit(1)
+
+    apply_scale(pct)
+
+
+if __name__ == "__main__":
+    main()
