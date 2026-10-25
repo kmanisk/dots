@@ -85,6 +85,20 @@ case "$TARGET_RES" in
     *) TARGET_W=1600; TARGET_H=1200 ;;
 esac
 
+# Enforce exclusive fullscreen at target resolution in cs2_video.txt
+# (prevents borderless windowed fallback which disables SDL Wayland stretch and causes 320px black bar)
+for vcfg in "$HOME/.local/share/Steam"/userdata/*/730/local/cfg/cs2_video.txt; do
+    if [ -f "$vcfg" ]; then
+        sed -i \
+            -e 's/"setting.fullscreen"[[:space:]]*"[0-9]*"/"setting.fullscreen"\t\t"1"/' \
+            -e 's/"setting.coop_fullscreen"[[:space:]]*"[0-9]*"/"setting.coop_fullscreen"\t\t"0"/' \
+            -e 's/"setting.nowindowborder"[[:space:]]*"[0-9]*"/"setting.nowindowborder"\t\t"0"/' \
+            -e "s/\"setting.defaultres\"[[:space:]]*\"[0-9]*\"/\"setting.defaultres\"\t\t\"$TARGET_W\"/" \
+            -e "s/\"setting.defaultresheight\"[[:space:]]*\"[0-9]*\"/\"setting.defaultresheight\"\t\t\"$TARGET_H\"/" \
+            "$vcfg" 2>/dev/null || true
+    fi
+done
+
 # --- per-mode SDL setup ---
 case "$CS2_MODE" in
     wayland)
@@ -154,6 +168,17 @@ cleanup() {
     if [ "$ananicy_was_active" = "1" ]; then
         sudo -n systemctl start ananicy-cpp.service 2>/dev/null || true
     fi
+    for vcfg in "$HOME/.local/share/Steam"/userdata/*/730/local/cfg/cs2_video.txt; do
+        if [ -f "$vcfg" ]; then
+            sed -i \
+                -e 's/"setting.fullscreen"[[:space:]]*"[0-9]*"/"setting.fullscreen"\t\t"1"/' \
+                -e 's/"setting.coop_fullscreen"[[:space:]]*"[0-9]*"/"setting.coop_fullscreen"\t\t"0"/' \
+                -e 's/"setting.nowindowborder"[[:space:]]*"[0-9]*"/"setting.nowindowborder"\t\t"0"/' \
+                -e "s/\"setting.defaultres\"[[:space:]]*\"[0-9]*\"/\"setting.defaultres\"\t\t\"$TARGET_W\"/" \
+                -e "s/\"setting.defaultresheight\"[[:space:]]*\"[0-9]*\"/\"setting.defaultresheight\"\t\t\"$TARGET_H\"/" \
+                "$vcfg" 2>/dev/null || true
+        fi
+    done
     if [ -n "${SWAYSOCK:-}" ] && command -v swaymsg >/dev/null 2>&1; then
         swaymsg 'mode "default"' >/dev/null 2>&1 || true
     fi
