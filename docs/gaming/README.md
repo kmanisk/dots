@@ -11,9 +11,11 @@ This directory contains battle-tested configurations, root-cause analyses, bench
 ### 1. [Counter-Strike 2 (CS2)](./cs2/README.md)
 - **Status:** **Working Flawlessly** (Native Linux Vulkan)
 - **Performance:** **407.6 Avg FPS** / **170.3 1% Low FPS** (locked above 165Hz physical panel refresh)
+- **Resolution & Scaling:** 1600x1200 4:3 stretched edge-to-edge (zero black bars) via native Wayland SDL viewport stretch; self-healing exclusive fullscreen enforcement in `cs2_video.txt`.
 - **Audio Routing:** Automatically routed to `sink.peace_gaming` (Peace PUBG EQ + LoudMax limiter) via `gaming-audio-route.lua`
 - **Documentation:**
   - [Status & Experience Log](./cs2/README.md)
+  - [Native Wayland 4:3 Stretched Fix Log](./cs2/wayland-43-stretched.md)
   - [VProf Benchmark Telemetry Breakdown](./cs2/performance-benchmarks.md)
 
 ---
