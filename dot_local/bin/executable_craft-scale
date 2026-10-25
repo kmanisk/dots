@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""craft-scale - Adjust UI scaling for all ArtCraft suite applications."""
+"""craft-scale - Adjust UI scaling for ArtCraft suite applications."""
 
 import json
 import os
@@ -81,12 +81,13 @@ def show_current_scale():
             pass
 
 
-def apply_scale(pct: int):
+def apply_scale(pct: int, target_apps=None):
     mult = round(pct / 100.0, 4)
     home = os.path.expanduser("~")
     applied = []
+    apps_to_update = target_apps if target_apps else APPS
 
-    for app in APPS:
+    for app in apps_to_update:
         cfg_dir = os.path.join(home, ".config", app)
         os.makedirs(cfg_dir, exist_ok=True)
 
@@ -128,7 +129,7 @@ def apply_scale(pct: int):
                     if "interface" not in data:
                         data["interface"] = {}
                     data["interface"]["uiScale"] = str(pct)
-                    data["interface"]["uiFontSize"] = "medium"
+                    data["interface"]["uiFontSize"] = "small" if pct <= 125 else "medium"
                 elif app == "filmcraft":
                     if "appearance" not in data:
                         data["appearance"] = {}
@@ -169,21 +170,23 @@ def apply_scale(pct: int):
                     sys.stderr.write(f"Error updating {ron_file}: {e}\n")
 
     # Local share for FilmCraft
-    film_share = os.path.join(home, ".local/share/filmcraft")
-    if os.path.isdir(film_share):
-        fc_pref = os.path.join(film_share, "preferences.json")
-        try:
-            data = json.load(open(fc_pref)) if os.path.exists(fc_pref) else {}
-            if "appearance" not in data:
-                data["appearance"] = {}
-            data["appearance"]["uiScale"] = str(pct)
-            with open(fc_pref, "w") as f:
-                json.dump(data, f, indent=2)
-            applied.append(("filmcraft (local/share)", "preferences.json", f"uiScale={pct}"))
-        except Exception as e:
-            sys.stderr.write(f"Error updating {fc_pref}: {e}\n")
+    if not target_apps or "filmcraft" in [a.lower() for a in target_apps]:
+        film_share = os.path.join(home, ".local/share/filmcraft")
+        if os.path.isdir(film_share):
+            fc_pref = os.path.join(film_share, "preferences.json")
+            try:
+                data = json.load(open(fc_pref)) if os.path.exists(fc_pref) else {}
+                if "appearance" not in data:
+                    data["appearance"] = {}
+                data["appearance"]["uiScale"] = str(pct)
+                with open(fc_pref, "w") as f:
+                    json.dump(data, f, indent=2)
+                applied.append(("filmcraft (local/share)", "preferences.json", f"uiScale={pct}"))
+            except Exception as e:
+                sys.stderr.write(f"Error updating {fc_pref}: {e}\n")
 
-    print(f"Applied {pct}% UI scaling across Craft applications:")
+    target_desc = ", ".join(target_apps) if target_apps else "Craft applications"
+    print(f"Applied {pct}% UI scaling for {target_desc}:")
     for item in applied:
         print(f"  {item[0]}: {item[1]} -> {item[2]}")
 
@@ -191,31 +194,43 @@ def apply_scale(pct: int):
 def main():
     if len(sys.argv) < 2:
         show_current_scale()
-        print("\nUsage: craft-scale <percentage>")
-        print("Example: craft-scale 150")
+        print("\nUsage: craft-scale [app] <percentage>")
+        print("Examples:")
+        print("  craft-scale 125              # Set 125% for all craft apps")
+        print("  craft-scale photocraft 125   # Set 125% for PhotoCraft only")
         return
 
-    arg = sys.argv[1].strip()
-    if arg in ["-h", "--help", "help"]:
-        print("Usage: craft-scale [percentage]")
-        print("Adjust UI scale for all ArtCraft suite applications.")
+    arg1 = sys.argv[1].strip()
+    if arg1 in ["-h", "--help", "help"]:
+        print("Usage: craft-scale [app] <percentage>")
+        print("Adjust UI scale for ArtCraft suite applications.")
         print("Examples:")
-        print("  craft-scale        # Show current scaling")
-        print("  craft-scale 150    # Set 150% UI scaling across all apps")
-        print("  craft-scale 125    # Set 125% UI scaling across all apps")
+        print("  craft-scale                  # Show current scaling")
+        print("  craft-scale 150              # Set 150% across all apps")
+        print("  craft-scale photocraft 125   # Set 125% for PhotoCraft only")
         return
+
+    target_apps = None
+    pct_str = arg1
+
+    if len(sys.argv) >= 3:
+        target_apps = [arg1]
+        pct_str = sys.argv[2].strip()
+    elif not arg1.rstrip("%").isdigit():
+        sys.stderr.write(f"craft-scale: missing percentage for app '{arg1}'.\n")
+        sys.exit(1)
 
     try:
-        pct = int(arg.rstrip("%"))
+        pct = int(pct_str.rstrip("%"))
     except ValueError:
-        sys.stderr.write(f"craft-scale: invalid percentage '{arg}'. Must be an integer like 125 or 150.\n")
+        sys.stderr.write(f"craft-scale: invalid percentage '{pct_str}'. Must be an integer like 125 or 150.\n")
         sys.exit(1)
 
     if pct < 50 or pct > 300:
         sys.stderr.write("craft-scale: percentage must be between 50 and 300.\n")
         sys.exit(1)
 
-    apply_scale(pct)
+    apply_scale(pct, target_apps=target_apps)
 
 
 if __name__ == "__main__":

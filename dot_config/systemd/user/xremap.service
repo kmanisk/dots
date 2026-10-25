@@ -1,6 +1,7 @@
 [Unit]
 Description=xremap key remapper
-After=graphical-session.target
+After=graphical-session.target bluetooth.target
+Wants=bluetooth.target
 
 [Service]
 Nice=-10
@@ -10,7 +11,7 @@ Nice=-10
 # running game with it. Only ever signal xremap itself.
 KillMode=process
 TimeoutStopSec=5
-ExecStart=/usr/bin/xremap --device "Katana S K1 Keyboard" --device "Katana S K2 Keyboard" --device "AT Translated Set 2 keyboard" --watch=config,device --allow-launch true %h/.config/xremap/config.yml
+ExecStart=/usr/bin/xremap --ignore "Pulsefire" --watch=config,device --allow-launch true %h/.config/xremap/config.yml
 Restart=always
 RestartSec=2
 StandardOutput=journal

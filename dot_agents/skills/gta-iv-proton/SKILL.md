@@ -20,11 +20,13 @@ description: Launch configuration, Proton prefix handling, DXVK/FusionFix moddin
 
 ### Steam Launch Options:
 ```bash
-WINEDLLOVERRIDES="dinput8=n,b" LSFGVK_PROFILE="gta4" prime-run mangohud %command%
+WINEDLLOVERRIDES="dinput8=n,b" ENABLE_VKBASALT=1 prime-run mangohud %command%
 ```
 - `WINEDLLOVERRIDES="dinput8=n,b"`: Loads the Ultimate ASI Loader DLL.
-- `LSFGVK_PROFILE="gta4"`: Enables 32-bit Lossless Scaling frame generation via `aur/lib32-lsfg-vk`.
+- `ENABLE_VKBASALT=1`: Activates post-processing vibrance shaders.
 - `prime-run`: Offloads rendering to the RTX 5050 Mobile dGPU.
+- `mangohud`: Displays minimal HUD and frametime graph.
+- Note on LSFG-VK: Adding `LSFGVK_PROFILE="gta4"` on top of native 85-90 FPS loads the GPU heavily with optical flow passes and drops base framerate to ~48 FPS. For lowest input latency and flat 11ms frametime pacing, native rendering is recommended.
 
 ---
 
@@ -113,7 +115,7 @@ Trainer Init = true    # Permanently bypasses the introductory splash
 1. **Prerequisites:** Steam library on native Linux Btrfs/Ext4 (never NTFS).
 2. **Proton:** Force **GE-Proton11-7-x86_64** in Steam Play properties.
 3. **Launch Options:** Set `WINEDLLOVERRIDES="dinput8=n,b" prime-run mangohud %command%`.
-4. **DirectX 9 Native Runtime:** Run `protontricks 12210 -q d3dx9_43`.
+4. **DirectX 9 Native Runtime & Shader Compiler:** Run `protontricks 12210 -q d3dcompiler_43 d3dx9`. (Mandatory: prevents error `E5033: Unknown target profile '__fx_2_0__'` caused by Wine's builtin HLSL compiler failing on fx_2_0 shader targets).
 5. **Install FusionFix v5.0.1:** Extract `GTAIV.EFLC.FusionFix.zip` into `.../GTAIV/`.
 6. **Install ScriptHook CE Bridge:**
    - Copy only `ScriptHook.dll` (v0.5.1, 336 KB) from HazardX into `.../GTAIV/`.
@@ -356,7 +358,7 @@ Because the `+C` attribute in Linux only applies to data blocks allocated **afte
     - `Internaldim`: `AmbDownMult` = `0.50`
     - `generic`: `AmbMult0/1` = `3.0`, `AmbDownMult` = `0.50`
     - `korbar`: `AmbDownMult` = `0.65`
-- **vkBasalt Post-Processing:** `Vibrance` calibrated to `0.60` (balanced New York atmosphere without sky oversaturation).
+- **vkBasalt Post-Processing:** `Vibrance` reduced to `0.20` in `Vibrance.fx` (preventing double oversaturation alongside hardware display vibrance). Hardware vibrance calibrated via `nvibrant-ctl set 55%` (or hotkeys `CapsLock + z` / `CapsLock + x`).
 - **Overridden Files Mirror:** Staged at `~/gta4_mod_profiles/profile_current_story/update_overrides/`.
 
 ### 16.2 Profile 2: TACE.lite DLC (Staged in `~/gta4_mod_profiles/profile_tace_dlc/`)
@@ -367,3 +369,34 @@ Because the `+C` attribute in Linux only applies to data blocks allocated **afte
   - **LibertyCityPlates Integration:** Deployed `2A.LibertyCityPlates/` (97 MB) specifically compiled for TACE.Lite with custom plate shaders.
   - **Vehicle Definitions:** `vehicles.ide` and `handling.dat` populated with all DLC cars (`buffalo`, `bullet`, `hexer`, `avan`, `caddy`, etc.).
   - **Save Invariant:** Requires starting a **New Game** or loading a TACE CE 1.2.0.59 starter save. Never load an existing vanilla campaign save with Profile 2 active.
+
+---
+
+## 17. Frametime Pacing & Micro-Stutter (Jitter) Elimination
+
+**Execution Date:** 2026-10-24 05:15 IST  
+**Verified In-Game Metric:** Flat 11.3ms frametime line at 85-90 FPS in live 3D gameplay (driving Dukes in Alderney City).
+
+### 17.1 Root Causes of Frametime Jitter
+1. **Synchronous Disk I/O Trace (`PROTON_LOG=1`):** Tracing wine debug messages, exception handling, and thread scheduling directly to disk generated 36 MB of log data in minutes, stalling the CPU render thread during asset streaming.
+2. **Disabled Vulkan GPL (`dxvk.enableGraphicsPipelineLibrary = false`):** Setting this to false in `dxvk.conf` prevented DXVK from using fast Vulkan Graphics Pipeline Library compilation, forcing synchronous monolithic shader compilation stutters when new models or shaders were encountered.
+3. **LSFG-VK Swapchain & Pacing Conflict:** `preserve_swapchain_image_count = false` caused swapchain recreation loops (`VK_SUBOPTIMAL_KHR` / `Device reset`). Furthermore, running neural frame generation on an already saturated GPU (84W TGP) dropped base framerate to ~48 FPS, and forcing `pacing_mode = "vsync"` against a 165Hz screen produced severe pacing judder.
+4. **FusionFix Frame Limit Preset:** `FpsLimitPreset = 9` in `GTAIV.EFLC.FusionFix.cfg` conflicted with DXVK presentation settings.
+
+### 17.2 Permanent Fixes
+1. **Purged `PROTON_LOG=1` and Added MangoHud Xwayland Invariant (`read_cfg`):**
+   - In MangoHud's global configuration, `vsync=0` requests Adaptive VSync (`VK_PRESENT_MODE_FIFO_RELAXED_KHR`), which is unsupported on NVIDIA Xwayland under Sway (`Present mode is not supported: VK_PRESENT_MODE_FIFO_RELAXED_KHR`). Combined with uncapped presentation (`d3d9.presentInterval = 0`), this triggered DXVK device loss (`D3DERR_DEVICELOST`) and a spinlock hang on launch.
+   - Setting `MANGOHUD_CONFIG="read_cfg,no_display=0,vsync=3,fps_limit=165"` ensures MangoHud loads `~/.config/MangoHud/MangoHud.conf` (compact horizontal layout, colors, temperatures, wattage, RAM/VRAM, and `pci_dev=0000:01:00.0`) while enforcing Immediate present mode (`VK_PRESENT_MODE_IMMEDIATE_KHR`), displaying on launch, and capping render rate at 165 FPS.
+   - Steam AppID 12210 `LaunchOptions`: `DISABLE_LSFGVK=1 MANGOHUD_CONFIG="read_cfg,no_display=0,vsync=3,fps_limit=165" WINEDLLOVERRIDES="dinput8=n,b" ENABLE_VKBASALT=1 prime-run mangohud %command%`.
+   - Dedicated fallback config also staged at `~/.config/MangoHud/GTAIV.exe.conf` and `wine-GTAIV.conf`.
+2. **Re-enabled Vulkan Graphics Pipeline Library in `GTAIV/dxvk.conf`:**
+   - `dxvk.enableGraphicsPipelineLibrary = true`
+   - `dxvk.numCompilerThreads = 8`
+   - `d3d9.maxFrameLatency = 1`
+   - `d3d9.presentInterval = 0`
+   - `d3d9.maxFrameRate = 0`
+3. **Restored FusionFix Uncapped Preset:**
+   - `FpsLimitPreset = 0` in `plugins/GTAIV.EFLC.FusionFix.cfg`.
+4. **LSFG-VK Invariant (If Enabled):**
+   - In `~/.config/lsfg-vk/conf.toml`, `preserve_swapchain_image_count = true` must be set for the `GTAIV.exe` profile to prevent swapchain recreation loops.
+   - For optimal frametime delivery and lowest input latency, native rendering at 85-90 FPS without frame generation is strongly recommended over 2x interpolation.

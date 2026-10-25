@@ -12,6 +12,8 @@ or Cursor, both of those now read `AGENTS.md` too, so this one file covers all t
 
 ## 1. Global Behavior Rules
 
+- **Project placement:** Create every new project in its own named subfolder under `/home/onyx/Projects/`, such as `/home/onyx/Projects/watchparty/`. Keep source, manifests, dependencies, tests, generated files and project documentation inside that subfolder. Never scaffold directly in the home or Projects parent directory or replace parent files when initializing a project.
+
 - **Token discipline:** never print full config files or command dumps unless asked. Use
   unified diffs or targeted line replacements for dotfile edits.
 - **No unverified "verified" claims.** Before reporting a package, MCP server, or tool as

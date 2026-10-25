@@ -6,8 +6,9 @@ Targeting exclusively:
 
 Features:
   - Event-driven via system D-Bus (GLib mainloop)
-  - Completely dormant (0% CPU) when keyboard is connected
-  - Immediate asynchronous connection when keyboard disconnects or wakes up
+  - Completely dormant (0% CPU) when keyboard is connected or sleeping
+  - Never locks HCI adapter in failing connection loops while keyboard is asleep
+  - Allows kernel passive accept-list scanning to catch wake advertisements instantly
   - Auto-restarts xremap.service on reconnect so custom layers attach instantly
   - Immediate reconnection on system resume and Bluetooth adapter power-on
   - Zero interference with audio devices or bt-refuse-toggle
@@ -23,16 +24,17 @@ from gi.repository import GLib
 
 KEYBOARD_ADDR = "CC:04:2E:90:66:02"
 KEYBOARD_PATH = "/org/bluez/hci0/dev_CC_04_2E_90_66_02"
-RETRY_INTERVAL_SEC = 3
+CONNECT_TIMEOUT_SEC = 5
 LOG_FILE = os.path.expanduser("~/.local/state/bt-keyboard-reconnect.log")
+MAX_LOG_SIZE = 128 * 1024  # 128 KB cap
 
 class KeyboardAutoConnector:
     def __init__(self, verbose=True):
         self.verbose = verbose
         os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
         self.bus = dbus.SystemBus()
-        self.retry_timer_id = None
         self.connecting = False
+        self.last_err_msg = None
 
         # Listen for Device property changes (Connected, etc.)
         self.bus.add_signal_receiver(
@@ -41,6 +43,16 @@ class KeyboardAutoConnector:
             signal_name="PropertiesChanged",
             path_keyword="path"
         )
+
+        # Listen for InterfacesAdded (handles dynamic adapter recreation / pairing)
+        try:
+            self.bus.add_signal_receiver(
+                self.on_interfaces_added,
+                dbus_interface="org.freedesktop.DBus.ObjectManager",
+                signal_name="InterfacesAdded"
+            )
+        except Exception as e:
+            self.log(f"Warning: Could not hook InterfacesAdded: {e}")
 
         # Listen for system resume from sleep
         try:
@@ -59,6 +71,11 @@ class KeyboardAutoConnector:
         if self.verbose:
             print(formatted, flush=True)
         try:
+            if os.path.exists(LOG_FILE) and os.path.getsize(LOG_FILE) > MAX_LOG_SIZE:
+                old_file = LOG_FILE + ".old"
+                if os.path.exists(old_file):
+                    os.remove(old_file)
+                os.rename(LOG_FILE, old_file)
             with open(LOG_FILE, "a") as f:
                 f.write(formatted + "\n")
         except Exception:
@@ -70,7 +87,36 @@ class KeyboardAutoConnector:
             props = dbus.Interface(dev_obj, "org.freedesktop.DBus.Properties")
             return bool(props.Get("org.bluez.Device1", "Connected"))
         except Exception as e:
-            self.log(f"Could not read Connected property: {e}")
+            err_str = str(e)
+            if err_str != self.last_err_msg:
+                self.last_err_msg = err_str
+                self.log(f"Could not read Connected property: {e}")
+            return False
+
+    def is_xremap_attached(self):
+        """Check if any running xremap process has Katana keyboard node open."""
+        try:
+            out = subprocess.check_output(["pgrep", "-u", "onyx", "-x", "xremap"]).decode().strip()
+            pids = out.split()
+            for pid in pids:
+                fd_dir = f"/proc/{pid}/fd"
+                if not os.path.exists(fd_dir):
+                    continue
+                for link in os.listdir(fd_dir):
+                    try:
+                        target = os.readlink(os.path.join(fd_dir, link))
+                        if target.startswith("/dev/input/event"):
+                            node = os.path.basename(target)
+                            name_path = f"/sys/class/input/{node}/device/name"
+                            if os.path.exists(name_path):
+                                with open(name_path, "r") as f:
+                                    dev_name = f.read().strip()
+                                if "Katana S K" in dev_name:
+                                    return True
+                    except (OSError, IOError):
+                        continue
+            return False
+        except Exception:
             return False
 
     def restart_xremap(self):
@@ -80,33 +126,30 @@ class KeyboardAutoConnector:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
-            self.log("xremap restarted to attach to reconnected keyboard.")
+            self.log("xremap restarted to attach to all connected keyboards.")
         except Exception as e:
             self.log(f"Failed to restart xremap: {e}")
 
-    def stop_retry_timer(self):
-        if self.retry_timer_id is not None:
-            GLib.source_remove(self.retry_timer_id)
-            self.retry_timer_id = None
-
-    def schedule_retry(self, delay=RETRY_INTERVAL_SEC):
-        if self.retry_timer_id is None:
-            self.retry_timer_id = GLib.timeout_add_seconds(delay, self.on_retry_timer)
-
-    def on_retry_timer(self):
-        self.retry_timer_id = None
-        self.connect()
+    def ensure_xremap(self):
+        """Verify xremap is attached to Katana; restart if not attached."""
+        if not self.is_connected():
+            return False
+        if not self.is_xremap_attached():
+            self.log("Katana connected but xremap not attached. Restarting xremap...")
+            self.restart_xremap()
+        else:
+            self.log("Katana connected and xremap is already attached.")
         return False
 
-    def connect(self):
-        if self.connecting:
-            return
-        if self.is_connected():
-            self.stop_retry_timer()
+    def connect_once(self):
+        """Attempt non-blocking connection once (for startup/resume); don't loop if sleeping."""
+        if self.connecting or self.is_connected():
+            if self.is_connected():
+                self.ensure_xremap()
             return
 
         self.connecting = True
-        self.log("Attempting asynchronous connection to Katana S K2...")
+        self.log("Attempting initial connection to Katana S K2...")
 
         try:
             dev_obj = self.bus.get_object("org.bluez", KEYBOARD_PATH)
@@ -114,32 +157,26 @@ class KeyboardAutoConnector:
 
             def on_success():
                 self.connecting = False
-                self.log("Connection successfully established! Entering dormant state.")
-                self.stop_retry_timer()
-                GLib.timeout_add_seconds(1, self.restart_xremap)
+                self.log("Connection established. Ensuring xremap layers attached.")
+                GLib.timeout_add_seconds(1, self.ensure_xremap)
 
             def on_error(err):
                 self.connecting = False
                 err_msg = str(err)
                 if "AlreadyConnected" in err_msg:
                     self.log("Keyboard is already connected.")
-                    self.stop_retry_timer()
-                elif "InProgress" in err_msg:
-                    self.log("Connection already in progress.")
-                    self.schedule_retry(5)
+                    GLib.timeout_add_seconds(1, self.ensure_xremap)
                 else:
-                    self.log(f"Connect attempt ended ({err_msg}). Re-arming scan in {RETRY_INTERVAL_SEC}s...")
-                    self.schedule_retry(RETRY_INTERVAL_SEC)
+                    self.log(f"Connect attempt ended ({err_msg}). Passive accept-list listening active.")
 
             dev_iface.Connect(
                 reply_handler=on_success,
                 error_handler=on_error,
-                timeout=25
+                timeout=CONNECT_TIMEOUT_SEC
             )
         except Exception as e:
             self.connecting = False
-            self.log(f"Connect call exception: {e}")
-            self.schedule_retry(RETRY_INTERVAL_SEC)
+            self.log(f"Connect call exception: {e}. Passive accept-list listening active.")
 
     def on_properties_changed(self, interface, changed, invalidated, path):
         if interface == "org.bluez.Device1" and path == KEYBOARD_PATH:
@@ -148,37 +185,45 @@ class KeyboardAutoConnector:
                 self.log(f"Katana S K2 Connected property changed -> {connected}")
                 if connected:
                     self.connecting = False
-                    self.stop_retry_timer()
-                    GLib.timeout_add_seconds(1, self.restart_xremap)
+                    GLib.timeout_add_seconds(1, self.ensure_xremap)
                 else:
-                    self.log("Katana S K2 disconnected. Initiating auto-reconnect...")
-                    GLib.timeout_add_seconds(1, self.connect)
+                    self.log("Katana S K2 entered idle sleep/disconnected. Adapter passive scanning ready.")
 
         elif interface == "org.bluez.Adapter1":
             if "Powered" in changed and bool(changed["Powered"]):
-                self.log("Bluetooth adapter powered ON. Triggering connect...")
-                GLib.timeout_add_seconds(1, self.connect)
+                self.log("Bluetooth adapter powered ON. Triggering initial connect...")
+                GLib.timeout_add_seconds(1, self.connect_once)
+
+    def on_interfaces_added(self, path, interfaces):
+        if path == KEYBOARD_PATH and "org.bluez.Device1" in interfaces:
+            self.log("Katana S K2 interface registered on D-Bus.")
+            dev_props = interfaces["org.bluez.Device1"]
+            if bool(dev_props.get("Connected", False)):
+                GLib.timeout_add_seconds(1, self.ensure_xremap)
+            else:
+                GLib.timeout_add_seconds(1, self.connect_once)
 
     def on_prepare_for_sleep(self, going_to_sleep):
         if not going_to_sleep:
-            self.log("System resumed from sleep. Triggering connect in 1s...")
-            GLib.timeout_add_seconds(1, self.connect)
+            self.log("System resumed from sleep. Triggering initial connect in 1s...")
+            GLib.timeout_add_seconds(1, self.connect_once)
 
 def main():
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     connector = KeyboardAutoConnector()
 
     if not connector.is_connected():
-        connector.log("Keyboard not connected at startup. Beginning connect loop.")
-        connector.connect()
+        connector.log("Keyboard not connected at startup. Attempting initial connect...")
+        connector.connect_once()
     else:
-        connector.log("Keyboard already connected at startup. Staying dormant.")
+        connector.log("Keyboard already connected at startup.")
+        GLib.timeout_add_seconds(1, connector.ensure_xremap)
 
     loop = GLib.MainLoop()
     try:
         loop.run()
     except (KeyboardInterrupt, SystemExit):
-        connector.stop_retry_timer()
+        pass
 
 if __name__ == "__main__":
     main()
