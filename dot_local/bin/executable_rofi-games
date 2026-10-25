@@ -2,7 +2,7 @@
 # rofi-games / game launcher menu (Alt+g) powered by fuzzel.
 export PATH="$HOME/.local/bin:$PATH"
 
-options="ELDEN RING + LSFG (120 FPS)\nELDEN RING Randomizer (Reroll Seed)\nELDEN RING Fog Gate Randomizer (GUI)\nGrand Theft Auto IV + LSFG (165 FPS)\nDARK SOULS III + LSFG\nDS3 Randomizer Config (GUI)\nSteam library\nConfigure LSFG (GUI)\nKill game"
+options="Counter-Strike 2\nELDEN RING + LSFG (120 FPS)\nELDEN RING Randomizer (Reroll Seed)\nELDEN RING Fog Gate Randomizer (GUI)\nGrand Theft Auto IV + LSFG (165 FPS)\nDARK SOULS III + LSFG\nDS3 Randomizer Config (GUI)\nSteam library\nConfigure LSFG (GUI)\nKill game"
 REG="$HOME/.config/rofi/epic-games.list"
 if [ -f "$REG" ]; then
     while IFS='|' read -r title _ _; do
@@ -10,7 +10,7 @@ if [ -f "$REG" ]; then
     done < "$REG"
 fi
 
-chosen=$(echo -e "$options" | fuzzel --dmenu --prompt "❯ " --width 38 --lines 10)
+chosen=$(echo -e "$options" | fuzzel --dmenu --prompt "❯ " --width 38 --lines 12)
 
 [ -z "$chosen" ] && exit 0
 
@@ -25,11 +25,12 @@ if [ -f "$REG" ]; then
 fi
 
 case "$chosen" in
+    *"Counter-Strike 2"*)   ( nohup env STEAM_DGPU=1 steam steam://rungameid/730 >/dev/null 2>&1 & ) ;;
     *"ELDEN RING + LSFG"*) ( nohup bash -c 'echo "=== $(date "+%F %T") Alt+g launch ===" >>/tmp/eldenring-lsfg.log; exec eldenring-lsfg >>/tmp/eldenring-lsfg.log 2>&1' & ) ;;
     *"Fog Gate"*)          ( nohup eldenring-fog-gui >/dev/null 2>&1 & ) ;;
     *"ELDEN RING Randomizer"*|*"ER Randomizer"*) ( nohup eldenring-randomizer-gui >/dev/null 2>&1 & ) ;;
     *"Grand Theft Auto IV"*) ( nohup env STEAM_DGPU=1 steam steam://rungameid/12210 >/dev/null 2>&1 & ) ;;
-    *"DARK SOULS III + LSFG"*) ( nohup mangohud darksouls3-run >/dev/null 2>&1 & ) ;;
+    *"DARK SOULS III + LSFG"*) ( nohup bash -c 'echo "=== $(date "+%F %T") Alt+g DS3 launch ===" >>/tmp/darksouls3.log; exec darksouls3-run >>/tmp/darksouls3.log 2>&1' & ) ;;
     *"DS3 Randomizer"*) ( nohup ds3-randomizer-gui >/dev/null 2>&1 & ) ;;
     *"Steam"*)          ( nohup env STEAM_DGPU=1 steam-workspace >/dev/null 2>&1 & ) ;;
     *"Configure LSFG"*) ( nohup ~/.local/bin/lsfg-vk-ui >/dev/null 2>&1 & ) ;;
