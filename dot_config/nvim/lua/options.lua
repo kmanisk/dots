@@ -95,9 +95,9 @@ vim.g.neovide_animation_fps = 100
 vim.g.neovide_scroll_animation_length = 0.3
 vim.g.neovide_cursor_animation_length = 0.05
 vim.g.neovide_cursor_trail_size = 0.5
--- VictorMono Nerd Font matches ~/.config/foot/foot.ini
-o.guifont = "VictorMono Nerd Font:h28"
-vim.opt.linespace = 12
+-- Iosevka Nerd Font Mono matches ~/.config/foot/foot.ini
+o.guifont = "Iosevka Nerd Font Mono:h22"
+vim.opt.linespace = 10
 
 -- Statusline highlights (theme-aware, refreshed on theme change)
 require("configs.statusline").setup()

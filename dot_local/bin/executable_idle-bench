@@ -280,7 +280,8 @@ def main():
                 'Idle Benchmark Completed',
                 f'CPU Avg: {avg_cpu:.2f}%\nRAM In-Use: {avg_mem:.0f} MB ({avg_mem/1024:.2f} GB / {final_mem["total"]:.0f} MB)'
             ], capture_output=True)
-            subprocess.Popen(['alacritty', '-e', 'sh', '-c', f'cat "{args.output}"; echo ""; read -p "Press Enter to close..."'])
+            term_bin = 'footclient' if subprocess.run(['which', 'footclient'], capture_output=True).returncode == 0 else 'foot'
+            subprocess.Popen([term_bin, 'sh', '-c', f'cat "{args.output}"; echo ""; read -p "Press Enter to close..."'])
         except Exception:
             pass
 

@@ -18,10 +18,10 @@ if $IPC_CMD -t get_tree 2>/dev/null | grep -E -q '"(class|app_id)":"btop"'; then
         $IPC_CMD '[app_id="(?i)^btop$"] focus, [class="(?i)^btop$"] focus' >/dev/null 2>&1
     fi
 else
-    # Not running: spawn single instance in floating Kitty (or fallback to Alacritty)
-    if command -v kitty >/dev/null 2>&1; then
-        exec kitty --class btop -e btop
+    # Not running: spawn single instance in floating Foot (footclient / foot)
+    if command -v footclient >/dev/null 2>&1; then
+        exec footclient --app-id=btop btop
     else
-        exec alacritty --class btop -e btop
+        exec foot --app-id=btop btop
     fi
 fi

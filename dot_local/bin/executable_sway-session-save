@@ -240,11 +240,11 @@ def normalize(cmd, pid=None, title=""):
         return ["brave-origin"]
     if "zed" in s:
         return ["zed"]
-    if "alacritty" in s:
+    if "foot" in s or "alacritty" in s:
         inner = detect_terminal_app(pid, title)
         if inner:
-            return ["alacritty", "-e"] + inner
-        return ["alacritty"]
+            return ["footclient"] + inner
+        return ["footclient"]
     base = Path(cmd[0]).name
     kept = [base] + [a for a in cmd[1:]
                      if "/tmp/" not in a and "socket" not in a.lower()]
@@ -256,8 +256,9 @@ def fallback_launch(win):
                         ("firefox", ["firefox"]),
                         ("librewolf", ["librewolf"]),
                         ("zed", ["zed"]),
-                        ("alacritty", ["alacritty"]),
-                        ("ghostty", ["ghostty"]),
+                        ("foot", ["footclient"]),
+                        ("alacritty", ["footclient"]),
+                        ("ghostty", ["footclient"]),
                         ("thunar", ["thunar"]),
                         ("steam", ["steam"])):
         if key in win["app_id"] or key in win["class"] or key in win["instance"]:

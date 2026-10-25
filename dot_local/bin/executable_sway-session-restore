@@ -379,8 +379,8 @@ def main():
     # so we never duplicate an app open elsewhere.
     if "--all" in args and not dry:
         if "1" not in restored_ws and not any(
-                t in c for c in present for t in ("alacritty", "ghostty")):
-            run(sock, "workspace number 1; exec --no-startup-id alacritty")
+                t in c for c in present for t in ("foot", "footclient")):
+            run(sock, "workspace number 1; exec --no-startup-id footclient")
             total += 1
         if "2" not in restored_ws and not any(
                 b in c for c in present

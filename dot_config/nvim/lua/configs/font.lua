@@ -11,9 +11,9 @@
 
 local M = {}
 
-local default_size = 28
+local default_size = 22
 local current_size = default_size
-local font_name = "VictorMono Nerd Font"
+local font_name = "Iosevka Nerd Font Mono"
 
 local function is_gui()
     return vim.g.neovide ~= nil or vim.fn.has("gui_running") == 1
