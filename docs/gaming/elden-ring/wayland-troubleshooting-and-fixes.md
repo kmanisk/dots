@@ -58,10 +58,12 @@
 - Test runners removed (Sep 17 cleanup). Rofi is LSFG-free.
 - Notes for future use: v2 pacing is Vsync-only (cap base rate ~40 in-game or `DXVK_CONFIG="dxgi.maxFrameRate=40"`); bad frametimes → `ENABLE_GAMESCOPE_WSI=0`; old log spam `(lsfg-vk) [ERROR]: Invalid profiles section` was the v1 conf lacking profiles — resolved by the v2 config.
 
-## 7. FPS cap (MangoHud)
+## 7. FPS cap (MangoHud) — resolved, limiter retired
 
-- **Symptom:** FPS uncapped past 60. **Cause:** global MangoHud `fps_limit=120,60,165` defaults to the first entry (120) for every rofi-launched game.
-- **Fix:** per-game `~/.config/MangoHud/eldenring.exe.conf` with `fps_limit=60` (auto-picked by exe name, no launcher change). F8 still cycles; F9 toggles HUD.
+- **Original symptom / fix (history):** FPS rode past 60 because the old global MangoHud `fps_limit=120,60,165` defaulted to its first entry (120) for every rofi-launched game; the per-game `~/.config/MangoHud/eldenring.exe.conf` pinned `fps_limit=60` as the stopgap.
+- **Current state (2026-10-17+):** no `fps_limit` is defined in any active config — the global config, the live ER config (`.../Game/MangoHud.conf` via `MANGOHUD_CONFIGFILE`), and the DS3 config are all limiter-free. Frame pacing is owned by the engine (60 base) and LSFG-VK (`pacing_mode = "vsync"`, 2x → 120).
+- The retired `eldenring.exe.conf` stays on disk as a dormant fallback (it still carries `fps_limit=60`); nothing in the normal launch path reads it.
+- HUD keys: `Alt+3` toggle, `Alt+4` font presets, `Alt+5` position — full list in `docs/gaming/README.md` §5.
 
 ## 8. Input-focus FPS drops — RESOLVED, stable 60 FPS
 
@@ -76,10 +78,11 @@
 
 ## 9. CS2 Wayland setup (separate game, kept intact)
 
-- Consolidated Wayland launcher `~/.local/bin/cs2-launch`: native Wayland SDL3 (`SDL_VIDEO_DRIVER=wayland`), `SDL_VIDEO_WAYLAND_SCALE_TO_DISPLAY=1` for 1.2× fractional scale, NVIDIA offload (`LIBVA_DRIVER_NAME=iHD`), P-core pinning `taskset -c 0-11`, `gamemoderun`, optional Gamescope 4:3 stretch (`--stretch` / `CS2_STRETCH=1`).
+- Legacy X11 launcher `~/.local/bin/cs2-launch` (xrandr 1344x1008, polybar hide, picom kill) is i3-only — segfaults under Wayland. **Untouched.**
+- Wayland launcher `~/.local/bin/cs2-launch-wayland`: native Wayland SDL3 (`SDL_VIDEO_DRIVER=wayland`), `SDL_VIDEO_WAYLAND_SCALE_TO_DISPLAY=1` for 1.2× fractional scale, NVIDIA offload (`LIBVA_DRIVER_NAME=iHD`), P-core pinning `taskset -c 0-11`, `gamemoderun`, optional Gamescope 4:3 stretch (`--stretch` / `CS2_STRETCH=1`).
 - KWin: `[Wayland] AllowTearing=true` in `~/.config/kwinrc`, reloaded via D-Bus.
 - In-game (`cs2_video.txt`): exclusive fullscreen, 165Hz numerator/denominator.
-- Steam launch options: `$HOME/.local/bin/cs2-launch %command%` (+ `--stretch` variant).
+- Steam launch options: `$HOME/.local/bin/cs2-launch-wayland %command%` (+ `--stretch` variant).
 
 ## 10. Environment watch-items
 

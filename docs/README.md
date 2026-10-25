@@ -20,7 +20,8 @@ docs/
 ├── virtualization/      # Waydroid NVIDIA container (Venus/vtest) & Windows VFIO setup
 ├── bootloader/          # Dark Souls boot stack (GrubSouls III menu, DS3 Plymouth)
 ├── personal/            # Personal engineering guides (networking, Btrfs FHS architecture)
-├── projects/            # Native Linux workstation software (ytui, micstudio, legendary-tui, rogtui)
+├── projects/            # Native Linux workstation & web software (tele, rogtui, micstudio, watchparty, sentinel, fetchit, ytui, legendary-tui)
+├── archive/             # Retired/superseded subsystems (tgt Telegram TUI, intel-hardware-vibrance)
 └── future/              # Future roadmap & optimization plans
 ```
 
@@ -28,10 +29,13 @@ docs/
 
 ## Category Overview
 
+Current cross-system verification: [Workstation audit, 2026-10-23](system/workstation-audit-2026-10-23.md).
+It distinguishes measured runtime state, implemented fixes, and remaining limitations.
+
 ### 1. [Audio (`docs/audio/`)](file:///home/onyx/docs/audio)
 - [`AUDIO_ARCHITECTURE.md`](file:///home/onyx/docs/audio/AUDIO_ARCHITECTURE.md) (or `README.md`) — Complete architectural specification of the native PipeWire audio stack:
   - Single persistent virtual microphone (`ghelper-audio`, Priority 3000) with in-chain DPDFNet neural denoising (45 dB floor), 80 Hz HPF, broadcast EQ, and anti-shout limiting.
-  - MicStudio v1.0.0 Ratatui TUI & CLI controlling 27 voice models, 7 live audio controls, dual fullscreen spectrograph, and feedback-protected sidetone.
+  - MicStudio v1.0.1 Ratatui TUI & CLI controlling 27 voice models, 7 live audio controls, dual fullscreen spectrograph, and feedback-protected sidetone.
   - ASUS TUF DAX3 Dolby Speaker DSP (`40-asus-speakers.conf` / `dax-speaker-route.lua`) with factory IR convolution (`Dolby_Speaker.irs`) and multi-voicing profiles (`music`, `dynamic`, `balanced`, `custom`, `experimental`).
   - Device-Agnostic Dolby Headphones (`42-dolby-headphones.conf`) with dialogue clarity EQ, AutoGain, and multiband dynamics.
   - Competitive gaming low-latency bypass (`sink.peace_gaming` / `gaming-audio-route.lua`).
@@ -61,7 +65,7 @@ docs/
 - [`xremap.md`](file:///home/onyx/docs/system/xremap.md) — 60% keyboard architecture, CapsLock virtual layer, and full remap reference.
 - [`terminal-shell.md`](file:///home/onyx/docs/system/terminal-shell.md) — Fish shell configuration, Alacritty and Kitty terminals, Starship prompt, and helper scripts.
 - [`foot.md`](file:///home/onyx/docs/system/foot.md) — Foot terminal emulator architecture, client-server benchmarks, and memory comparison.
-- [`tgt.md`](file:///home/onyx/docs/system/tgt.md) — tgt Telegram TUI: build architecture, full media features, minimal memory tuning, and Sway/Foot integration.
+- [`tele-sixel.md`](system/tele-sixel.md) — Tele Sixel source branch, correctness fixes, validation, and upstream contribution status (PR #318). Centralized Tele hub: [`docs/projects/tele/`](file:///home/onyx/docs/projects/tele/README.md).
 - [`neovim.md`](file:///home/onyx/docs/system/neovim.md) — Custom NvChad setup, base46 disk cache, keybindings, runners, and plugins.
 - [`file-management.md`](file:///home/onyx/docs/system/file-management.md) — Yazi terminal file manager, Zed typography standards & Vim chords, and Thunar.
 - [`rclone.md`](file:///home/onyx/docs/system/rclone.md) — On-demand Google Drive mount, zero idle RAM, fstab automounting, and storage taxonomy.
@@ -91,11 +95,17 @@ docs/
 - [`linux-filesystem-btrfs.md`](file:///home/onyx/docs/personal/linux-filesystem-btrfs.md) — Linux Root Filesystem, Filesystem Hierarchy Standard (FHS), and Btrfs subvolume architecture reference.
 
 ### 10. [Projects (`docs/projects/`)](file:///home/onyx/docs/projects)
-- [`README.md`](file:///home/onyx/docs/projects/README.md) — Directory index of custom-built native Rust applications.
+- [`README.md`](file:///home/onyx/docs/projects/README.md) — Centralized directory index of custom-built applications with symlinked repository documentation.
+- **[Tele (`docs/projects/tele/`)](file:///home/onyx/docs/projects/tele/README.md)** — Terminal Telegram client (Bubble Tea) with upstream contributions: PR #318 (Sixel inline previews) and PR #321 (progressive range-based video streaming to mpv).
+- **[rogtui (`docs/projects/rogtui/`)](file:///home/onyx/docs/projects/rogtui/README.md)** — Hardware control center for ASUS TUF and ROG laptops (fan curves, MUX switch, power limits; v0.1.3 on crates.io).
+- **[MicStudio (`docs/projects/micstudio/`)](file:///home/onyx/docs/projects/micstudio/README.md)** — PipeWire virtual microphone (`ghelper-audio`), 27 voice models, DPDFNet neural denoising, live controls, and dual spectrograph (v1.0.1 on crates.io).
+- **[WatchParty (`docs/projects/watchparty/`)](file:///home/onyx/docs/projects/watchparty/README.md)** — Self-hostable synchronized video playback room with millisecond drift correction, live chat, and Rosé Pine interface.
+- **[Sentinel (`docs/projects/sentinel/`)](file:///home/onyx/docs/projects/sentinel/README.md)** — High-throughput API health, latency, and uptime telemetry monitoring platform with WebSocket streaming.
+- **[FetchIt (`docs/projects/fetchit/`)](file:///home/onyx/docs/projects/fetchit/README.md)** — High-performance TUI download manager and multi-pattern CDN resolver with aria2c and auto-unarchive.
 - **[ytui & ytui-gui (`docs/projects/ytui/`)](file:///home/onyx/docs/projects/ytui/README.md)** — Keyboard-first YouTube client combining Ratatui TUI and GTK4 GUI with embedded libmpv, SponsorBlock, and RYD.
   - [`future.md`](file:///home/onyx/docs/projects/ytui/future.md) — SmartTube parity matrix, ExoPlayer-style chunk streaming architecture, and GUI roadmap.
-- **[MicStudio (`docs/projects/micstudio/`)](file:///home/onyx/docs/projects/micstudio/README.md)** — PipeWire virtual microphone (`ghelper-audio`), 27 voice models, DPDFNet neural denoising, live controls, and dual spectrograph.
 - **[legendary-tui (`docs/projects/legendary-tui/`)](file:///home/onyx/docs/projects/legendary-tui/README.md)** — Fast Ratatui TUI frontend for Legendary Epic Games Store CLI with background queue and cloud saves.
-- **[rogtui (`docs/projects/rogtui/`)](file:///home/onyx/docs/projects/rogtui/README.md)** — Hardware control center for ASUS TUF and ROG laptops (fan curves, MUX switch, power limits).
+- **[launcher-runner-bridge (`docs/projects/launcher-runner-bridge/`)](file:///home/onyx/docs/projects/launcher-runner-bridge/README.md)** — Execution bridge chaining systemd user scopes, GameMode, Gamescope, and UMU Proton.
+- **[ssh-bootstrap (`docs/projects/ssh/`)](file:///home/onyx/docs/projects/ssh/README.md)** — Idempotent remote SSH setup over Tailscale for Windows and Linux.
 
 

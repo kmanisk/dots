@@ -128,20 +128,19 @@ preserve_swapchain_image_count = false
 
 ## 4. MangoHud Telemetry & Frame Pacing Configuration
 
-### 4.1 Dedicated Game Configuration (`~/.config/MangoHud/GTAIV.exe.conf`)
-```ini
-# Dedicated MangoHud config for GTA IV (Complete Edition)
-# Disables external MangoHud frame limiter so FusionFix can manage engine pacing & physics.
-fps_limit=0
-```
+### 4.1 Global Configuration (`~/.config/MangoHud/MangoHud.conf`)
+The global config is chezmoi-managed and protected with `chattr +i` — never edit it in place (use `chezmoi edit` / `chezmoi apply`). Current state (since 2026-10-17): minimal horizontal SteamOS-style HUD based on the Elden Ring layout — FPS/frametime → CPU → GPU → VRAM/RAM, compact, top-left, `pci_dev=0000:01:00.0` binding telemetry to the RTX 5050. No `fps_limit` is defined (FusionFix owns frame pacing), the overlay starts hidden (`Alt+3` toggles it), and logging is fully disabled. In-game keys (60% keyboard — no physical F-row): `Alt+3` HUD on/off | `Alt+4` font presets (hidden 15 / 20 / 30) | `Alt+5` position | `Alt+6` reset FPS metrics | `Alt+7` frame-cap toggle (no cap defined — no-op) | `Alt+8` reload config; MangoHud debounces hotkeys ~0.4 s, so pause between presses. It is the single source of truth for every game without a dedicated config; retired per-game overrides live in `~/.config/MangoHud/archive/20261017/`.
 
-### 4.2 Why `fps_limit=0` is Essential in MangoHud
+### 4.2 GTA IV Overrides
+GTA IV has no per-game MangoHud override anymore — the former `GTAIV.exe.conf` is archived under `~/.config/MangoHud/archive/20261017/`. The global config defines no frame limiter, so FusionFix keeps full control of engine pacing exactly as before.
+
+### 4.3 Why the MangoHud Frame Limiter Must Stay Off
 GTA IV's Rage Engine is notorious for tying internal game logic to frame tick timing:
 1. **Motorcycle Physics:** At uncapped or erratic frame rates, motorcycles lose downward traction, causing them to bounce uncontrollably over bumps.
 2. **Vehicle Suspension Jitter:** External frame limiters (MangoHud, Libstrangle, RTSS) apply thread sleep intervals outside the Direct3D presentation loop, causing the physics engine to receive uneven $\Delta t$ delta-time values.
 3. **The "Out of Commission" Helicopter QTE Bug:** During the final story mission, climbing into the helicopter requires tapping the spacebar. If an external limiter desyncs the physics loop, the game fails to register keypresses, making the mission impossible to complete.
 
-**The Solution:** MangoHud's limiter is disabled (`fps_limit=0`). Frame pacing is delegated entirely to **FusionFix** (`FpsLimitPreset = 12` in `plugins/GTAIV.EFLC.FusionFix.cfg`) and **DXVK** (`d3d9.maxFrameLatency = 1`, `d3d9.presentInterval = 0`), which operate inside the game's internal render loop.
+**The Solution:** MangoHud's limiter stays out of the picture — no `fps_limit` is defined in any active MangoHud config, so the overlay never paces frames. Frame pacing is delegated entirely to **FusionFix** (`FpsLimitPreset = 12` in `plugins/GTAIV.EFLC.FusionFix.cfg`) and **DXVK** (`d3d9.maxFrameLatency = 1`, `d3d9.presentInterval = 0`), which operate inside the game's internal render loop.
 
 ---
 
@@ -157,22 +156,25 @@ vkBasalt runs as a pure Vulkan compute post-processing layer inserted directly b
 # vkBasalt configuration for GTA IV Complete Edition
 # CAS (Contrast Adaptive Sharpening) + Vibrance (single-pass post-processing)
 
+toggleKey = Home
+enableOnLaunch = True
+
 effects = cas:vibrance
 
-casSharpness = 0.40
+# Balanced edge sharpening without artificial ringing or grain (scaled down from 1.0)
+casSharpness = 0.50
 
+# ReShade Vibrance effect (tuned to 0.75 in Vibrance.fx for rich, saturated colors)
 vibrance = /home/onyx/.config/vkBasalt/reshade-shaders/Shaders/Vibrance.fx
 reshadeTexturePath = /home/onyx/.config/vkBasalt/reshade-shaders/Textures
 reshadeIncludePath = /home/onyx/.config/vkBasalt/reshade-shaders/Shaders
-
-toggleKey = Home
 ```
 
 ### 5.3 Effect Tuning Breakdown
-* **`casSharpness = 0.40` (AMD Contrast Adaptive Sharpening):**
-  Applies non-linear edge sharpening based on local contrast. High-contrast edges (like neon sign borders and HUD text) receive subtle sharpening to avoid haloing, while low-contrast areas (road asphalt, building masonry, vehicle paint textures) receive aggressive detail recovery.
-* **`vibrance` (`Vibrance.fx`):**
-  Selectively boosts saturation on desaturated pixels while preserving skin tones. Synergizes with Solitude 3's deep obsidian nights, making Times Square / Star Junction neon signs, vehicle taillights, and streetlights pop vividly against dark asphalt.
+* **`casSharpness = 0.50` (AMD Contrast Adaptive Sharpening):**
+  Applies subtle non-linear edge sharpening based on local contrast. Decreased from the overly aggressive 1.0/0.72 baselines to eliminate pixel haloing and white shimmering, providing natural clarity on road textures and building facades.
+* **`vibrance = 0.75` (`Vibrance.fx`):**
+  Intelligently saturates desaturated pixels so that vehicles, graffiti, neon signage, and taillights pop with deep, colorful vibrancy (replicating modern Windows digital vibrance / ReShade presets) while keeping human skin tones natural and unburned.
 * **`toggleKey = Home`:** Allows instantaneous in-game toggling to audit raw vs. enhanced visual output.
 
 ---
@@ -326,9 +328,9 @@ Because all three color channels ($R, G, B$) scaled equally, **Solitude's exact 
 * **`Amb1` (Tokens 3, 4, 5):** Dynamic object ambient floor (illuminates vehicles, pedestrians, and dynamic props).
 
 #### The Only Three Hours Modified (Smooth Interpolation):
-* **`10PM` (22:00) — +4%:** Smooth ramp down from untouched 21:00 dusk into night.
-* **`Midnight` (00:00) — +7%:** Peak nighttime readability (governs 23:00 through 04:00).
-* **`5AM` (05:00) — +4%:** Smooth ramp up from night into untouched 06:00 dawn.
+* **`10PM` (22:00) — +8%:** Smooth ramp down from untouched 21:00 dusk into night.
+* **`Midnight` (00:00) — +14%:** Peak nighttime readability (governs 23:00 through 04:00, preventing black crush on dark asphalt, vehicle models, and alleys while retaining obsidian skies).
+* **`5AM` (05:00) — +8%:** Smooth ramp up from night into untouched 06:00 dawn.
 * **`6AM` through `9PM` (06:00 → 21:00):** **100% bit-for-bit identical to original Solitude.** Daytime, sunrise, sunset, and twilight are completely untouched.
 
 ### 8.4 Exhaustive Before vs. After Values (All 8 Gameplay Weathers)
@@ -500,6 +502,8 @@ FusionFix loads directories in `GTAIV/update/` in **strict alphanumeric ascendin
 ```
 GTAIV/update/
 ├── 0.libertyunlocked/          <-- 18 enterable free-roam interiors & doors
+├── 1.ProjectLights/            <-- Project Lights (DayL Modloader Build: Project.Lights.img 173MB + IV/TLAD/TBoGT sub-archives)
+├── 1 Statue of Liberty/        <-- NYC Statue of Liberty v2.0 (nj_liberty.img 2.5MB + nj_liberty.ide)
 ├── 1 Minor Mods/               <-- IAP assault rifle anims, console reticle
 ├── 1. Vegetation Mods/         <-- Project RevIVe HQ trees & textures
 ├── 2 Potential Grim/           <-- Grim's weapon models & texture fixes
@@ -507,10 +511,13 @@ GTAIV/update/
 ├── 3b Restored Vegetation/     <-- Cut console foliage placements
 ├── 3c Restored Graffiti/       <-- Cut graffiti across all boroughs
 ├── 4a Various Pedestrian Actions/ <-- VPA 1.8 (ambient.dat, default.ide)
-├── 4b Restored Pedestrians/    <-- Cut pedestrian models & variations
+├── 4b Restored Pedestrians/    <-- Restored Pedestrians (Gillian 4b baseline, RestoredPeds.img 128MB)
+├── 4c Euphoria Action Ragdolls/ <-- Standalone Overloader RPF2 packfile (pc/data/game.rpf -> taskparams.txt)
 ├── 5 Higher Resolution Misc Pack/ <-- HD pick-ups, signs, decals
-├── 6a Traffic Parameters/      <-- New Game Parameters 2.3.5 (cargrp.dat)
+├── 5b HD Weapons Pack/         <-- High-definition weapon models & textures
+├── 6a Traffic Parameters/      <-- New Game Parameters 2.3.5 (cargrp.dat, pedgrp.dat)
 ├── 6b Fidelity Popcycle/       <-- Fidelity Popcycle 1.0 (24-hr population cycle)
+├── 6c CoPPoT/                  <-- CoPPoT 2.0.1 (IV/TLAD/TBoGT handling.dat vehicle physics corrections)
 ├── 7 Characters Fixes/         <-- Storyline character mesh & texture repairs
 ├── 8 Console Visuals/          <-- Console pedestrian lighting & foliage shading
 ├── 9 Project Glass/            <-- 274 MB cubemap glass reflections
@@ -518,10 +525,14 @@ GTAIV/update/
 ├── Ash_HiRes_VehiclesPack/     <-- HRVP 2.4 15th Anniversary vehicle pack
 ├── CP,Shvab,Ash_GTAIV.EFLC.CityPlates/ <-- Era-accurate license plates
 ├── GTAIV.EFLC.FusionFix/       <-- FusionFix core engine overrides
+├── Ockky Blood/                <-- Ockky's Better Blood Pack (fxprojtex.wtd, peddamage.wtd, bloodFx.dat)
 ├── Restored Trees Position/    <-- Attramet tree anti-clipping WPLs
+├── VanillaFriendly.IVLane/     <-- IV Lane Vanilla Friendly (VanillaFriendly.IVLane.img 1.31 GB + TLAD/TBoGT)
 ├── Various Fixes/              <-- VariousFixes.img (818 MB core map & collision fixes)
-├── common/data/                <-- Controls, default0.cfg overrides
-└── pc/                         <-- Direct path overrides (gtxd.img, ext_veg.img, timecyc.dat)
+├── common/data/                <-- Controls, Ambient.dat, default.ide, visualsettings.dat
+├── pc/                         <-- Direct path overrides (gtxd.img 58MB, ext_veg.img, timecyc.dat pristine Solitude 3)
+├── TLAD/                       <-- Episode 1 overrides (visualsettings.dat, maps, playerped.rpf HD Johnny 24MB)
+└── TBoGT/                      <-- Episode 2 overrides (visualsettings.dat, carcols.dat, playerped.rpf HD Luis 35MB)
 ```
 
 ### 9.2 Active Plugins Inventory (`GTAIV/plugins/` & Root)
@@ -538,6 +549,92 @@ GTAIV/update/
 | `aCompleteEditionHook.asi` | `GTAIV/plugins/` | v0.4 | Bridges ScriptHook to Complete Edition 1.2.0.59 memory structures. |
 | `ScriptHook.dll` | `GTAIV/` (Root) | v0.5.1 (336 KB)| Pure C++ ScriptHook binary. |
 | `Liberty's Legacy.asi` | `GTAIV/plugins/` | v2.4.1 | Native trainer, vehicle neon underglow, RGB paint tuning. |
+
+### 9.3 Physical Handling & Ragdoll Overhauls (CoPPoT 2.0.1 & Euphoria Action Ragdolls 1.1)
+
+#### 9.3.1 CoPPoT 2.0.1 (Correction of Physical Parameters of Transport)
+* **Author / Release:** eyZNrcX4 ([Nexus Mods #714](https://www.nexusmods.com/gta4/mods/714)), updated September 15, 2026.
+* **Architecture:** Modifies vehicle dynamics via `handling.dat` across GTA IV base and EFLC episodes.
+* **Installation via Fusion Overloader:**
+  * `update/6c CoPPoT/common/data/handling.dat` (41,512 bytes)
+  * `update/6c CoPPoT/TLAD/common/data/handling.dat` (13,034 bytes)
+  * `update/6c CoPPoT/TBoGT/common/data/handling.dat` (15,619 bytes)
+* **Mechanics & Improvements:**
+  * Stiffened vehicle suspension curves eliminate excessive body roll while preserving authentic physics.
+  * Increased dent and crumple susceptibility without destabilizing vehicle collision meshes.
+  * Enhanced bus braking deceleration curves to resolve vanilla under-braking.
+  * Rebalanced acceleration profiles for Blista Compact and DF8-90.
+  * Corrected drivetrain assignments (FWD/RWD/AWD) on misconfigured vanilla models.
+  * Enabled Anti-lock Braking System (ABS) flags on appropriate modern vehicles.
+  * Stiffened motorcycle front/rear suspension dampening.
+  * Adjusted durability and weight distributions (including enhanced Squalo boat durability).
+  * Configured proper off-road handling flags for SUVs and trucks.
+* **Stability Invariant:** Operates purely through float adjustments in `handling.dat`. Adds **zero** model slots, requires `ExtendedLimits = 0`, and introduces zero heap allocation overhead.
+
+#### 9.3.2 Euphoria Action Ragdolls 1.1 (RPF2 Overloader Virtualization)
+* **Author / Release:** Clayssinck ([Nexus Mods #364](https://www.nexusmods.com/gta4/mods/364)).
+* **Engine Target:** NaturalMotion Euphoria physics engine parameters (`taskparams.txt`).
+* **Physics Tuning:** Modifies 18 key behavioral parameters (e.g. `grabBodyStiffness` 10.0 → 10.9, `braceLegStiffness` 12.0 → 15.5, `balanceBodyStiffness` 12.0 → 14.6, `shotLooseness` 1.0 → 0.1). Prevents instant ragdoll limpness upon bullet impact, producing realistic staggering, stumbling, grabbing, and ground reactions.
+* **Engine Architecture & Disassembly:**
+  * In `GTAIV.exe` (Complete Edition 1.2.0.59), the engine binary contains the hardcoded string `platform:/data/game.rpf` at virtual address `0xce0ae3`.
+  * During engine startup, `fiPackfile::Mount` maps `platform:/data/game.rpf` to `pc/data/game.rpf` and mounts it as `tp:/`, subsequently reading `tp:/data/taskparams.txt`.
+  * `game.rpf` is an **RPF2** format archive (header magic `0x32465052`, 34,816 bytes) containing exactly three Table of Contents entries: `/` (root directory), `data` (directory), and `taskparams.txt` (file, 28,716 bytes).
+  * The TOC (offset `0x800`) and the data payload (offset `0x1000`) are encrypted with **16 rounds of AES-128-ECB** using the CE 1.2.0.59 AES key (`0xC5B73C`).
+* **Overloader Virtualization Methodology:**
+  * Rather than modifying or replacing the vanilla archive at `pc/data/game.rpf` (which risks corruption and breaks baseline integrity), a bit-perfect, AES-128-ECB encrypted RPF2 packfile containing modded `data/taskparams.txt` was programmatically compiled.
+  * Deployed into Fusion Overloader at:
+    * `update/4c Euphoria Action Ragdolls/pc/data/game.rpf` (34,816 bytes)
+    * `update/pc/data/game.rpf` (34,816 bytes)
+  * Ultimate ASI Loader (`dinput8.dll`) hooks `CreateFileA`/`W`. When the engine calls `fiPackfile::Mount` for `pc/data/game.rpf`, Overloader redirects the file descriptor to the virtualized RPF2 packfile.
+  * **Vanilla Integrity:** The original `GTAIV/pc/data/game.rpf` remains 100% pristine and untouched (SHA256: `43f73dfa00f21a3da2b7d67ad3aa97a669e7710db6e0b09084d4051e71db30a2`).
+
+#### 9.3.3 Ockky's Better Blood Pack (Nexus #785)
+* **Author / Release:** Ayanami45 ([Nexus Mods #785](https://www.nexusmods.com/gta4/mods/785)), v0.5.
+* **Purpose:** Enhanced, realistic blood splatter decals and pedestrian wound exit effects.
+* **Overloader Virtualization:**
+  * `update/Ockky Blood/pc/textures/fxprojtex.wtd` (21,405,814 bytes) — Blood impact projection decals.
+  * `update/Ockky Blood/pc/textures/peddamage.wtd` (884,901 bytes) — High-detail pedestrian bullet exit wounds.
+  * `update/Ockky Blood/common/data/effects/bloodFx.dat` (22,033 bytes) — Decal particle scattering and pooling tables.
+* **Screen Droplet Filtering:** Screen-space blood splashes disabled via `BloodDrops = 0` in `plugins/GTAIV.XboxRainDroplets.ini`, ensuring all 3D world decals remain intact without camera clutter.
+
+#### 9.3.4 GTA IV Trilogy HD Upscaled Protagonists (Nexus #258)
+* **Author / Release:** B Dawg ([Nexus Mods #258](https://www.nexusmods.com/gta4/mods/258)), v1.0.
+* **Architecture & Clean Replacement:**
+  * **LURP Niko Removal:** Existing 251 MB LURP archive (`update/pc/models/cdimages/playerped.rpf`) cleanly removed to prevent mesh conflicts and memory bloat.
+  * **Niko Bellic:** `GTAIV/pc/models/cdimages/playerped.rpf` replaced with 147 MB HD upscaled pack (original backed up at `/home/onyx/backup_gta4_pre_three_mods/playerped.rpf`).
+  * **Johnny Klebitz:** Virtualized via Overloader at `update/TLAD/pc/models/cdimages/playerped.rpf` (24 MB).
+  * **Luis Lopez:** Virtualized via Overloader at `update/TBoGT/pc/models/cdimages/playerped.rpf` (35 MB).
+* **Stability Invariant:** Operates cleanly with `ExtendedLimits = 0`. Zero texture distortion or head clipping.
+
+#### 9.3.5 IV Lane Vanilla Friendly & Legacy IV-LANE History
+* **Current Active Road Mod:** **IV Lane Vanilla Friendly - Modloader Version (IV & EFLC)**
+  * **Authors:** DayL & dhruvrock8 ([GTAInside Vanilla Friendly HD Roads](https://www.gtainside.com/en/gta4/mods/186727-vanilla-friendly-hd-roads/)) based on the file structure established by UncleDisco.
+  * **Architecture & Files:**
+    * `update/VanillaFriendly.IVLane/VanillaFriendly.IVLane.img` (1.31 GB)
+    * `update/VanillaFriendly.IVLane/TBoGT/TBoGT.VanillaFriendly.IVLane.img` (129 MB)
+    * `update/VanillaFriendly.IVLane/TLAD/TLAD.VanillaFriendly.IVLane.img` (325 MB)
+    * `update/pc/data/cdimages/gtxd.img` (58.8 MB global texture dictionary)
+  * **Aesthetic & Visual Improvements:** Combines dhruvrock8's recreated vanilla-accurate high-definition road surfaces with custom AI-upscaled textures for alleys, parking lots, and roadside surfaces. Recreates 1024px normal maps and parallax cobble surfaces without altering sidewalk geometry (preventing streaming budget spikes).
+
+* **Previous Road Mod (Purged):** **IV-LANE (DKT70 Road Textures Variant)**
+  * **Original Mod Source / Reference:** UncleDisco & DKTronics70 ([Nexus Mods #643](https://www.nexusmods.com/gta4/mods/643) / UncleDisco Discord).
+  * **Previous Footprint:** `update/1 IV-LANE/ivlane.img` (1.15 GB) + `gtxd.img` (166 MB).
+  * **Reason for Replacement:** While stable, the DKT70 variant featured dark high-contrast asphalt tarmac that deviated from GTA IV's authentic gritty NYC concrete/asphalt aesthetic. The new Vanilla Friendly edition faithfully restores the original art style at high resolution.
+  * **Cleanup:** The old `update/1 IV-LANE/` directory and local staging backup (`~/backups/ivlane_original_20260927/`, 1.5 GB) were completely purged to reclaim NVMe storage.
+
+#### 9.3.6 Project Lights (DayL Modloader Build & 2DFX Corona Integration)
+* **Author / Release:** DayL & ChunkLeChuck ([DayL Discord Early Access / Nexus](https://next.nexusmods.com/profile/ChunkLeChuck)).
+* **Purpose:** Overhauls illumination across 500+ world models (gas stations, neon signs, building windows with emissive textures, subway station entrances, street lamps, and industrial lights), casting dynamic real-time shadows.
+* **Architecture & Files:**
+  * `update/1.ProjectLights/Project.Lights.img` (173 MB — global emissive meshes).
+  * `update/1.ProjectLights/IV/ProjectLightsIV.img` (38 MB — IV specific meshes).
+  * `update/1.ProjectLights/TBoGT/ProjectLightsTBoGT.img` (26 MB — Ballad of Gay Tony meshes).
+  * `update/1.ProjectLights/TLAD/ProjectLightsTLAD.img` (35 MB — The Lost and Damned meshes).
+  * `update/pc/data/maps/props/` (`industrial.ide`, `lights.ide`, `lamppost.ide`, `traffic.ide`, `works.ide`, `amenitie.ide`, `misc.ide` — custom 2DFX coronas, draw distances, and night flash flags).
+* **Linux/Proton Invariants:**
+  * **No Loose Folders:** Uses the official compiled Modloader edition rather than loose folders imitating `.img` archives, avoiding Fusion Overloader archive limit corruption.
+  * **Omitted `VolumetricLights.asi`:** Excluded the low-level D3D9 hook script (`safetyhook`) which triggers crashes and micro-stuttering under DXVK/Wine.
+  * **Synergy:** Harmonizes with Solitude 3 v1.1.5 and vkBasalt Vibrance, providing vivid nocturnal light cones against obsidian tarmac.
 
 ---
 
@@ -606,6 +703,36 @@ Every failed mod audited during this project was reverse-engineered to identify 
 * **Failure Symptom:** Hard crash on boot.
 * **Root Cause Analysis:** The author explicitly states it requires downpatching to 1.0.7.0/1.0.8.0 and a new game save. The mod bundles `xlive.dll`, requires `scenariosmod.asi` (which requires ZMenu, throwing Error 998 on CE), and packages `fastman92 limit adjuster` (which violates our `ExtendedLimits=0` invariant).
 
+### 10.12 PRGS 3.1 Gun Sounds (Rage Audio Engine Stack Buffer Overrun `0xc0000409`)
+* **Mod Audited:** PRGS 3.1 (Nexus #437) RPF3 audio replacements (`resident.rpf`, `EP1_SFX.rpf`, `EP2_SFX.rpf`, `sounds.dat15`).
+* **Failure Symptom:** Game crashes during initial startup sequence before rendering the main menu. Rockstar Games Launcher logs: `Exit code 0xc0000409 indicates a fatal game exit (reason: Unknown Error Code)`. Steam console logs: `free(): corrupted unsorted chunks`. `scripthook.log` halts immediately at `Dynamic (1.2.0.59)` before launching any script threads.
+* **Root Cause Disassembly & Analysis:**
+  1. *Stack Cookie Failure (`0xc0000409`):* `0xc0000409` is `STATUS_STACK_BUFFER_OVERRUN` (`FAST_FAIL_STACK_COOKIE_CHECK_FAILURE`). In Complete Edition 1.2.0.59, the Rage Sound Engine allocates fixed-size internal memory buffers for preloading resident sound bank descriptors.
+  2. *Descriptor Overflow:* PRGS modified the sound banks drastically (`EP2_RESIDENT` grew 6x from 520 KB to 3.3 MB; wave table slot mappings and tails data were modified). When the 32-bit audio parser reads these sound banks, it overruns the static descriptor buffer, corrupts the stack canary, and triggers an immediate fast-fail crash.
+* **Resolution:** Completely purged all `update/*/pc/audio/` directories. Stock RPF3 audio preserved intact.
+
+### 10.13 Winter Pedestrians 1.0 & Restored Pedestrians 2.0 (32-Bit Pool Allocation & Glibc Heap Crash)
+* **Mods Audited:** Winter Pedestrians v1.0 (Nexus #856, `Winter Pedestrians.img` 360 MB) + Restored Pedestrians v2.0 (Nexus #911, `RestoredPeds.img` 115.5 MB).
+* **Failure Symptom:** Immediate crash on boot when combined with the active visual mod stack.
+* **Root Cause Analysis:**
+  1. *DirectX 9 32-Bit Address Space Exhaustion:* Under Wine/Proton, GTA IV has a strict ~3.5 GB address space limit. We keep `ExtendedLimits = 0` to prevent memory allocator crashes. Adding 475 MB of additional uncompressed pedestrian model meshes and collision data on top of HRVP 2.4, Jersey 1.3, and VariousFixes pushes the Direct3D 9 pool allocator beyond the 32-bit ceiling during asset pre-caching, causing Wine memory corruption (`corrupted unsorted chunks`).
+  2. *Unresolved Speech Archetypes:* Restored Pedestrians v2.0 introduces cut ped entries in `peds.ide` and `pedgrp.dat` (e.g. `M_M_EE_Heavy_02`, `move_m@old_c`) referencing audio voice tags that do not exist in Complete Edition 1.2.0.59 stock sound banks, causing unhandled null-pointer/buffer faults in the ped spawning engine.
+* **Resolution:** Removed `Winter Pedestrians.img`, `Scenarios.dat`, and custom ped data tables. Reverted `RestoredPeds.img` back to the stable Gillian Visual Pack baseline.
+
+### 10.14 b-bridge v0.1.2 (Out-of-Process D3D9 Render Pipeline Stutter)
+* **Mod Audited:** b-bridge v0.1.2 (Out-of-process D3D9 $\rightarrow$ D3D11 bridge for RTX Remix / 64-bit address expansion).
+* **Failure Symptom:** Severe framerate degradation (~29 FPS @ 34.6 ms vs. 60–100+ FPS native).
+* **Root Cause Disassembly & IPC Telemetry:**
+  1. *Synchronous Query Latency:* In heavily modded GTA IV (FusionFix console lighting + Solitude tonemapper + IV Lane roads), the engine issues ~15,058 D3D9 API calls per frame (~436,000 commands/sec).
+  2. *Lockstep Wait:* Synchronous occlusion and query requests (`Direct3DQuery9_LSS::GetData()`) across the 32-bit Wine game process and the 64-bit bridge server stalled the CPU render thread for ~22.6 ms per frame.
+  3. *Diminishing Headroom Returns:* Gained only +96 MB contiguous address space (864 MB $\rightarrow$ 960 MB) while sacrificing over 60% of runtime frame rate.
+* **Resolution:** Completely purged and rolled back to native in-process DXVK 2.6.2 GPLAsync.
+
+### 10.15 DayL's Vanilla+ Timecycle (Aesthetic Over-Saturation & Sky Inconsistency)
+* **Mod Audited:** DayL's Vanilla+ Timecycle (Nexus #396 / Discord Early Access).
+* **Observed Result:** Excessive yellow/warm haze, unnatural daytime saturation, and horizon brightness spikes that washed out urban contrast and conflicted with Project Lights 2DFX coronas.
+* **Resolution:** Purged. Reverted to author-tuned Solitude 3 v1.1.5 with relative mathematical ambient lift (+14% Midnight, +8% 10PM/5AM).
+
 ---
 
 ## 11. First Person Perspective (C06alt FPP v1.3) Reverse Engineering
@@ -654,29 +781,31 @@ Trainer Init = true
 ```
 
 * **Open / Close Menu:** `F11`
-* **Navigation:** `I` (Up), `K` (Down), `J` (Left), `L` (Right)
-* **Select / Confirm:** `U`
+* **Navigation:** `I` (Up), `K` (Down), `J` (Left / Decrease slider value), `L` (Right / Increase slider value)
+* **Select / Confirm:** `Enter` (`VK_RETURN` `0x0D` — patched at offset `0x43768` replacing hardcoded `0x55` `'U'`)
 * **Back / Cancel:** `O`
 * `Trainer Init = true`: Permanently suppresses the opening splash banner.
 
-### 12.2 Controller D-Pad Phone Conflict Disassembly
+### 12.2 Controller D-Pad Phone Conflict Disassembly & Binary Fix
 * **The Conflict:** Pressing `D-Pad Up` to navigate up the trainer menu causes Niko to simultaneously pull out his mobile phone, fighting the menu.
-* **Disassembly Breakdown:**
-  1. In `Liberty's Legacy.asi` (offsets `0x497f9` and `0x49da8`):
+* **Root Cause Disassembly:**
+  1. In `Liberty's Legacy.asi` (offsets `0x497f9` and `0x49806`):
      ```assembly
-     call 0x2acd0    ; checks native 0x019064ed (is_using_controller)
-     test %al, %al
-     je   0x49890    ; if false, it skips phone suppression!
-     mov  $0x1, %cl
-     call 0x32530    ; calls native 0x063c4508 (disable_player_phone(true))
+     0x497f9: call 0x2acd0    ; checks native 0x019064ed (is_using_controller)
+     0x497fe: test %al, %al
+     0x49800: je   0x49890    ; if false, branches over phone suppression!
+     0x49806: cmpl $0x0, 0x10190198 ; checks if trainer menu is open
+     0x4980d: setne %cl       ; cl = 1 if open, 0 if closed
+     0x49810: call 0x32530    ; calls native 0x063c4508 (disable_player_phone(cl))
      ```
-  2. Under Wine/Proton, `is_using_controller` frequently returns `false` or toggles between mouse/keyboard and gamepad states when cursor centering is active.
-  3. When `0x2acd0` returns false, Liberty's Legacy skips calling `disable_player_phone`.
-  4. GTA IV's background script `spcellphone.sco` intercepts the raw XInput `DPAD_UP` and pulls out the phone!
-* **The 3 Verified Working Solutions:**
-  * **Solution 1 (Advanced Nav In-Game):** Hold **`RB`** while pressing D-Pad (`RB + Up` jumps to top, `RB + Down` jumps to bottom). Holding `RB` inherently suppresses the standalone phone trigger.
-  * **Solution 2 (Steam Input Chord):** In Steam Controller Layout, create an Action Set or Mode Shift that remaps the D-Pad to Keyboard `I/K/J/L` when the trainer is open. GTA IV never receives `DPAD_UP`, eliminating the phone trigger.
-  * **Solution 3 (Downward Wrap Navigation):** Only `D-Pad Up` summons the phone. Scrolling down wraps from the bottom back to the top cleanly.
+  2. Under Wine/Proton, `is_using_controller` frequently returns `0` (`false`) when cursor centering is active.
+  3. Because `0x2acd0` returns `false`, the conditional jump `je 0x49890` was taken, completely skipping `disable_player_phone`.
+  4. GTA IV's background script `spcellphone.sco` intercepted the raw XInput `DPAD_UP` and pulled out the phone during menu navigation.
+* **Permanent Binary Fix Applied:**
+  * At file offset `0x49800`, the 6-byte jump `0f 84 8a 00 00 00` (`je 0x49890`) was patched to 6 NOP instructions (`90 90 90 90 90 90`).
+  * `Liberty's Legacy` now unconditionally evaluates `0x10190198` every frame:
+    * **Menu Open:** Calls `disable_player_phone(true)` — D-pad Up navigates up with zero phone interference.
+    * **Menu Closed:** Calls `disable_player_phone(false)` — D-pad Up functions normally for the phone.
 * **Controller Open Binding:** Keep `Controller binding = 0` (`RB + X`). Bumper combinations like `8` (`LB + RB`) fail to register reliably under Proton XInput.
 
 ---
@@ -741,6 +870,11 @@ Per system rules, any system, driver, or mod modification is bracketed with Btrf
 | **#38** | — | Sep 22 01:36 | Pre-timecycle night lift calibration. |
 | **#41** | **#564** | Sep 22 03:08 | `before-solitude-night-only-brightness`: Pristine Solitude 3 restoration baseline. |
 | **#42** | **#565** | Sep 22 03:10 | `after-solitude-night-only-brightness`: Master accepted Solitude 3 lifted nighttime state. |
+| **#49** | — | Sep 22 04:49 | `stable-baseline-after-reverting-pedestrians-and-prgs`: Stable baseline after reverting broken audio/ped mods. |
+| **#50** | — | Sep 22 05:01 | `before-installing-coppot-and-euphoria-action-ragdolls`: Clean baseline before physics/ragdoll deployment. |
+| **#51** | — | Sep 22 05:08 | `after-installing-coppot-and-euphoria-action-ragdolls`: Master verified deployment of CoPPoT 2.0.1 and Euphoria Action Ragdolls 1.1. |
+| **#52** | — | Sep 22 05:22 | `before-mangohud-blood-legacy-fixes`: Baseline before fixing blood sprites, Liberty's Legacy keys, and MangoHud. |
+| **#53** | — | Sep 22 05:27 | `after-mangohud-blood-legacy-fixes`: Master verified state with screen blood disabled, Enter key enabled, phone conflict binary patched, and MangoHud palette overhauled. |
 
 ### 14.2 Instant Rollback Commands
 To revert the system to the pristine baseline before the night ambient lift:
@@ -759,3 +893,98 @@ To verify that the active timecycle is the exact mathematically lifted Solitude 
 sha256sum "$HOME/.local/share/Steam/steamapps/common/Grand Theft Auto IV/GTAIV/update/pc/data/timecyc.dat"
 # Output must match: 63475d827a7e25f26e3794589d4b32f51f71faf0fc8102addf9ea4f0dad235e1
 ```
+
+---
+
+## 15. System Storage Cleanup Audit & Bloat Purge Log
+
+**Execution Date:** 2026-09-22 22:18 IST  
+**Snapper Baseline:** Snapshot `#58` (`before-clean-gta4-and-downloads`)
+
+### 15.1 Download Directory Cleanup (`~/Downloads` — Freed 14.61 GB)
+Removed 62 staged mod packages, temporary uncompressed directories, and incomplete browser downloads while keeping all non-mod documents:
+
+| Category | File / Folder Removed | Size | Notes |
+| :--- | :--- | :---: | :--- |
+| **Map Overhauls** | `EAST FILES-781-1-31-1780890791.rar` | 2.78 GB | Unpacked / active in `update/` |
+| **Map Overhauls** | `Liberty IV REDUX pack-933-v0-08-1772037088.zip` | 2.89 GB | Staged test archive |
+| **Map Overhauls** | `IVLANE/` (Directory) | 1.73 GB | Unpacked folder; compiled `.img` active in `update/1 IV-LANE/` |
+| **Map Overhauls** | `GTA4-DKT70 major overhaul v0.8 beta-643-0-8-1745046791.zip` | 319.41 MB | Texture pack archive |
+| **Map Overhauls** | `GTXD FILES-781-1-3-1780012224.rar` | 57.55 MB | Deployed to `update/` |
+| **Overloader Packs** | `Installation through Fusion Overloader 824 2.3 2026-09-14T13-36Z AOHlJDek.zip` | 1.97 GB | Gillian 2026 mod archive |
+| **Incomplete Download** | `Unconfirmed 910143.crdownload` | 2.60 GB | Incomplete browser download file |
+| **Character Overhauls** | `GTAIV Trilogy Characters Fixes (Steam Version & FusionFix).rar` | 791.29 MB | Deployed to `update/` |
+| **Character Overhauls** | `GTA IV Trilogy HD Protagonists-258-1-0-1676403788.7z` | 198.74 MB | Deployed to `playerped.rpf` & `update/` |
+| **Character Overhauls** | `playerped.rpf-394-1-5-1705943627.zip` | 213.35 MB | LURP Niko archive |
+| **Vehicle Addons** | `First Degree Grand Theft Auto Addon Pack (CE) 1025 1.2.6.7 2026-08-02T17-14Z VI32vY6V.7z` | 176.67 MB | Reverted (requires ExtendedLimits) |
+| **Vehicle Addons** | `Complete Edition Vehicle Pack-282-2-4-1776557186.zip` | 139.46 MB | Corrupted archive |
+| **Vehicle Addons** | `Lamborghini Huracan Libertywalk-156-1-1645763428.zip` | 29.12 MB | Standalone car test |
+| **Vehicle Addons** | `ZR450-862-1-1766674958.zip` | 1.74 MB | Standalone car test |
+| **Incompatible Mods** | `Winter Pedestrians - Fusion Overloader-856-1-0-1764601157.zip` | 340.50 MB | Reverted (exceeds 3.5GB ceiling) |
+| **Incompatible Mods** | `Installation through Fusion Overloader-911-2-0-1776348402.zip` | 111.61 MB | Restored Pedestrians (memory crash) |
+| **Incompatible Mods** | `PRGS 3.1 (The Reload Ricochets Update)-437-3-1-1735488201.rar` | 31.93 MB | Reverted (heap corruption crash) |
+| **Incompatible Mods** | `Bodyguards By MYHVN 1367 1 2026-09-05T17-32Z OESKhQyI.rar` | 7.1 KB | Reverted (.NET CE mismatch) |
+| **Scripts / Plugins** | `Project RevIVe.zip` | 119.94 MB | Deployed to `update/` |
+| **Scripts / Plugins** | `Liberty Unlocked By Scott1 1358 2 2026-09-07T14-29Z vUPgLVlE.zip` | 150.74 MB | Deployed to `update/` |
+| **Scripts / Plugins** | `Natural Timecycle By DayL 396 1.1.9 2026-07-10T00-01Z AOHlJik8.rar` | 62.68 MB | Standby |
+| **Scripts / Plugins** | `Liberty Rush v1.12-280-v1-12-1685890849.zip` | 46.07 MB | Staged |
+| **Scripts / Plugins** | `Props Restoration-834-1-3-1779383411.zip` | 36.56 MB | Deployed to `update/` |
+| **Scripts / Plugins** | `2k Trees and Vegetation Textures-165-E-g-1-0-1648850589.rar` | 29.44 MB | Deployed to `update/` |
+| **Scripts / Plugins** | `Grand Theft Auto IV Silence Mod v1.2-91-v1-2-1603391849.zip` | 27.17 MB | Audio fix |
+| **Scripts / Plugins** | `Ockky's Better Blood Pack-785-v0-5-1762037173.zip` | 21.05 MB | Deployed to `update/` |
+| **Scripts / Plugins** | `Animated Weapons 3.0 (Fusion Overloader)-641-3-0-1753570211.7z` | 18.62 MB | Weapons mod |
+| **Scripts / Plugins** | `Animated Weapons 3.0-641-3-0-1753570259.7z` | 16.93 MB | Weapons mod |
+| **Scripts / Plugins** | `Mini Game by Jitsuin aka Cheyron-968-1-0-1773617038.zip` | 14.29 MB | Minigame addon |
+| **Scripts / Plugins** | `[FusionOverloader] Improved Animations Pack.zip` | 11.93 MB | Deployed to `update/` |
+| **Scripts / Plugins** | `Complete Edition HD Weapons Pack-967-1-0-0-1773581258.7z` | 10.34 MB | Weapons pack |
+| **Scripts / Plugins** | `ProjectThunder.v2.2.1.zip` | 5.44 MB | Audio addon |
+| **Scripts / Plugins** | `Solitude 3-417-1-1-5-1777738809.rar` | 4.16 MB | Deployed to `update/` |
+| **Scripts / Plugins** | `1415985091_1415911009_liberty2.rar` (Statue of Liberty) | 2.69 MB | Deployed to `update/` |
+| **Scripts / Plugins** | `More NPCs Variety v1.0.4-819-1-0-4-1661507388.zip` + folder | 1.99 MB | Staged mod |
+| **Scripts / Plugins** | `Various Pedestrian Actions 843 1.8 2026-06-30T12-18Z JhI5BQ15.zip` | 1.11 MB | Deployed to `update/` |
+| **Scripts / Plugins** | `New Game Parameters For Transport And Traffic 616 2.3.5 2026-09-17T15-41Z Mo1Blw0Y.zip` | 0.93 MB | Traffic config |
+| **Scripts / Plugins** | `Beaten & Bruised.zip` | 0.77 MB | Ped damage textures |
+| **Scripts / Plugins** | `Correction Of Physical Parameters Of Transport 714 2.0.1 2026-09-15T17-23Z eyZNrcX4.zip` | 0.75 MB | Deployed to `update/` |
+| **Scripts / Plugins** | `Grass And Procedural Prop Fixes 1.2 1230 1.2 2026-09-05T12-02Z UWAC0IKk.zip` | 0.66 MB | Deployed to `update/` |
+| **Scripts / Plugins** | `Drive-By Pre-Aim V1.2 1362 1 2026-09-12T23-27Z Nshq8W2J.zip` | 0.54 MB | Deployed to `plugins/` |
+| **Scripts / Plugins** | `Improved Cover System 1407 1.0 2026-09-13T21-45Z K7emdosj.zip` | 0.52 MB | Standalone script |
+| **Scripts / Plugins** | `NoPickupGlow 1386 1.0 2026-09-08T03-05Z C9lRF6m9.zip` | 0.52 MB | Deployed to `plugins/` |
+| **Scripts / Plugins** | `GTAIV_Complete_Edition_Fix_0_4.zip` | 0.33 MB | CE Hook bridge |
+| **Scripts / Plugins** | `1275674702GTAIVScriptHook_0_5_1_Redist.zip` | 0.19 MB | ScriptHook redist |
+| **Scripts / Plugins** | `FirstPersonV1.3.zip` | 0.19 MB | Deployed to `GTAIV/` |
+| **Scripts / Plugins** | `QuickSaveIV 1.1-1119-1-1-1780254048.zip` | 0.14 MB | Deployed to `plugins/` |
+| **Scripts / Plugins** | `Blood 1245 1.2 2026-08-05T00-00Z sJViaDQS.7z` | 0.10 MB | Blood decals test |
+| **Scripts / Plugins** | `SimpleDotIV.zip` | 0.09 MB | Reticle mod |
+| **Scripts / Plugins** | `DriftIV - V3-395-3-0-1735237645.rar` | 0.08 MB | Handling mod |
+| **Scripts / Plugins** | `IVLongerLoadingScreen 1394 1 2026-09-10T11-34Z sJViaP6o.rar` | 0.07 MB | Staged mod |
+| **Scripts / Plugins** | `ChaosIV.zip` | 0.02 MB | Chaos mod |
+| **Scripts / Plugins** | `Fidelity Popcycle - by Chunk-405-1-0-1707891511.7z` | 0.02 MB | Deployed to `update/` |
+| **Scripts / Plugins** | `AVP-853-1-2-0-1765100126.rar` | 0.01 MB | Pedestrian actions |
+| **Scripts / Plugins** | `1373930578_assassination_mod.zip` | 0.01 MB | Deployed to `scripts/` |
+| **Scripts / Plugins** | `14240242_LibertyCityCustomsV1.2-22-1-2.rar` | 0.01 MB | Staged mod |
+| **Scripts / Plugins** | `1436392826_Weapon Flashlight for GTA IV.rar` | 4.2 KB | Weapon flashlight |
+| **Scripts / Plugins** | `Bank Robbery By MYHVN 1129 1 2026-09-07T21-37Z L0sSTv53.rar` | 4.2 KB | Robbery script |
+| **Scripts / Plugins** | `Euphoria Action Ragdolls-364-1-1-1699632885.zip` | 4.5 KB | Deployed to `update/` |
+| **Scripts / Plugins** | `Personal Vehicle-717-1-0-1753139691.zip` | 2.8 KB | Vehicle script |
+| **Scripts / Plugins** | `GTA V High Vehicle Camera For GTA IV V1.0 1223 1 2026-07-27T10-59Z 8aXDtPQv.zip` | 1.8 KB | Camera script |
+
+### 15.2 Redundant Game Root Directories & Loose Backups (`GTAIV/` — Freed 2.87 GB)
+* **`GTAIV/backup_pre_mods_update/`** (2,699.94 MB): Redundant snapshot of early `update/` tree.
+* **`GTAIV/backup_pre_4.9g_pack/`** (216.24 MB): Intermediate backup created prior to FusionFix 5.0.1.
+* **`GTAIV/backup_pre_mods_plugins/`** (15.29 MB): Redundant backup copy of `plugins/`.
+* **`GTAIV/vulkan.dll.stock`** (4.25 MB): Stock DXVK binary backup.
+* **`GTAIV/Liberty's Legacy.asi.orig`** (1.80 MB): Unpatched binary copy.
+
+### 15.3 Btrfs Snapper Maintenance Summary
+Per Rule 8 (Resource discipline and snapshot pruning):
+* **Pruned Snapshots:** 48 transient trial snapshots (`#10-15`, `#17-19`, `#21-29`, `#31-48`, `#50-51`, `#54-57`).
+* **Active Verified Baselines Retained:**
+  * `#8`: Initial baseline (`stable-baseline-cursor-bootchain-working`)
+  * `#9`: Pre-vehicle addon baseline (`before-gta4-first-degree-vehicle-addon`)
+  * `#16`: Full visual overhaul milestone (`stable-milestone-gta4-full-visual-overhaul-verified`)
+  * `#20`: Reverted controls baseline (`stable-baseline-after-reverting-controls-and-blood`)
+  * `#30`: Post-audit milestone (`after-final-audit-install-libertyunlocked-quicksave`)
+  * `#49`: Reverted peds baseline (`stable-baseline-after-reverting-pedestrians-and-prgs`)
+  * `#52` / `#53`: Blood & Liberty's Legacy binary fix milestone
+  * `#58`: Pre-clean snapshot (`before-clean-gta4-and-downloads`)
+

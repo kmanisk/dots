@@ -1,0 +1,1 @@
+/home/onyx/micstudio/docs/ARCHITECTURE.md

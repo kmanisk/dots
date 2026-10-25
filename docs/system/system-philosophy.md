@@ -29,9 +29,9 @@
 * **Direct Hardware Presentation:**
   * Sway directly bypasses compositing for fullscreen games via direct scanout (`presentation-time` protocol).
   * Direct rendering to physical panel refresh (165Hz) without double-buffering or XWayland translation penalty.
-* **Dual-GPU Isolation (Optimus D3cold Offloading):**
-  * Desktop, terminal, browser, and 2D surfaces stay on the Intel Raptor Lake iGPU (`LIBVA_DRIVER_NAME=iHD`).
-  * Dedicated NVIDIA RTX 5050 Mobile remains asleep in runtime D3cold power state until explicitly invoked with `gamemoderun prime-run %command%`.
+* **Direct dGPU MUX / Dynamic GPU Architecture:**
+  * Permanent display topology is `AsusMuxDgpu`: Dedicated RTX 5050 Mobile directly scans out `eDP-1` at native 165Hz with uncapped CS2 framerates.
+  * In `Hybrid` mode (switchable via `supergfxctl`): Desktop and 2D surfaces run on the Intel Raptor Lake iGPU (`LIBVA_DRIVER_NAME=iHD`), keeping the RTX 5050 Mobile suspended in runtime D3cold until explicitly offloaded (`prime-run`).
 * **P-Core CPU Pinning:**
   * Latency-critical titles (e.g., CS2) isolate execution to Intel Raptor Lake Performance cores (threads 0–11 via `taskset -c 0-11`), completely bypassing Efficiency cores to eliminate thread scheduling jitter.
 * **Btrfs nodatacow (`chattr +C`):**

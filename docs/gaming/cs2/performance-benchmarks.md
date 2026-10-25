@@ -2,6 +2,8 @@
 
 **Document Purpose:** Records official VProf/VProfLite benchmark telemetry, hardware configuration, execution environment, and engine launcher parameters on CachyOS.
 
+> **Update note (2026-10-17):** this report records the 2026-09-20 session as-is. The current setup runs 1600x1200 4:3 stretched via native Wayland SDL viewport stretch, launched through `/home/onyx/.local/bin/cs2-launch %command%` (the `%command%` token is mandatory; MangoHud is not used for CS2). Stored in-game config is now 1600x1200 + Fullscreen. Details: `wayland-43-stretched.md` §0.
+
 ---
 
 ## 1. Test Environment & System Specifications

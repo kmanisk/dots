@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# bt-katana — Instant connection helper for Katana S K2 keyboard
+set -euo pipefail
+
+MAC="CC:04:2E:90:66:02"
+
+echo "Connecting to Katana S K2 ($MAC)..."
+bluetoothctl unblock "$MAC" >/dev/null 2>&1 || true
+
+if timeout 6 bluetoothctl connect "$MAC"; then
+    echo "Katana S K2 connected successfully."
+    # Ensure xremap is attached
+    sleep 0.5
+    systemctl --user restart xremap.service
+    echo "xremap service restarted."
+else
+    echo "Connection attempt timed out. Ensure keyboard is powered on and tap a key to wake it from sleep."
+    exit 1
+fi

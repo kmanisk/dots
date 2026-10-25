@@ -7,10 +7,10 @@ Detailed machine specifications, architecture, and keybindings for the ASUS TUF 
 ## Machine Contract
 
 * **Display:** `eDP-1` (1920×1200 @ 165Hz native 1:1)
-* **GPU Offload:** Intel Raptor Lake iGPU (desktop session) + RTX 5050 Mobile (`prime-run` / `gamemoderun`)
+* **GPU Architecture:** Direct dGPU MUX (`AsusMuxDgpu`) — RTX 5050 Mobile directly drives eDP-1 with uncapped FPS (Hybrid mode supported via `supergfxctl`)
 * **Storage:** NVMe Btrfs root + `/mnt/Games` dedicated game filesystem
-* **Audio:** ALC256 Dolby Atmos filter chain (`swh-plugins`) + Dusky Audio Studio (RNNoise DSP)
-* **Boot:** UEFI → MineGRUB → Minecraft Plymouth → TTY1 autologin → Sway
+* **Audio:** Native PipeWire 1.6.9 + WirePlumber 0.5 (100% daemonless), `ghelper-audio` (MicStudio v1.0.0: DPDFNet neural suppression + 27 voice models), ASUS TUF DAX3 Speaker DSP (`Dolby_Speaker.irs`), and Dolby Headphones
+* **Boot:** UEFI → Dark Souls GRUB → Dark Souls Plymouth → TTY1 autologin → Sway
 
 ---
 

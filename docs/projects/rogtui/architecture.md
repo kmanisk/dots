@@ -1,0 +1,1 @@
+/home/onyx/Projects/rogtui/docs/asusctl-architecture-and-effects.md

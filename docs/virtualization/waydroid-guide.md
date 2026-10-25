@@ -1,187 +1,91 @@
-# Waydroid on CachyOS (Sway / Intel iGPU + RTX 5050 Mobile) — Implementation & Architecture Guide
+# Waydroid + NVIDIA on CachyOS — Setup & Troubleshooting Log
 
-A complete, battle-tested reference for setting up, rooting, configuring, and maintaining Waydroid on CachyOS rolling with Sway (Wayland), Magisk Delta root, Zygisk, LSPosed, and hybrid Intel/NVIDIA laptop architecture.
+Machine: ASUS TUF F16 · i5-13450HX · RTX 5050 Mobile (Blackwell) · Sway 1.12 Wayland · 1920×1200@165Hz · CachyOS (`linux-cachyos`), UFW active.
+Stack: `waydroid-nvidia-bin 0.1.2-1` (Venus over vtest socket) · LineageOS 20 GAPPS · `supergfxctl` mode `AsusMuxDgpu` (dGPU-only).
 
----
+## 0. Architecture (how the whole thing fits together)
 
-## 1. System Topology & Core Invariants
-
-- **Host Environment**: CachyOS rolling (Linux BORE/EEVDF), Sway / Wayland (`wayland-1`).
-- **Display Resolution & Density**: 1920×1200 @ 165 Hz (typical Waydroid surface 1920×1170 at 180 DPI).
-- **GPU Invariant (Critical)**:
-  - Waydroid UI, EGL, and Android hardware acceleration MUST run on the **Intel UHD iGPU** (`/dev/dri/renderD128` using `minigbm_gbm_mesa` and Mesa Intel Vulkan).
-  - The discrete NVIDIA RTX 5050 Mobile (`/dev/dri/renderD129`) MUST remain in runtime power management (`auto`, D3cold `suspended`). Waydroid must never be bound to the NVIDIA render node (doing so causes EGL surface crashes and burns ~15–20W battery idle).
-- **Binder IPC**: Uses native CachyOS kernel binderfs (`CONFIG_ANDROID_BINDERFS=y`). Binder devices exist at `/dev/binderfs/{binder, hwbinder, vndbinder}`. Do not install out-of-tree DKMS binder packages.
-- **Container Freeze Deadlock Fix**: In `/var/lib/waydroid/waydroid.cfg`, ensure:
-  ```ini
-  [waydroid]
-  suspend_action = none
-  ```
-  Without `suspend_action = none`, the container enters cgroup freezer when switching workspaces or focusing another window in Sway, causing session deadlocks and unresponsiveness.
-
----
-
-## 2. Directory Layout & Storage Architecture
-
-```text
-/var/lib/waydroid/
-├── images/
-│   ├── system.img          <-- LineageOS 20 GAPPS image (read-only base, ~1.5 GB)
-│   └── vendor.img          <-- LineageOS 20 Mainline vendor image (read-only base, ~800 MB)
-├── overlay/                <-- Persistent system modifications via tmpfs overlay
-│   └── system/etc/init/
-│       ├── bootanim.rc     <-- Magisk Delta early-boot post-fs-data hooks
-│       ├── media_mounts.rc <-- Mounts /data/media/0/* into /storage/emulated/0/*
-│       └── magisk/         <-- Magisk binaries (magisk64, magiskpolicy, su)
-└── waydroid.cfg            <-- Main Waydroid container configuration
-
-~/.local/share/waydroid/
-└── data/                   <-- Android /data partition (user apps, settings, Magisk DB)
-    ├── adb/
-    │   ├── magisk/         <-- Persistent Magisk runtime modules and scripts
-    │   ├── magisk.db       <-- Magisk SQLite database (Zygisk=1, superuser permissions)
-    │   ├── modules/
-    │   │   └── zygisk_lsposed  <-- LSPosed v1.9.3_mod Zygisk framework
-    │   └── lspd/           <-- LSPosed runtime config, daemon bridge, logs
-    └── misc/adb/adb_keys   <-- Authorized host ADB public key
+```
+┌─ HOST (CachyOS, Sway/Wayland on NVIDIA, MUX dGPU) ─────────────────────────┐
+│  wd-venus.service (user)          │  waydroid-container.service (system)    │
+│  virgl_test_server +             │  LXC container (LineageOS 20, Android 13│
+│  virgl_render_server ─real       │  GAPPS, kernel-shared, no VM)           │
+│  Vulkan─▶ RTX 5050 proprietary   │    binderfs (/dev/binder, hwbinder, vndbinder)   │
+│  driver                          │    veth eth0 ◄──► bridge waydroid0 (.1)  │
+│  socket: /run/waydroid-venus/    │    dnsmasq (.2–.254, authoritative)      │
+│  venus.sock ⇆ bind-mounted as    │    UFW: allow 67/udp + 53 + route in on  │
+│  /dev/venus in guest             │    waydroid0; NAT via ip lxc masquerade  │
+└────────────────────────────────────────────────────────────────────────────┘
 ```
 
----
+- **Graphics path (64-bit app):** app Vulkan → guest Mesa Venus (`vulkan.virtio.so`) → unix socket → host renderer → NVIDIA driver → block-linear dmabuf → guest gralloc (`minigbm_gbm_mesa` vtest backend) → `hwcomposer.waydroid` → Wayland subsurface → Sway (NVIDIA-driven, so buffers display natively). GL goes via ANGLE-on-Venus (`skiavk` HWUI, `skiaglthreaded` RenderEngine). Refresh pinned `--refresh 165`.
+- **ARM path (32-bit app):** ARM32 → Houdini (`libhoudini.so`) → x86 ANGLE → x86 Venus → same socket/host NVIDIA path (dual-ABI guest ships ELF32 `vendor/lib` + ELF64 `vendor/lib64`). ARM64 → `houdini64`. Kernel auto-invokes translators via binfmt_misc (`arm_exe/arm_dyn/arm64_exe/arm64_dyn`).
+- **Images/data layout:** base `system.img`/`vendor.img` (read-only, OTA) + `/var/lib/waydroid/nv/guest` (NVIDIA stack) + `/var/lib/waydroid/overlay/system` (Houdini, upperdir) merged by overlayfs; userdata `~/.local/share/waydroid/data` (730M); cfg `waydroid.cfg` (NVIDIA props + Houdini props, disjoint keys).
+- **Known limits:** no ETC2 emulation, no ASTC readback, render nodes renumber across boots (re-run setup), `hwcomposer` flaky across some boots (container restart recovers), no keymapper layer (host keyboard = physical keyboard; clicks = taps).
 
-## 3. What Worked: Step-by-Step Reconstruction
+## 1. Preflight audit (read-only, no changes)
+- Verified: open kernel modules (`nvidia-open-dkms`, `modinfo` Dual MIT/GPL, `/proc/driver/nvidia` says Open), `nvidia-drm.modeset=Y`, driver ≥ 595.71 (615.71.09, later 615.78.08).
+- Verified: eDP panel on NVIDIA card, Sway/GLX/EGL-Wayland on NVIDIA (`LIBVA_DRIVER_NAME=nvidia`), kernel binderfs flags set, `/dev/udmabuf` present, 51G disk free.
+- Ran upstream probe (`tests/run-probe.sh`): exit 0 — block-linear DMA-BUF imports pass; LINEAR+INPUT_ATTACHMENT `FORMAT_NOT_SUPPORTED` is a known, guest-worked-around quirk.
 
-### A. Base Installation
-1. Install Waydroid package:
-   ```bash
-   sudo pacman -Syu waydroid
-   ```
-2. Initialize Waydroid with official LineageOS GAPPS (Android 13 / lineage-20):
-   ```bash
-   sudo waydroid init -s GAPPS -f
-   ```
-3. Prevent window freeze in `/var/lib/waydroid/waydroid.cfg`:
-   ```ini
-   suspend_action = none
-   ```
+## 2. Installation
+1. Snapper pre-snapshot (`snapper -c root create --description pre-waydroid-nvidia-bin-gapss-165hz`).
+2. Re-checked AUR `PKGBUILD 0.1.2-1` (provides/conflicts `waydroid`) + `waydroid-nvidia-setup`, udev rule (`TAG+=uaccess`, scoped), `wd-venus.service` (user unit), tmpfiles.
+3. `paru -S --noconfirm --needed waydroid-nvidia-bin` (pulls `lxc`, `python-gbinder`; snapper pre/post auto).
+4. `sudo waydroid init -s GAPPS` (system 2.5G + vendor 537M).
+5. `sudo waydroid-nvidia-setup --refresh 165` (validates dual-ABI ELF, NVIDIA node, modeset, minigbm vendor; writes `drm_device`, `suspend_action=none`, Venus props; `waydroid upgrade -o`).
+6. Enabled `waydroid-container.service` (system) + `wd-venus.service` (user). udev ACL already grants `/dev/udmabuf`.
+7. Verified: `boot_completed=1`, `GLES: ANGLE NVIDIA Vulkan Venus (RTX 5050)`, gralloc `minigbm_gbm_mesa`, Settings window on Sway.
 
-### B. Magisk Delta Root & Zygisk Injection
-Standard upstream Magisk cannot hook zygote on LXC containers natively. **Magisk Delta (HuskyDG fork)** works by leveraging ptrace-based zygote interception:
-
-1. **Overlay Placement**:
-   Place Magisk Delta binaries (`magisk64`, `magiskpolicy`, `su`) under `/var/lib/waydroid/overlay/system/etc/init/magisk/`.
-2. **Init Hook (`bootanim.rc`)**:
-   Add early boot hooks to `/var/lib/waydroid/overlay/system/etc/init/bootanim.rc`:
-   ```rc
-   service bootanim /system/bin/bootanimation
-       class core animation
-       user graphics
-       group graphics audio
-       disabled
-       oneshot
-       ioprio rt 0
-       task_profiles MaxPerformance
-
-   on post-fs-data
-       start logd
-       exec u:r:su:s0 root root -- /system/etc/init/magisk/magiskpolicy --live --magisk
-       exec u:r:magisk:s0 root root -- /system/etc/init/magisk/magiskpolicy --live --magisk
-       exec u:r:update_engine:s0 root root -- /system/etc/init/magisk/magiskpolicy --live --magisk
-       mkdir /dev/magisk_iqeoVo2mDrO 700
-       exec u:r:su:s0 root root -- /system/etc/init/magisk/magisk64 --auto-selinux --setup-sbin /system/etc/init/magisk /dev/magisk_iqeoVo2mDrO
-       exec u:r:su:s0 root root -- /dev/magisk_iqeoVo2mDrO/magisk --auto-selinux --post-fs-data
-
-   on nonencrypted
-       exec u:r:su:s0 root root -- /dev/magisk_iqeoVo2mDrO/magisk --auto-selinux --service
-
-   on property:vold.decrypt=trigger_restart_framework
-       exec u:r:su:s0 root root -- /dev/magisk_iqeoVo2mDrO/magisk --auto-selinux --service
-
-   on property:sys.boot_completed=1
-       mkdir /data/adb/magisk 755
-       exec u:r:su:s0 root root -- /dev/magisk_iqeoVo2mDrO/magisk --auto-selinux --boot-complete
-
-   on property:init.svc.zygote=restarting
-       exec u:r:su:s0 root root -- /dev/magisk_iqeoVo2mDrO/magisk --auto-selinux --zygote-restart
-
-   on property:init.svc.zygote=stopped
-       exec u:r:su:s0 root root -- /dev/magisk_iqeoVo2mDrO/magisk --auto-selinux --zygote-restart
-   ```
-3. **Database Configuration**:
-   Enable Zygisk in SQLite (`~/.local/share/waydroid/data/adb/magisk.db`):
-   - Table `settings`: `key='zygisk'`, `value='1'`.
-   - Table `policies`: `uid=2000` (shell) or root authorized.
-
-### C. LSPosed Framework Integration
-1. Module: **LSPosed v1.9.3_mod (7244) Zygisk release** (`mywalkb/LSPosed_mod`).
-2. Placed in `~/.local/share/waydroid/data/adb/modules/zygisk_lsposed/`.
-3. Install companion APK: `org.lsposed.manager` (APK version matches framework).
-4. Verify via ADB:
-   ```bash
-   adb -s 192.168.240.112:5555 shell "su -c ls -la /data/adb/lspd"
-   ```
-
-### D. Navigation Bar Alignment on Desktop Resolutions (Wide Landscape)
-On 1920×1170 landscape displays at 180 DPI, Android 13 SystemUI by default glitches button insets, hiding Home and Recents into the corner.
-- **The Permanent Fix**:
-  ```bash
-  adb -s 192.168.240.112:5555 shell cmd overlay enable com.android.internal.systemui.navbar.threebutton
+## 3. Internet fix (root cause proven, 3 UFW rules)
+- Symptom: Android DHCPDISCOVER loop, no IP.
+- `nft monitor trace` proof: `inet lxc input` → accept, then UFW `ip filter INPUT` → `dport 67 → skip-to-policy → DROP` (terminating; bypasses UFW logging, hence invisible in dmesg). Same pattern blocked DNS (:53) and TCP forwarding (UFW passes only ICMP + established).
+- Fix (persistent, defaults untouched):
   ```
-  This restores standard 3-button layout: Back (`<`), Home (`○`) on bottom-left, Recents (`▢`) on bottom-right.
+  sudo ufw allow in on waydroid0 to any port 67 proto udp
+  sudo ufw allow in on waydroid0 to any port 53
+  sudo ufw route allow in on waydroid0
+  ```
+- Verified: IP `.112` leased → gateway/DNS/external-IP ping 0% loss → HTTPS `204 in 0.096s` → Finsky active.
+- Rollback: `sudo ufw delete route allow in on waydroid0`, `sudo ufw delete allow in on waydroid0 to any port 53`, `sudo ufw delete allow in on waydroid0 to any port 67 proto udp`, `sudo ufw reload`.
 
-### E. Google Certified Device & Play Store Registration
-GAPPS builds require device registration against Google Play Protect:
+## 4. Graphics crashes (fixed by setup re-runs + reboot)
+- `hwcomposer.waydroid.so` SIGABRT → SurfaceFlinger `HIDL DEAD_OBJECT` → app `Adding window failed`; later a hang variant (SF/window dumpsys timeouts, launches hanging, 0 crashes).
+- Fix: `sudo waydroid-nvidia-setup --refresh 165` (idempotent) + container restart. Crash buffer clean since.
+- Driver mismatch found mid-way: userspace updated to 615.78.08 while live boot ran module 615.71.09 (NVML mismatch, NVIDIA missing from Vulkan, Venus fell back to Intel). Fixed by rebooting into `linux-cachyos 7.2.9-2`.
+
+## 5. Operational quirks learned
+- **Render nodes renumber across boots** (observed 129→128→129 for NVIDIA). After every reboot: check `grep DRIVER /sys/class/drm/renderD*/device/uevent` vs `grep drm_device /var/lib/waydroid/waydroid.cfg`; re-run setup if stale.
+- **Android-side `netd` can wedge** (`stopping`, no DHCP attempts despite healthy host path). Fix: `sudo systemctl restart waydroid-container.service` + session stop/start (data-preserving).
+- Session stop tears down bridge/dnsmasq/lxc tables (`waydroid-net.sh stop`); all recreated on start. UFW user rules persist.
+- ARM translation absent (`abilist=x86_64,x86`); Play sign-in/certification are user-side follow-ups.
+
+## 6. Daily commands (autostart stays OFF)
 ```bash
-# Retrieve Android Google Service Framework (GSF) ID
-adb -s 192.168.240.112:5555 shell 'sqlite3 /data/data/com.google.android.gsf/databases/gservices.db "SELECT value FROM main WHERE name=\"android_id\";"'
-```
-Register the retrieved decimal ID at: `https://www.google.com/android/uncertified/`.
-
-### F. Host Media Storage Offloading (Preventing Root Partition Bloat)
-Android media folders (`Pictures`, `Movies`, `Download`, `Documents`) can be mapped directly to a large auxiliary partition (e.g. `/mnt/Games` or secondary NVMe):
-1. In `/var/lib/waydroid/overlay/system/etc/init/media_mounts.rc`:
-   ```rc
-   on property:sys.boot_completed=1
-       mount none /data/media/0/Pictures /storage/emulated/0/Pictures bind
-       mount none /data/media/0/Movies /storage/emulated/0/Movies bind
-       mount none /data/media/0/Download /storage/emulated/0/Download bind
-       mount none /data/media/0/Documents /storage/emulated/0/Documents bind
-   ```
-2. Host bind mounts external drive directories into `~/.local/share/waydroid/data/media/0/Pictures`.
-
----
-
-## 4. Session & Process Control Commands
-
-```bash
-# Start container systemd service
 sudo systemctl start waydroid-container.service
-
-# Start user session (Wayland display wayland-1)
+systemctl --user start wd-venus.service
 waydroid session start
-
-# Launch full UI window
-waydroid show-full-ui
-
-# Launch specific Android package
-waydroid app launch com.android.settings
-waydroid app launch org.lsposed.manager
-
-# Stop session cleanly
+waydroid status
+waydroid app launch com.android.settings   # or com.android.vending
+sudo waydroid shell dumpsys SurfaceFlinger | grep GLES
 waydroid session stop
 sudo systemctl stop waydroid-container.service
-
-# ADB connectivity (container default bridge IP)
-adb connect 192.168.240.112:5555
+systemctl --user stop wd-venus.service
 ```
 
----
+## 8. ARM translation — WORKING (2026-10-11)
+- Installed ONLY `libhoudini` via audited `casualsnek/waydroid_script` @ `48dbfaf` (Android 13 archive `2f8f088`, MD5 `37fe0899…` re-hashed independently; Intel proprietary, expiry 2028-07-01).
+- Backup: Snapper #866 + `~/waydroid-backup-pre-houdini-20261011/` (1.8G verified). No Magisk/Zygisk/libndk; base images untouched (overlay-only + 7 props).
+- Live proof: `abilist=x86_64,x86,arm64-v8a,armeabi-v7a,armeabi`, `native.bridge=libhoudini.so`, binfmt `arm_exe/arm_dyn/arm64_exe/arm64_dyn` registered.
+- Functional proof: Subway Surfers (`com.rioo.runnersubway`) running translated — Houdini 14.0.0 `GoogleGame_com1.3` init OK, process maps contain `libhoudini.so` + 64-bit `vulkan.virtio.so` (ARM → x86_64 → Venus NVIDIA). Translated system procs: media provider, Google search, GMS.
+- Note: one `hwcomposer` SIGSEGV (Wayland-dispatch mutex) occurred post-install and felled a boot's windows; cleared by container restart, crash-free since. Causation vs Houdini not established (HWC flaky before).
+- Houdini uninstall: `cd /tmp/opencode/waydroid_script && sudo venv/bin/python3 main.py --android-version 13 remove libhoudini`.
 
-## 5. Troubleshooting & Invariants Checklist
-
-| Symptom | Root Cause | Working Solution |
-| :--- | :--- | :--- |
-| **Black screen or crash on launch** | NVIDIA dGPU intercepted Wayland/EGL | Ensure `waydroid` runs without `prime-run`; keep RTX 5050 in `auto`/`suspended`. |
-| **Window hangs when unfocused** | Cgroup freezer suspended container | Set `suspend_action = none` in `/var/lib/waydroid/waydroid.cfg`. |
-| **Only back `<` visible on navbar** | Landscape insets displaced 3-button bar | Run `adb shell cmd overlay enable com.android.internal.systemui.navbar.threebutton`. |
-| **Zygisk fails to activate** | Standard Magisk lacks LXC ptrace hook | Use Magisk Delta with the custom `bootanim.rc` post-fs-data injection. |
-| **Boot loop after bad LSPosed module** | Faulty Xposed hook | `touch ~/.local/share/waydroid/data/adb/modules/.disable` to boot in safe mode. |
+## 7. Full rollback
+```bash
+systemctl --user disable --now wd-venus.service
+sudo systemctl disable --now waydroid-container.service
+paru -R waydroid-nvidia-bin
+sudo rm -rf /var/lib/waydroid ~/.local/share/waydroid   # destroys Android data
+sudo snapper -c root undochange <pre-install-id>..0
+```

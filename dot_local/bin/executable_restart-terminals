@@ -1,0 +1,131 @@
+#!/bin/sh
+# restart-terminals
+# Restarts foot-server.service and relaunches active terminals so that all
+# windows (including active agy session and scratchpad terminal) pick up the
+# updated font cleanly without losing session state.
+set -eu
+
+LOG_FILE="/tmp/restart-terminals.log"
+
+# If invoked interactively from an active terminal, detach immediately
+# so this process outlives the terminal closure during server restart.
+if [ "${RESTART_DETACHED:-0}" != "1" ]; then
+    echo "Restarting foot-server and respawning terminals in 1 second..."
+    RESTART_DETACHED=1 setsid nohup "$0" "$@" </dev/null >"$LOG_FILE" 2>&1 &
+    exit 0
+fi
+
+# ===================================================================
+# DETACHED WORKER PROCESS
+# ===================================================================
+
+# Determine IPC command (swaymsg vs i3-msg)
+IPC_CMD="i3-msg"
+if [ -n "${SWAYSOCK:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
+    IPC_CMD="swaymsg"
+fi
+
+# 1. Inspect running environment before restart
+AGY_RUNNING=0
+AGY_CWD="${HOME}"
+AGY_PID="$(pgrep -x agy | head -n 1 || true)"
+if [ -n "$AGY_PID" ]; then
+    AGY_RUNNING=1
+    if [ -d "/proc/$AGY_PID/cwd" ]; then
+        AGY_CWD="$(readlink -f "/proc/$AGY_PID/cwd" 2>/dev/null || echo "$HOME")"
+    fi
+fi
+
+# Count open regular foot windows on sway
+EXTRA_SHELLS=0
+if [ "$IPC_CMD" = "swaymsg" ]; then
+    TOTAL_FOOT="$($IPC_CMD -t get_tree 2>/dev/null | python3 -c '
+import json, sys
+try:
+    tree = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+count = 0
+def count_foot(n):
+    global count
+    if n.get("app_id") == "footclient" and n.get("name") != "scratch-term":
+        count += 1
+    for c in n.get("nodes", []) + n.get("floating_nodes", []):
+        count_foot(c)
+count_foot(tree)
+print(count)
+' 2>/dev/null || echo "1")"
+    # If agy was running, subtract 1 from total to count companion shell windows
+    if [ "$AGY_RUNNING" = "1" ]; then
+        EXTRA_SHELLS=$((TOTAL_FOOT > 1 ? TOTAL_FOOT - 1 : 0))
+    else
+        EXTRA_SHELLS=$((TOTAL_FOOT > 0 ? TOTAL_FOOT : 1))
+    fi
+fi
+
+echo "[$(date '+%T')] Detected: AGY_RUNNING=$AGY_RUNNING (CWD=$AGY_CWD), EXTRA_SHELLS=$EXTRA_SHELLS" >> "$LOG_FILE"
+
+# 2. Brief grace period so caller process can finish writing and exit cleanly
+sleep 1.0
+
+# 3. Restart the foot server daemon
+echo "[$(date '+%T')] Restarting foot-server.service..." >> "$LOG_FILE"
+systemctl --user restart foot-server.service >> "$LOG_FILE" 2>&1
+
+# 4. Wait for foot socket to become active (up to 3 seconds)
+SOCK_FOUND=0
+for _ in $(seq 1 30); do
+    if [ -S "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/foot.sock" ] || \
+       [ -S "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/foot-${WAYLAND_DISPLAY:-wayland-1}.sock" ]; then
+        SOCK_FOUND=1
+        break
+    fi
+    sleep 0.1
+done
+
+if [ "$SOCK_FOUND" = "0" ]; then
+    echo "[$(date '+%T')] Warning: foot socket not detected after 3 seconds, proceeding anyway" >> "$LOG_FILE"
+fi
+
+# 5. Relaunch active agy session if it was running
+if [ "$AGY_RUNNING" = "1" ]; then
+    echo "[$(date '+%T')] Respawning agy session on Workspace 1..." >> "$LOG_FILE"
+    if [ "$IPC_CMD" = "swaymsg" ]; then
+        $IPC_CMD "workspace 1; exec footclient -T 'agy' -D '$AGY_CWD' fish -c 'agy --continue --dangerously-skip-permissions; exec fish'" >> "$LOG_FILE" 2>&1
+    else
+        footclient -T 'agy' -D "$AGY_CWD" fish -c 'agy --continue --dangerously-skip-permissions; exec fish' &
+    fi
+    sleep 0.2
+fi
+
+# 6. Relaunch companion shell windows if they existed
+if [ "$EXTRA_SHELLS" -gt 0 ]; then
+    echo "[$(date '+%T')] Respawning $EXTRA_SHELLS companion shell window(s)..." >> "$LOG_FILE"
+    for _ in $(seq 1 "$EXTRA_SHELLS"); do
+        if [ "$IPC_CMD" = "swaymsg" ]; then
+            $IPC_CMD "workspace 1; exec footclient -D '$HOME'" >> "$LOG_FILE" 2>&1
+        else
+            footclient -D "$HOME" &
+        fi
+        sleep 0.1
+    done
+fi
+
+# 7. Pre-warm scratchpad terminal with new font
+# Sway's window rule automatically catches app_id=scratch-term and stashes it into scratchpad.
+echo "[$(date '+%T')] Pre-warming scratchpad terminal..." >> "$LOG_FILE"
+footclient \
+    --app-id=scratch-term \
+    --title=scratch-term \
+    -o selection-target=both \
+    -o mouse-bindings.primary-paste=none \
+    -o mouse-bindings.clipboard-paste=BTN_MIDDLE \
+    -o mouse-bindings.font-increase=none \
+    -o mouse-bindings.font-decrease=none \
+    -o mouse-bindings.scrollback-up-mouse="BTN_WHEEL_BACK Control+Mod1+BTN_WHEEL_BACK Mod1+Control+BTN_WHEEL_BACK Control+BTN_WHEEL_BACK Mod1+BTN_WHEEL_BACK Mod4+BTN_WHEEL_BACK Control+Mod4+BTN_WHEEL_BACK" \
+    -o mouse-bindings.scrollback-down-mouse="BTN_WHEEL_FORWARD Control+Mod1+BTN_WHEEL_FORWARD Mod1+Control+BTN_WHEEL_FORWARD Control+BTN_WHEEL_FORWARD Mod1+BTN_WHEEL_FORWARD Mod4+BTN_WHEEL_FORWARD Control+Mod4+BTN_WHEEL_FORWARD" \
+    -o locked-title=yes \
+    -o include="${HOME}/.config/foot/foot-colors.ini" \
+    2>>/tmp/scratch-term-err.log &
+
+echo "[$(date '+%T')] Terminals successfully restored with updated font." >> "$LOG_FILE"
