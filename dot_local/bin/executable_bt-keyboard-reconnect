@@ -35,6 +35,8 @@ class KeyboardAutoConnector:
         self.bus = dbus.SystemBus()
         self.connecting = False
         self.last_err_msg = None
+        self.reconnect_timer = None
+        self.retry_interval = 2
 
         # Listen for Device property changes (Connected, etc.)
         self.bus.add_signal_receiver(
@@ -64,6 +66,17 @@ class KeyboardAutoConnector:
             )
         except Exception as e:
             self.log(f"Warning: Could not hook PrepareForSleep: {e}")
+
+        # Listen for session unlock (screen unlock after idle / swaylock)
+        try:
+            self.bus.add_signal_receiver(
+                self.on_session_unlocked,
+                bus_name="org.freedesktop.login1",
+                dbus_interface="org.freedesktop.login1.Manager",
+                signal_name="SessionUnlock"
+            )
+        except Exception:
+            pass
 
     def log(self, msg):
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -141,15 +154,60 @@ class KeyboardAutoConnector:
             self.log("Katana connected and xremap is already attached.")
         return False
 
+    def cancel_reconnect(self):
+        if self.reconnect_timer is not None:
+            try:
+                GLib.source_remove(self.reconnect_timer)
+            except Exception:
+                pass
+            self.reconnect_timer = None
+        self.retry_interval = 2
+
+    def schedule_reconnect(self, delay=None):
+        if self.is_connected():
+            self.cancel_reconnect()
+            return
+
+        if delay is None:
+            delay = self.retry_interval
+
+        if self.reconnect_timer is not None:
+            try:
+                GLib.source_remove(self.reconnect_timer)
+            except Exception:
+                pass
+            self.reconnect_timer = None
+
+        def _retry():
+            self.reconnect_timer = None
+            if self.is_connected():
+                return False
+            self.log(f"Auto-reconnecting to Katana S K2 (retry in {self.retry_interval}s)...")
+            self.connect_once()
+            # Gentle exponential backoff: 2s -> 5s -> 10s -> 30s -> 60s cap
+            if self.retry_interval < 5:
+                self.retry_interval = 5
+            elif self.retry_interval < 10:
+                self.retry_interval = 10
+            elif self.retry_interval < 30:
+                self.retry_interval = 30
+            else:
+                self.retry_interval = 60
+            self.schedule_reconnect()
+            return False
+
+        self.reconnect_timer = GLib.timeout_add_seconds(delay, _retry)
+
     def connect_once(self):
-        """Attempt non-blocking connection once (for startup/resume); don't loop if sleeping."""
+        """Attempt non-blocking connection once (for startup/resume/wake); don't loop if sleeping."""
         if self.connecting or self.is_connected():
             if self.is_connected():
+                self.cancel_reconnect()
                 self.ensure_xremap()
             return
 
         self.connecting = True
-        self.log("Attempting initial connection to Katana S K2...")
+        self.log("Attempting connection to Katana S K2...")
 
         try:
             dev_obj = self.bus.get_object("org.bluez", KEYBOARD_PATH)
@@ -157,6 +215,7 @@ class KeyboardAutoConnector:
 
             def on_success():
                 self.connecting = False
+                self.cancel_reconnect()
                 self.log("Connection established. Ensuring xremap layers attached.")
                 GLib.timeout_add_seconds(1, self.ensure_xremap)
 
@@ -164,6 +223,7 @@ class KeyboardAutoConnector:
                 self.connecting = False
                 err_msg = str(err)
                 if "AlreadyConnected" in err_msg:
+                    self.cancel_reconnect()
                     self.log("Keyboard is already connected.")
                     GLib.timeout_add_seconds(1, self.ensure_xremap)
                 else:
@@ -185,13 +245,16 @@ class KeyboardAutoConnector:
                 self.log(f"Katana S K2 Connected property changed -> {connected}")
                 if connected:
                     self.connecting = False
+                    self.cancel_reconnect()
                     GLib.timeout_add_seconds(1, self.ensure_xremap)
                 else:
-                    self.log("Katana S K2 entered idle sleep/disconnected. Adapter passive scanning ready.")
+                    self.log("Katana S K2 entered idle sleep/disconnected. Arming auto-reconnect backoff...")
+                    self.schedule_reconnect(2)
 
         elif interface == "org.bluez.Adapter1":
             if "Powered" in changed and bool(changed["Powered"]):
                 self.log("Bluetooth adapter powered ON. Triggering initial connect...")
+                self.cancel_reconnect()
                 GLib.timeout_add_seconds(1, self.connect_once)
 
     def on_interfaces_added(self, path, interfaces):
@@ -199,14 +262,22 @@ class KeyboardAutoConnector:
             self.log("Katana S K2 interface registered on D-Bus.")
             dev_props = interfaces["org.bluez.Device1"]
             if bool(dev_props.get("Connected", False)):
+                self.cancel_reconnect()
                 GLib.timeout_add_seconds(1, self.ensure_xremap)
             else:
+                self.cancel_reconnect()
                 GLib.timeout_add_seconds(1, self.connect_once)
 
     def on_prepare_for_sleep(self, going_to_sleep):
         if not going_to_sleep:
-            self.log("System resumed from sleep. Triggering initial connect in 1s...")
+            self.log("System resumed from sleep. Triggering Katana connect in 1s...")
+            self.cancel_reconnect()
             GLib.timeout_add_seconds(1, self.connect_once)
+
+    def on_session_unlocked(self, *args):
+        self.log("Session unlocked. Re-arming Katana connect in 1s...")
+        self.cancel_reconnect()
+        GLib.timeout_add_seconds(1, self.connect_once)
 
 def main():
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)

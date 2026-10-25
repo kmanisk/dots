@@ -4,6 +4,12 @@ set -euo pipefail
 
 MAC="CC:04:2E:90:66:02"
 
+# If already connected, verify xremap and exit cleanly
+if bluetoothctl info "$MAC" 2>/dev/null | grep -q "Connected: yes"; then
+    systemctl --user restart xremap.service >/dev/null 2>&1 || true
+    exit 0
+fi
+
 echo "Connecting to Katana S K2 ($MAC)..."
 bluetoothctl unblock "$MAC" >/dev/null 2>&1 || true
 
