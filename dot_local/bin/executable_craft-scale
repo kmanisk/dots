@@ -45,8 +45,18 @@ def show_current_scale():
             pass
 
     # PhotoCraft
+    ph_ron = os.path.join(home, ".config", "photocraft", "ui.ron")
     ph_pref = os.path.join(home, ".config", "photocraft", "preferences.json")
-    if os.path.exists(ph_pref):
+    ph_shown = False
+    if os.path.exists(ph_ron):
+        try:
+            m = re.search(r'zoom_factor:\s*([\d.]+)', open(ph_ron).read())
+            if m:
+                print(f"  PhotoCraft:  {int(float(m.group(1)) * 100)}% (zoom_factor={m.group(1)})")
+                ph_shown = True
+        except Exception:
+            pass
+    if not ph_shown and os.path.exists(ph_pref):
         try:
             d = json.load(open(ph_pref))
             print(f"  PhotoCraft:  {d.get('interface', {}).get('uiScale', 'auto')}%")
