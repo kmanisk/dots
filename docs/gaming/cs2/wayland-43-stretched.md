@@ -1,5 +1,15 @@
 # CS2 Native Wayland 4:3 Stretched — Fix Log (2026-09-30)
 
+## Baseline lock, 2026-10-25
+
+The launcher `~/.local/bin/cs2-launch` is locked as an immutable stable baseline (`chattr +i`).
+It enforces exclusive fullscreen (`setting.fullscreen 1`, `setting.coop_fullscreen 0`) in
+`cs2_video.txt` pre-launch and on cleanup, exports native Wayland scaling hints
+(`SDL_VIDEO_WAYLAND_SCALE_TO_DISPLAY=1`, `SDL_VIDEO_WAYLAND_MODE_SCALING=stretch`, `SDL_VIDEO_WAYLAND_ALLOW_TEARING=1`),
+pins to 6 physical P-cores (taskset 0-11), handles ASUS performance profiles and ananicy-cpp safely,
+and disables explicit sync in AsusMuxDgpu mode to eliminate Wayland protocol drops.
+Steam launch option is verified as `/home/onyx/.local/bin/cs2-launch %command%`.
+
 ## Launcher reliability update, 2026-10-23
 
 The chezmoi-managed `~/.local/bin/cs2-launch` now runs GameMode only after

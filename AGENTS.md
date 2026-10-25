@@ -156,3 +156,10 @@ the strength of a description alone.
 - **Always use the internal laptop microphone (`alsa_input.pci-0000_00_1f.3.analog-stereo` via `ghelper-audio`)**.
 - **Never allow Bluetooth headphones to switch into handsfree / headset mode (HSP/HFP / CVSD / mSBC)**. Bluetooth headphones must stay strictly in high-fidelity A2DP playback mode (`bluez5.roles = [ a2dp_sink a2dp_source ]`).
 - **All noise suppression, voice changing, and chat applications must use `ghelper-audio` as their recording input**, never a Bluetooth handsfree source.
+
+---
+
+## 11. CS2 Launcher Protection
+
+- **Never modify `~/.local/bin/cs2-launch` or `dot_local/bin/executable_cs2-launch`**. The launcher is locked as a verified stable baseline (native Wayland, 1600x1200 4:3 stretched, automatic video config enforcement, P-core affinity, ASUS profile switching, explicit sync handling).
+- Keep `~/.local/bin/cs2-launch` protected (immutable via `chattr +i`) so no automated script or tool can alter or degrade this verified baseline.
