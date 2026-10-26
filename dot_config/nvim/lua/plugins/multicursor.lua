@@ -5,6 +5,14 @@ return {
     branch = "1.0",
     keys = {
         {
+            "gl",
+            function()
+                require("multicursor-nvim").matchAddCursor(1)
+            end,
+            mode = { "n", "x" },
+            desc = "Add cursor on next match",
+        },
+        {
             "g l",
             function()
                 require("multicursor-nvim").matchAddCursor(1)
@@ -13,12 +21,28 @@ return {
             desc = "Add cursor on next match",
         },
         {
+            "gL",
+            function()
+                require("multicursor-nvim").matchAddCursor(-1)
+            end,
+            mode = { "n", "x" },
+            desc = "Add cursor on previous match",
+        },
+        {
             "g L",
             function()
                 require("multicursor-nvim").matchAddCursor(-1)
             end,
             mode = { "n", "x" },
             desc = "Add cursor on previous match",
+        },
+        {
+            "ga",
+            function()
+                require("multicursor-nvim").matchAllAddCursors()
+            end,
+            mode = { "n", "x" },
+            desc = "Add cursors on all matches",
         },
         {
             "g a",

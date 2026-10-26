@@ -35,8 +35,9 @@ All future keybinding modifications across **i3**, **xremap**, **Zed**, **Alacri
   - Toggle Scratchpad / Background Focus: `Win + Space`
   - Spotify Scratchpad Toggle: `Win + m`
   - Process Killer Menu: `Caps + w` (App Aggregator & Terminator; formerly `Win + Shift + e` / `Win + x`)
-  - Persistent Clip: `Win + y` (Cliphist + Rofi Gruvbox)
-  - Websearch: `Win + ?` (`Shift + /`; cheatsheet modal removed 2026-10-18)
+  - Persistent Clip: `Win + V` / `Win + y` (Centered Foot picker, large prompt preview & deep search)
+  - Quick Cheatsheet: `Win + ?` (Interactive Rofi cheatsheet modal)
+  - Screen Black (Sleep Audio): `Win + Alt + l` (Display backlight off, keeps agent and audio active)
   - Region Screenshot (Clipboard): `Win + S`
   - OCR Snip: `Win + Shift + S` (fullscreen screenshot in gaming mode)
   - Cursor Theme Toggle: `Alt + Shift + c` (Dark / Light)
@@ -51,10 +52,12 @@ All future keybinding modifications across **i3**, **xremap**, **Zed**, **Alacri
     - Word / Char Del: `Caps + u / d` (`Ctrl+BS / Del`)
     - Spacing & Line: `Caps + n / m` (`Enter / BS`)
     - Select All & Copy: `Caps + ,` (`Ctrl+A, Ctrl+C`)
-    - Paste: `Caps + .` (`Ctrl+V`)
+    - Smart Paste: `Caps + .` (pastes all buffered screenshots if present; otherwise Ctrl+V)
+    - Clipboard Menu: `Caps + c` (Opens centered floating clipboard manager)
+    - View Screenshot: `Caps + v` (Opens latest screenshot in imv)
     - Brightness Control: `Caps + [` (BrightnessUp), `Caps + '` (BrightnessDown)
     - Volume Control: `Caps + ]` (VolumeUp), `Caps + \` (VolumeDown)
-    - Fullscreen Screenshot: `Caps + Space` (file + clipboard; WS 3/4 save to `Screenshots/Gaming`, 2026-10-18)
+    - Fullscreen Screenshot: `Caps + Space` (disk + clipboard + AI buffer; WS 3/4 save to `Screenshots/Gaming`)
     - Region Screenshot (Saved to File + Clipboard): `Caps + s`
     - Window Close (Graceful): `Caps + q` only (Two-Handed)
     - Window Force Kill: `Caps + BackSpace` (maps to `Win + BackSpace` force-kill)

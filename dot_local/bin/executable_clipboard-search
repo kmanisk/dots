@@ -1,0 +1,58 @@
+#!/usr/bin/env python3
+"""
+clipboard-search: Full-text search engine for cliphist history
+Searches through complete multi-line prompt bodies in cliphist database.
+Usage: clipboard-search <query>
+"""
+import sys
+import subprocess
+
+def main():
+    if len(sys.argv) < 2 or not sys.argv[1].strip():
+        # Fall back to normal cliphist list
+        subprocess.run(["cliphist", "list"])
+        return
+
+    query = sys.argv[1].strip().lower()
+
+    try:
+        proc = subprocess.Popen(
+            ["cliphist", "list"],
+            stdout=subprocess.PIPE,
+            text=True,
+            errors="replace"
+        )
+    except Exception as e:
+        sys.exit(1)
+
+    for line in proc.stdout:
+        line = line.strip()
+        if not line:
+            continue
+        # Skip binary data for text query unless query explicitly asks for image
+        if "[[ binary data" in line:
+            if "image" in query or "png" in query or "jpg" in query:
+                print(line)
+            continue
+
+        # Fast check if query is already in title preview
+        if query in line.lower():
+            print(line)
+            continue
+
+        # Deep search in decoded full body
+        try:
+            dec = subprocess.run(
+                ["cliphist", "decode"],
+                input=line.encode("utf-8"),
+                capture_output=True,
+                timeout=1.0
+            )
+            body = dec.stdout.decode("utf-8", errors="replace")
+            if query in body.lower():
+                print(line)
+        except Exception:
+            continue
+
+if __name__ == "__main__":
+    main()

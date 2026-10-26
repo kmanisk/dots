@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# paste-smart: Unified smart paste handler for Caps + . (Caps-DOT)
+# - If screenshot buffer has items: batch pastes all screenshots in sequence.
+# - If screenshot buffer is empty: performs standard Ctrl+V paste.
+# ==============================================================================
+set -euo pipefail
+
+export PATH="$HOME/.local/bin:/usr/bin:/bin:$PATH"
+
+# Resolve Sway / Wayland environment
+if [ -z "${SWAYSOCK:-}" ] || [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    while IFS='=' read -r k v; do
+        case "$k" in
+            SWAYSOCK|WAYLAND_DISPLAY|DISPLAY|XDG_CURRENT_DESKTOP)
+                [ -n "$v" ] && export "$k"="$v"
+                ;;
+        esac
+    done < <(systemctl --user show-environment 2>/dev/null || true)
+fi
+
+BUF_DIR="${XDG_RUNTIME_DIR:-/tmp}/screenshot-buffer-$UID"
+shots=()
+if [ -d "$BUF_DIR" ]; then
+    mapfile -t shots < <(find "$BUF_DIR" -maxdepth 1 -name "shot_*.png" 2>/dev/null | sort -V)
+fi
+
+if [ "${#shots[@]}" -gt 0 ]; then
+    exec "$HOME/.local/bin/screenshot-buffer" paste
+else
+    # Give xremap time to register CapsLock release
+    sleep 0.05
+    exec wtype -m shift -m win -m alt -M ctrl -k v -m ctrl
+fi

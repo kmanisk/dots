@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# clipboard-menu: Centered floating clipboard picker launcher
+# Launches via footclient (or standalone foot fallback) with centralized font.
+# ==============================================================================
+set -euo pipefail
+
+export PATH="$HOME/.local/bin:/usr/bin:/bin:$PATH"
+
+# Resolve Sway / Wayland environment
+if [ -z "${SWAYSOCK:-}" ] || [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    while IFS='=' read -r k v; do
+        case "$k" in
+            SWAYSOCK|WAYLAND_DISPLAY|DISPLAY|XDG_CURRENT_DESKTOP)
+                [ -n "$v" ] && export "$k"="$v"
+                ;;
+        esac
+    done < <(systemctl --user show-environment 2>/dev/null || true)
+fi
+
+SOCK="${XDG_RUNTIME_DIR:-/run/user/$UID}/foot.sock"
+
+if [ -S "$SOCK" ]; then
+    exec footclient -s "$SOCK" -E --app-id=clip-term \
+        -o font="VictorMono Nerd Font:size=14.0:style=Bold" \
+        -o pad=14x14 \
+        -w 1500x860 \
+        "$HOME/.local/bin/clipboard-picker" "$@"
+else
+    exec foot -a clip-term \
+        -o font="VictorMono Nerd Font:size=14.0:style=Bold" \
+        -o pad=14x14 \
+        -w 1500x860 \
+        "$HOME/.local/bin/clipboard-picker" "$@"
+fi

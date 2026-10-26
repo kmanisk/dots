@@ -19,9 +19,10 @@ del("n", "<leader>b") -- new buffer: breakpoint
 del("n", "<leader>x") -- close buffer: Lazy
 del("n", "<leader>ra") -- NvChad renamer: rename is <leader>rn / <leader>rv
 del("n", "<C-n>") -- NvimTreeToggle: project panel is <leader>e / <A-e>
-del("n", "<A-i>") -- float terminal: completion is <A-i>, float terminal is <A-;>
-del("n", "<A-v>") -- vertical terminal: split vertical
-del("n", "<A-h>") -- horizontal terminal: split horizontal
+del({ "n", "t" }, "<A-i>") -- float terminal: completion is <A-i>, float terminal is <A-;>
+del({ "n", "t" }, "<A-v>") -- vertical terminal: split vertical
+del({ "n", "t" }, "<A-h>") -- horizontal terminal: split horizontal
+del({ "n", "v" }, "<leader>/") -- NvChad comment toggle: re-mapped below with stable description
 del("n", "<A-d>") -- NvimTreeClose: outline / right dock
 del("n", "<leader>th") -- re-added below with the same action and a stable description
 del("n", "<leader>wa") -- NvChad LSP workspace mapping: replaced by session mappings
@@ -224,7 +225,7 @@ map("n", "<leader>sh", ide.print_path, { desc = "Print current file path" })
 -- Line editing helpers
 map("n", "<leader>j", "mzJ`z", { desc = "Join lines and keep cursor" })
 map("n", "<leader>/", "gcc", { remap = true, desc = "Toggle comment" })
-map("x", "<leader>/", "gc", { remap = true, desc = "Toggle comment" })
+map("v", "<leader>/", "gc", { remap = true, desc = "Toggle comment" })
 map("n", "<leader><CR>", "o<Esc>", { desc = "New line below" })
 map("n", "<leader>;", "mzA;<Esc>`z", { desc = "Append semicolon" })
 map("n", "<leader>d;", ":s/;$//<CR>", { desc = "Remove trailing semicolon" })

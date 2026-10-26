@@ -1,6 +1,23 @@
 return {
 	"cshuaimin/ssr.nvim",
-	module = "ssr",
+	keys = {
+		{
+			"<leader>cR",
+			function()
+				require("ssr").open()
+			end,
+			mode = { "n", "x" },
+			desc = "Structural replace (SSR)",
+		},
+		{
+			"<leader>sR",
+			function()
+				require("ssr").open()
+			end,
+			mode = { "n", "x" },
+			desc = "Structural replace (SSR)",
+		},
+	},
 	cond = function()
 		return not vim.g.vscode -- Exclude this plugin in VSCode
 	end,

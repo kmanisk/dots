@@ -29,7 +29,7 @@ keymap:
         launch: ["/home/onyx/.local/bin/nvibrant-ctl", "up"]
       CapsLock-z:
         launch: ["/home/onyx/.local/bin/nvibrant-ctl", "down"]
-      # Fullscreen Screenshot (Workspace 3 & 4 save to Screenshots/Gaming; other workspaces save to Screenshots + clipboard)
+      # Fullscreen Screenshot (Workspace 3 & 4 save to Screenshots/Gaming; other workspaces save to Screenshots + buffer + clipboard)
       CapsLock-Space:
         launch: ["/home/onyx/.local/bin/screenshot-fullscreen"]
       # Emergency kill game
@@ -65,9 +65,10 @@ keymap:
       CapsLock-u: C-BackSpace
       CapsLock-d: Delete
       CapsLock-f: C-f
-      # Copy / Paste (AHK migration: , = SelectAll+Copy, . = Paste)
+      # Copy / Paste (AHK migration: , = SelectAll+Copy, . = Smart Paste)
       CapsLock-COMMA: [C-a, C-c]
-      CapsLock-DOT: C-v
+      CapsLock-DOT:
+        launch: ["/home/onyx/.local/bin/paste-smart"]
       # F-key row
       CapsLock-1: F1
       CapsLock-2: F2
@@ -104,7 +105,9 @@ keymap:
       # Passthrough
       CapsLock-a: a
       CapsLock-b: b
-      CapsLock-c: c
+      # Clipboard menu (centered floating foot picker with prompt preview & deep search)
+      CapsLock-c:
+        launch: ["/home/onyx/.local/bin/clipboard-menu"]
       CapsLock-t: t
       # Clipboard image viewer (clipboard image -> imv)
       CapsLock-v:

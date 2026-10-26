@@ -1,0 +1,206 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# screenshot-buffer: Multi-screenshot accumulation buffer & batch paste tool
+# Captures multiple UI regions into a buffer and pastes all of them in one go
+# into AI chat / editor / browser via simulated sequential paste or stitching.
+#
+# Commands:
+#   snip    -> Select interactive region, save to buffer, copy newest to clipboard
+#   paste   -> Sequentially paste all buffered screenshots into active window
+#   stitch  -> Merge all buffered screenshots vertically into one image & paste
+#   clear   -> Wipe active buffer queue
+#   toggle  -> Toggle auto-buffer mode on/off
+#   view    -> View buffered screenshots in imv
+#   restore -> Undo last paste by restoring previous batch from archive
+# ==============================================================================
+set -euo pipefail
+
+# Ensure Wayland / Sway environment
+if [ -z "${SWAYSOCK:-}" ] || [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    if command -v systemctl >/dev/null 2>&1; then
+        while IFS='=' read -r k v; do
+            case "$k" in
+                SWAYSOCK|WAYLAND_DISPLAY|DISPLAY|XDG_CURRENT_DESKTOP)
+                    [ -n "$v" ] && export "$k"="$v"
+                    ;;
+            esac
+        done < <(systemctl --user show-environment 2>/dev/null || true)
+    fi
+fi
+if [ -z "${SWAYSOCK:-}" ]; then
+    for s in /run/user/"$UID"/sway-ipc.*.sock /tmp/sway-ipc.*.sock; do
+        if [ -S "$s" ]; then
+            export SWAYSOCK="$s"
+            break
+        fi
+    done
+fi
+if [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    for w in "${XDG_RUNTIME_DIR:-/run/user/$UID}"/wayland-*; do
+        if [ -S "$w" ]; then
+            export WAYLAND_DISPLAY="$(basename "$w")"
+            break
+        fi
+    done
+fi
+
+export PATH="$HOME/.local/bin:/usr/bin:/bin:$PATH"
+
+BUF_DIR="${XDG_RUNTIME_DIR:-/tmp}/screenshot-buffer-$UID"
+ARCHIVE_DIR="$BUF_DIR/archive"
+mkdir -p "$BUF_DIR" "$ARCHIVE_DIR"
+chmod 700 "$BUF_DIR" 2>/dev/null || true
+
+CMD="${1:-snip}"
+
+case "$CMD" in
+    snip)
+        # Load theme colors for slurp
+        BORDER_COL="#58a6ffff"
+        BG_COL="#00000080"
+        SEL_COL="#58a6ff33"
+        if [ -f "$HOME/.local/state/theme/colors.sh" ]; then
+            source "$HOME/.local/state/theme/colors.sh"
+            BORDER_COL="${THEME_ACCENT:-#58a6ff}ff"
+            BG_COL="${THEME_BG:-#000000}80"
+            SEL_COL="${THEME_ACCENT:-#58a6ff}33"
+        fi
+
+        GEOM=$(slurp -b "$BG_COL" -c "$BORDER_COL" -s "$SEL_COL" 2>/dev/null) || exit 0
+        [ -z "$GEOM" ] && exit 0
+
+        FILE="$BUF_DIR/shot_$(date +%s%N).png"
+        if grim -g "$GEOM" "$FILE" 2>/dev/null && [ -s "$FILE" ]; then
+            # Also keep latest in active clipboard
+            wl-copy -t image/png < "$FILE" 2>/dev/null || true
+
+            count=$(find "$BUF_DIR" -maxdepth 1 -name "shot_*.png" 2>/dev/null | wc -l)
+            notify-send -a "Screenshot Buffer" -t 1500 -i camera-photo \
+                "Screenshot Buffered" "#$count queued. Caps+. to paste all."
+        fi
+        ;;
+
+    paste)
+        mapfile -t shots < <(find "$BUF_DIR" -maxdepth 1 -name "shot_*.png" 2>/dev/null | sort -V)
+        count="${#shots[@]}"
+
+        if [ "$count" -eq 0 ]; then
+            notify-send -a "Screenshot Buffer" -t 1500 -u low -i camera-photo \
+                "Buffer Empty" "No screenshots in queue to paste."
+            exit 0
+        fi
+
+        # Lock to avoid clipboard watcher feedback loop
+        touch "$BUF_DIR/.pasting"
+        trap 'rm -f "$BUF_DIR/.pasting"' EXIT
+
+        # Wait for physical modifiers to be released
+        sleep 0.2
+
+        for img in "${shots[@]}"; do
+            [ -f "$img" ] || continue
+            wl-copy -t image/png < "$img"
+            sleep 0.1
+            wtype -m shift -m win -m alt -M ctrl -k v -m ctrl 2>/dev/null || true
+            sleep 0.35
+        done
+
+        # Move pasted screenshots to archive
+        mv "${shots[@]}" "$ARCHIVE_DIR/" 2>/dev/null || true
+
+        # Clean archive older than 2 hours
+        find "$ARCHIVE_DIR" -type f -mmin +120 -delete 2>/dev/null || true
+
+        notify-send -a "Screenshot Buffer" -t 1500 -i edit-paste \
+            "Batch Paste Complete" "Pasted $count screenshot(s) in sequence."
+        ;;
+
+    stitch)
+        mapfile -t shots < <(find "$BUF_DIR" -maxdepth 1 -name "shot_*.png" 2>/dev/null | sort -V)
+        count="${#shots[@]}"
+
+        if [ "$count" -eq 0 ]; then
+            notify-send -a "Screenshot Buffer" -t 1500 -u low -i camera-photo \
+                "Buffer Empty" "No screenshots in queue to stitch."
+            exit 0
+        fi
+
+        touch "$BUF_DIR/.pasting"
+        trap 'rm -f "$BUF_DIR/.pasting"' EXIT
+
+        STITCH_FILE="$BUF_DIR/stitched_$(date +%s%N).png"
+        if [ "$count" -eq 1 ]; then
+            cp "${shots[0]}" "$STITCH_FILE"
+        else
+            magick "${shots[@]}" -append "$STITCH_FILE" 2>/dev/null || true
+        fi
+
+        sleep 0.2
+        wl-copy -t image/png < "$STITCH_FILE"
+        sleep 0.1
+        wtype -m shift -m win -m alt -M ctrl -k v -m ctrl 2>/dev/null || true
+
+        mv "${shots[@]}" "$ARCHIVE_DIR/" 2>/dev/null || true
+        mv "$STITCH_FILE" "$ARCHIVE_DIR/" 2>/dev/null || true
+        find "$ARCHIVE_DIR" -type f -mmin +120 -delete 2>/dev/null || true
+
+        notify-send -a "Screenshot Buffer" -t 1500 -i edit-paste \
+            "Stitched Paste Complete" "Pasted $count screenshot(s) merged into one image."
+        ;;
+
+    clear)
+        mapfile -t shots < <(find "$BUF_DIR" -maxdepth 1 -name "shot_*.png" 2>/dev/null)
+        if [ "${#shots[@]}" -gt 0 ]; then
+            mv "${shots[@]}" "$ARCHIVE_DIR/" 2>/dev/null || true
+        fi
+        notify-send -a "Screenshot Buffer" -t 1200 -i edit-clear \
+            "Buffer Cleared" "Screenshot queue is now empty."
+        ;;
+
+    toggle)
+        if [ -f "$BUF_DIR/.auto_mode" ]; then
+            rm -f "$BUF_DIR/.auto_mode"
+            notify-send -a "Screenshot Buffer" -t 2000 -i camera-photo \
+                "Auto-Buffer: OFF" "Screenshots will not accumulate."
+        else
+            touch "$BUF_DIR/.auto_mode"
+            notify-send -a "Screenshot Buffer" -t 2000 -i camera-photo \
+                "Auto-Buffer: ON" "All screenshots (Win+S) will accumulate. Win+Alt+V to paste all."
+        fi
+        ;;
+
+    view)
+        mapfile -t shots < <(find "$BUF_DIR" -maxdepth 1 -name "shot_*.png" 2>/dev/null | sort -V)
+        if [ "${#shots[@]}" -eq 0 ]; then
+            notify-send -a "Screenshot Buffer" -t 1200 -i image-x-generic \
+                "Buffer Empty" "No screenshots in queue to view."
+        else
+            exec imv "${shots[@]}"
+        fi
+        ;;
+
+    restore)
+        mapfile -t archived < <(find "$ARCHIVE_DIR" -maxdepth 1 -name "shot_*.png" 2>/dev/null | sort -V)
+        if [ "${#archived[@]}" -eq 0 ]; then
+            notify-send -a "Screenshot Buffer" -t 1200 -i edit-undo \
+                "No Archive" "No recent batch found to restore."
+        else
+            mv "${archived[@]}" "$BUF_DIR/" 2>/dev/null || true
+            count=$(find "$BUF_DIR" -maxdepth 1 -name "shot_*.png" 2>/dev/null | wc -l)
+            notify-send -a "Screenshot Buffer" -t 1500 -i edit-undo \
+                "Buffer Restored" "Restored $count screenshot(s) to queue."
+        fi
+        ;;
+
+    status)
+        count=$(find "$BUF_DIR" -maxdepth 1 -name "shot_*.png" 2>/dev/null | wc -l)
+        auto_mode="Disabled"
+        [ -f "$BUF_DIR/.auto_mode" ] && auto_mode="Enabled"
+        printf "Queue Count: %s\nAuto-Buffer: %s\nDirectory: %s\n" "$count" "$auto_mode" "$BUF_DIR"
+        ;;
+
+    *)
+        printf "Usage: screenshot-buffer {snip|paste|stitch|clear|toggle|view|restore|status}\n"
+        exit 1
+        ;;
+esac

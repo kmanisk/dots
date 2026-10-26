@@ -1,0 +1,8 @@
+# cliphist engine configuration (see man cliphist / sentriz/cliphist docs)
+# Retention and dedupe are enforced here for every cliphist invocation.
+# Item size is capped by cliphist-store-capped (up to 10MB for large LLM prompts),
+# and cliphist-prune periodically rebuild-compacts the database file.
+max-items 500
+max-dedupe-search 200
+min-store-length 1
+preview-width 180

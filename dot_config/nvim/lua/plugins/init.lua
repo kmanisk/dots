@@ -192,7 +192,6 @@ return {
             vim.g.lazygit_floating_window_use_plenary = 0
             vim.g.lazygit_use_neovim_remote = 1
             vim.g.lazygit_use_custom_config_file_path = 0
-            vim.g.lazygit_config_file_path = ""
             vim.g.lazygit_config_file_path = {}
             vim.g.lazygit_on_exit_callback = nil
         end,

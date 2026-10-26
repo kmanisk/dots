@@ -126,11 +126,12 @@ NEXT_PREFIX="${TARGET_PREFIXES[$NEXT_INDEX]}"
 # 4. Apply target switch
 if [[ "$NEXT_ID" == "alsa:speaker" ]]; then
     pactl set-sink-port "$ALSA_SINK" "analog-output-speaker" 2>/dev/null || true
+    amixer -c 0 sset Headphone mute >/dev/null 2>&1 || true
     amixer -c 0 sset Speaker 100% unmute >/dev/null 2>&1 || true
     amixer -c 0 sset Master unmute >/dev/null 2>&1 || true
     pactl set-default-sink "$ALSA_SINK" 2>/dev/null || true
-    pw-metadata -n default 0 default.audio.sink "{\"name\":\"$ALSA_SINK\"}" 2>/dev/null || true
-    pw-metadata -n default 0 default.configured.audio.sink "{\"name\":\"$ALSA_SINK\"}" 2>/dev/null || true
+    pw-metadata -n default 0 default.audio.sink "{\"name\":\"$ALSA_SINK\"}" Spa:String:JSON 2>/dev/null || true
+    pw-metadata -n default 0 default.configured.audio.sink "{\"name\":\"$ALSA_SINK\"}" Spa:String:JSON 2>/dev/null || true
     wp_id=$(pw-dump Node 2>/dev/null | jq -r --arg n "$ALSA_SINK" '.[] | select(.info.props["node.name"] == $n and .info.props["media.class"] == "Audio/Sink") | .id' | head -n 1)
     if [[ -n "$wp_id" ]]; then
         wpctl set-default "$wp_id" 2>/dev/null || true
@@ -141,11 +142,12 @@ if [[ "$NEXT_ID" == "alsa:speaker" ]]; then
     [[ -n "$dax_id" && "$dax_id" != "null" ]] && pw-metadata -n filters "$dax_id" filter.smart.user_disabled false 2>/dev/null || true
 elif [[ "$NEXT_ID" == "alsa:headphones" ]]; then
     pactl set-sink-port "$ALSA_SINK" "analog-output-headphones" 2>/dev/null || true
+    amixer -c 0 sset Speaker mute >/dev/null 2>&1 || true
     amixer -c 0 sset Headphone 100% unmute >/dev/null 2>&1 || true
     amixer -c 0 sset Master unmute >/dev/null 2>&1 || true
     pactl set-default-sink "$ALSA_SINK" 2>/dev/null || true
-    pw-metadata -n default 0 default.audio.sink "{\"name\":\"$ALSA_SINK\"}" 2>/dev/null || true
-    pw-metadata -n default 0 default.configured.audio.sink "{\"name\":\"$ALSA_SINK\"}" 2>/dev/null || true
+    pw-metadata -n default 0 default.audio.sink "{\"name\":\"$ALSA_SINK\"}" Spa:String:JSON 2>/dev/null || true
+    pw-metadata -n default 0 default.configured.audio.sink "{\"name\":\"$ALSA_SINK\"}" Spa:String:JSON 2>/dev/null || true
     wp_id=$(pw-dump Node 2>/dev/null | jq -r --arg n "$ALSA_SINK" '.[] | select(.info.props["node.name"] == $n and .info.props["media.class"] == "Audio/Sink") | .id' | head -n 1)
     if [[ -n "$wp_id" ]]; then
         wpctl set-default "$wp_id" 2>/dev/null || true
@@ -153,8 +155,8 @@ elif [[ "$NEXT_ID" == "alsa:headphones" ]]; then
     fi
 else
     pactl set-default-sink "$NEXT_SINK" 2>/dev/null || true
-    pw-metadata -n default 0 default.audio.sink "{\"name\":\"$NEXT_SINK\"}" 2>/dev/null || true
-    pw-metadata -n default 0 default.configured.audio.sink "{\"name\":\"$NEXT_SINK\"}" 2>/dev/null || true
+    pw-metadata -n default 0 default.audio.sink "{\"name\":\"$NEXT_SINK\"}" Spa:String:JSON 2>/dev/null || true
+    pw-metadata -n default 0 default.configured.audio.sink "{\"name\":\"$NEXT_SINK\"}" Spa:String:JSON 2>/dev/null || true
     wp_id=$(pw-dump Node 2>/dev/null | jq -r --arg n "$NEXT_SINK" '.[] | select(.info.props["node.name"] == $n and .info.props["media.class"] == "Audio/Sink") | .id' | head -n 1)
     if [[ -n "$wp_id" ]]; then
         wpctl set-default "$wp_id" 2>/dev/null || true
@@ -162,9 +164,8 @@ else
     fi
 fi
 
-# 4. Move all active application playback streams ONLY if the physical sink changed
-if [[ -n "$CURRENT_SINK" && "$NEXT_SINK" != "$CURRENT_SINK" ]]; then
-    python3 -c '
+# 4. Ensure application playback streams route cleanly to target sink
+python3 -c '
 import subprocess, sys
 target_sink = sys.argv[1]
 
@@ -174,6 +175,7 @@ try:
     node_name = ""
     media_name = ""
     app_name = ""
+    bin_name = ""
     is_virtual = False
     
     lines = pactl_inputs.split("\n") + [""]
@@ -211,7 +213,6 @@ try:
 except Exception:
     pass
 ' "$NEXT_SINK" 2>/dev/null || true
-fi
 
 # 4b. Hot-reload Gaming Audio (playback.peace_gaming) ONLY when physical sink actually changes
 # This prevents audio drops/broken pipes in CS2 when cycling between internal speakers and 3.5mm jack

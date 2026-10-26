@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # cliphist-store-capped: size-guarded store shim for the cliphist watcher.
-# cliphist 0.7.0 has no max-store-size option: buffer the incoming clipboard
-# payload (stdin from wl-paste --watch), skip empty and oversized items, then
-# store everything else byte-for-byte.
+# - Stores up to 10MB payloads (handles large LLM prompts, code diffs, logs).
+# - Auto-feeds screenshot-buffer if auto-buffering mode is enabled.
 # ==============================================================================
 export PATH="$HOME/.local/bin:$PATH"
 
-MAX_BYTES=$((1024 * 1024))
+MAX_BYTES=$((10 * 1024 * 1024))
 
 tmp=$(mktemp "${XDG_RUNTIME_DIR:-/tmp}/cliphist-store.XXXXXX") || exit 1
 trap 'rm -f "$tmp"' EXIT
@@ -17,5 +16,17 @@ size=$(stat -c %s "$tmp" 2>/dev/null) || exit 1
 
 [ "$size" -gt 0 ] || exit 0
 [ "$size" -le "$MAX_BYTES" ] || exit 0
+
+# Check if screenshot auto-buffer mode is active
+BUF_DIR="${XDG_RUNTIME_DIR:-/tmp}/screenshot-buffer-$UID"
+if [ -f "$BUF_DIR/.auto_mode" ] && [ ! -f "$BUF_DIR/.pasting" ]; then
+    # Verify PNG magic bytes (\x89PNG)
+    if head -c 8 "$tmp" 2>/dev/null | grep -q 'PNG'; then
+        mkdir -p "$BUF_DIR"
+        cp "$tmp" "$BUF_DIR/shot_$(date +%s%N).png"
+        count=$(find "$BUF_DIR" -maxdepth 1 -name "shot_*.png" 2>/dev/null | wc -l)
+        notify-send -a "Screenshot Buffer" -t 1200 -i camera-photo "Image Buffered" "#$count in queue. Caps+. to paste all." 2>/dev/null || true
+    fi
+fi
 
 cliphist store < "$tmp"

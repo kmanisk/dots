@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# screen-black: Instant DPMS toggle for overnight sleep audio & background tasks
+# - Win+Alt+L toggles screen OFF / ON instantly (0ms latency, zero delay).
+# - Prevents sleep/suspend and lid-close suspension while screen is black.
+# - Any mouse movement or keyboard activity also triggers resume.
+# ==============================================================================
+set -euo pipefail
+
+export PATH="$HOME/.local/bin:/usr/bin:/bin:$PATH"
+
+# Resolve Wayland / Sway environment
+if [ -z "${SWAYSOCK:-}" ] || [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    while IFS='=' read -r k v; do
+        case "$k" in
+            SWAYSOCK|WAYLAND_DISPLAY|DISPLAY|XDG_CURRENT_DESKTOP)
+                [ -n "$v" ] && export "$k"="$v"
+                ;;
+        esac
+    done < <(systemctl --user show-environment 2>/dev/null || true)
+fi
+
+STATE_FILE="${XDG_RUNTIME_DIR:-/tmp}/screen-black.state"
+
+# Check if eDP-1 is currently on
+IS_ON="true"
+if command -v jq >/dev/null 2>&1; then
+    IS_ON=$(swaymsg -t get_outputs 2>/dev/null | jq -r '.[] | select(.name=="eDP-1") | .dpms' 2>/dev/null || echo "true")
+fi
+
+if [ "$IS_ON" = "false" ] || [ -f "$STATE_FILE" ]; then
+    # --- SCREEN IS CURRENTLY OFF: REGAIN SCREEN IMMEDIATELY ---
+    rm -f "$STATE_FILE"
+    pkill -f "screen-black-watcher" 2>/dev/null || true
+    swaymsg "output * dpms on" 2>/dev/null || true
+    notify-send -a "Display" -t 1200 -i display "Display Restored" "Screen active"
+else
+    # --- SCREEN IS CURRENTLY ON: TURN OFF IMMEDIATELY ---
+    touch "$STATE_FILE"
+    swaymsg "output * dpms off" 2>/dev/null || true
+
+    # Launch background watcher & sleep inhibitor
+    nohup systemd-inhibit --what=idle:sleep:handle-lid-switch \
+        --who="Sleep Audio" \
+        --why="Rain video audio and background agent" \
+        bash -c '
+            exec -a screen-black-watcher swayidle -w \
+                timeout 1 "true" \
+                resume "swaymsg \"output * dpms on\" && rm -f '"$STATE_FILE"' && exit 0"
+        ' >/dev/null 2>&1 &
+fi

@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# clipboard-picker: Minimal floating clipboard manager with large prompt preview
+# Features:
+#   - Instant launch via footclient (<10ms)
+#   - Full multi-line prompt preview with syntax highlighting & word wrap
+#   - Image preview in terminal via chafa
+#   - Deep full-text search across complete prompt bodies (Ctrl+F)
+#   - Windows Win+V behavior: Enter copies & directly pastes into active window
+#   - Alt+Enter / Ctrl+Y -> Copy to clipboard only (no paste)
+#   - Ctrl+D -> Delete item
+#   - Ctrl+X -> Wipe history
+# ==============================================================================
+set -euo pipefail
+
+export PATH="$HOME/.local/bin:/usr/bin:/bin:$PATH"
+
+# Load theme colors if present
+ACCENT="#749689"
+BG="#282828"
+FG="#ebdbb2"
+SEL="#3f3f3f"
+MUTED="#4e4e4e"
+YELLOW="#d79921"
+BLUE="#458588"
+ORANGE="#e78a4e"
+
+if [ -f "$HOME/.local/state/theme/colors.sh" ]; then
+    source "$HOME/.local/state/theme/colors.sh"
+    ACCENT="${THEME_ACCENT:-#749689}"
+    BG="${THEME_BG:-#282828}"
+    FG="${THEME_FG:-#ebdbb2}"
+    SEL="${THEME_SEL:-#3f3f3f}"
+    MUTED="${THEME_MUTED:-#4e4e4e}"
+    YELLOW="${THEME_YELLOW:-#d79921}"
+    BLUE="${THEME_BLUE:-#458588}"
+    ORANGE="${THEME_ORANGE:-#e78a4e}"
+fi
+
+# Ensure cliphist is installed
+if ! command -v cliphist >/dev/null 2>&1; then
+    notify-send -a "Clipboard" -u critical "Error" "cliphist is not installed"
+    exit 1
+fi
+
+items=$(cliphist list 2>/dev/null || true)
+if [ -z "$items" ]; then
+    notify-send -a "Clipboard" -t 1500 -u low -i edit-paste "Clipboard Empty" "No items in clipboard history"
+    exit 0
+fi
+
+HEADER="Enter: Paste  │  Alt+Enter/Ctrl+Y: Copy  │  Ctrl+F: Deep Search  │  Ctrl+D: Del  │  Esc: Exit"
+
+SELECTED=$(printf '%s\n' "$items" | fzf \
+    --prompt=" Clipboard > " \
+    --header="$HEADER" \
+    --header-first \
+    --layout=reverse \
+    --height=100% \
+    --border=none \
+    --margin=0 \
+    --padding=0 \
+    --info=inline \
+    --ansi \
+    --color="bg+:${SEL},fg+:${FG},pointer:${ORANGE},prompt:${ACCENT},hl:${YELLOW},hl+:${YELLOW},border:${MUTED},header:${BLUE},info:${MUTED}" \
+    --preview='~/.local/bin/clipboard-preview {}' \
+    --preview-window='right:58%:border-left:wrap' \
+    --bind="ctrl-d:execute-silent(cliphist delete <<< {})+reload(cliphist list)" \
+    --bind="ctrl-x:execute-silent(~/.local/bin/clipboard-wipe)+reload(cliphist list)" \
+    --bind="ctrl-f:reload(~/.local/bin/clipboard-search {q})" \
+    --bind="ctrl-r:reload(cliphist list)" \
+    --bind="shift-up:preview-up,shift-down:preview-down,page-up:preview-page-up,page-down:preview-page-down" \
+    --expect="alt-enter,ctrl-y" \
+    || true)
+
+[ -z "$SELECTED" ] && exit 0
+
+# Parse key and chosen line
+KEY=$(head -n 1 <<< "$SELECTED")
+ENTRY=$(sed -n '2p' <<< "$SELECTED")
+
+# If Enter was pressed without an expect key, sed -n 2p is empty and head -n 1 is the item
+if [ -z "$ENTRY" ]; then
+    ENTRY="$KEY"
+    KEY="enter"
+fi
+
+[ -z "$ENTRY" ] && exit 0
+
+# Decode and copy to Wayland clipboard
+if [[ "$ENTRY" == *"[[ binary data"* ]]; then
+    cliphist decode <<< "$ENTRY" | wl-copy -t image/png 2>/dev/null || true
+    notify-send -a "Clipboard" -t 1200 -i image-x-generic "Copied Image" "Image copied to clipboard"
+else
+    cliphist decode <<< "$ENTRY" | wl-copy 2>/dev/null || true
+    preview=$(cliphist decode <<< "$ENTRY" | head -n 1 | cut -c 1-60)
+    notify-send -a "Clipboard" -t 1200 -i edit-paste "Copied to Clipboard" "$preview"
+fi
+
+# Windows Win+V behavior: Enter simulates paste into previous active window
+if [ "$KEY" = "enter" ]; then
+    sleep 0.12
+    wtype -m shift -m win -m alt -M ctrl -k v -m ctrl 2>/dev/null || true
+fi
