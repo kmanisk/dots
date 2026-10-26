@@ -22,19 +22,6 @@ if [ -z "${SWAYSOCK:-}" ] || [ -z "${WAYLAND_DISPLAY:-}" ]; then
 fi
 
 STATE_FILE="${XDG_RUNTIME_DIR:-/tmp}/screen-black.state"
-PID_FILE="${XDG_RUNTIME_DIR:-/tmp}/screen-black.pid"
-
-cleanup_inhibitor() {
-    if [ -f "$PID_FILE" ]; then
-        local pid
-        pid=$(cat "$PID_FILE" 2>/dev/null || true)
-        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-            kill "$pid" 2>/dev/null || true
-        fi
-        rm -f "$PID_FILE"
-    fi
-    pkill -f "screen-black-inhibitor" 2>/dev/null || true
-}
 
 # Check if eDP-1 is currently on
 IS_ON="true"
@@ -45,7 +32,7 @@ fi
 if [ -f "$STATE_FILE" ] || [ "$IS_ON" = "false" ]; then
     # --- SCREEN IS CURRENTLY OFF: REGAIN SCREEN IMMEDIATELY ---
     rm -f "$STATE_FILE"
-    cleanup_inhibitor
+    systemctl --user stop screen-black-inhibitor.service 2>/dev/null || true
 
     # Resume swayidle timer
     pkill -CONT -x swayidle 2>/dev/null || true
@@ -63,15 +50,12 @@ else
     # Pause swayidle so timeouts or switch events cannot wake screen or lock session
     pkill -STOP -x swayidle 2>/dev/null || true
 
-    # Clean any stale inhibitor
-    cleanup_inhibitor
-
-    # Start sleep, idle, and lid-close inhibitor in background
-    systemd-inhibit --what=idle:sleep:handle-lid-switch \
+    # Start sleep, idle, and lid-close inhibitor as transient systemd user service
+    systemctl --user stop screen-black-inhibitor.service 2>/dev/null || true
+    systemd-run --user --unit=screen-black-inhibitor \
+        systemd-inhibit --what=idle:sleep:handle-lid-switch \
         --who="screen-black" \
         --why="Overnight sleep audio and background tasks" \
         --mode=block \
-        bash -c 'exec -a screen-black-inhibitor sleep infinity' >/dev/null 2>&1 &
-
-    echo "$!" > "$PID_FILE"
+        sleep infinity >/dev/null 2>&1
 fi
