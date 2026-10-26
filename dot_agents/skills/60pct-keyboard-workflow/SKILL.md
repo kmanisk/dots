@@ -52,7 +52,7 @@ All future keybinding modifications across **i3**, **xremap**, **Zed**, **Alacri
     - Word / Char Del: `Caps + u / d` (`Ctrl+BS / Del`)
     - Spacing & Line: `Caps + n / m` (`Enter / BS`)
     - Select All & Copy: `Caps + ,` (`Ctrl+A, Ctrl+C`)
-    - Smart Paste: `Caps + .` (pastes all buffered screenshots if present; otherwise Ctrl+V)
+    - Screenshot Buffer Picker: `Caps + .` (opens interactive picker to choose screenshots with Space/arrows and paste into prompt; otherwise Ctrl+V)
     - Clipboard Menu: `Caps + c` (Opens centered floating clipboard manager)
     - View Screenshot: `Caps + v` (Opens latest screenshot in imv)
     - Brightness Control: `Caps + [` (BrightnessUp), `Caps + '` (BrightnessDown)

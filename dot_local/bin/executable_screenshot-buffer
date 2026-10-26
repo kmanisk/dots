@@ -5,6 +5,7 @@
 # into AI chat / editor / browser via simulated sequential paste or stitching.
 #
 # Commands:
+#   menu    -> Open interactive multi-selection picker (Space to choose, Enter to paste)
 #   snip    -> Select interactive region, save to buffer, copy newest to clipboard
 #   paste   -> Sequentially paste all buffered screenshots into active window
 #   stitch  -> Merge all buffered screenshots vertically into one image & paste
@@ -54,6 +55,23 @@ chmod 700 "$BUF_DIR" 2>/dev/null || true
 CMD="${1:-snip}"
 
 case "$CMD" in
+    menu)
+        SOCK="${XDG_RUNTIME_DIR:-/run/user/$UID}/foot.sock"
+        if [ -S "$SOCK" ]; then
+            footclient -s "$SOCK" --app-id=clip-term \
+                -o font="VictorMono Nerd Font:size=14.0:style=Bold" \
+                -o pad=14x14 \
+                -w 1760x1040 \
+                "$HOME/.local/bin/screenshot-picker" && exit 0
+        fi
+
+        exec foot -a clip-term \
+            -o font="VictorMono Nerd Font:size=14.0:style=Bold" \
+            -o pad=14x14 \
+            -w 1760x1040 \
+            "$HOME/.local/bin/screenshot-picker"
+        ;;
+
     snip)
         # Load theme colors for slurp
         BORDER_COL="#58a6ffff"

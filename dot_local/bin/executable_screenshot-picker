@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# screenshot-picker: Interactive multi-selection modal for screenshot buffer
+# Allows browsing buffered screenshots with arrow keys, multi-selecting with Space,
+# and pasting chosen images directly into AI prompts (ChatGPT, Claude, etc.).
+#
+# Controls:
+#   Space      -> Toggle selection on/off and move down
+#   Up / Down  -> Navigate through screenshots
+#   Enter      -> Paste selected screenshots sequentially into active window
+#   Alt+Enter  -> Merge/stitch selected screenshots into one image and paste
+#   Ctrl+A     -> Select all screenshots in queue
+#   Ctrl+D     -> Delete highlighted screenshot from queue
+#   Ctrl+X     -> Wipe entire buffer queue and exit
+#   Esc        -> Close without pasting
+# ==============================================================================
+set -euo pipefail
+
+export PATH="$HOME/.local/bin:/usr/bin:/bin:$PATH"
+
+BUF_DIR="${XDG_RUNTIME_DIR:-/tmp}/screenshot-buffer-$UID"
+ARCHIVE_DIR="$BUF_DIR/archive"
+mkdir -p "$BUF_DIR" "$ARCHIVE_DIR"
+
+# Subcommand: --list-raw (for dynamic fzf reload on deletion)
+list_raw() {
+    local shots=()
+    mapfile -t shots < <(find "$BUF_DIR" -maxdepth 1 -name "shot_*.png" 2>/dev/null | sort -V)
+    [ "${#shots[@]}" -eq 0 ] && exit 0
+
+    local idx=1
+    for s in "${shots[@]}"; do
+        [ -f "$s" ] || continue
+        local mtime size_b size_kb t_str fname
+        mtime=$(stat -c %Y "$s" 2>/dev/null || date +%s)
+        size_b=$(stat -c %s "$s" 2>/dev/null || echo 0)
+        size_kb=$(( (size_b + 1023) / 1024 ))
+        t_str=$(date -d "@$mtime" +%H:%M:%S 2>/dev/null || date +%H:%M:%S)
+        fname=$(basename "$s")
+        printf "[%02d]  %s  │  %4d KB  │  %s\t%s\n" "$idx" "$t_str" "$size_kb" "$fname" "$s"
+        idx=$((idx + 1))
+    done
+}
+
+if [ "${1:-}" = "--list-raw" ]; then
+    list_raw
+    exit 0
+fi
+
+# Ensure buffer has screenshots
+items=$(list_raw)
+if [ -z "$items" ]; then
+    notify-send -a "Screenshot Buffer" -t 1500 -u low -i camera-photo \
+        "Buffer Empty" "No screenshots in queue."
+    exit 0
+fi
+
+# Load theme colors if present
+ACCENT="#749689"
+BG="#282828"
+FG="#ebdbb2"
+SEL="#3f3f3f"
+MUTED="#4e4e4e"
+YELLOW="#d79921"
+BLUE="#458588"
+ORANGE="#e78a4e"
+
+if [ -f "$HOME/.local/state/theme/colors.sh" ]; then
+    source "$HOME/.local/state/theme/colors.sh"
+    ACCENT="${THEME_ACCENT:-#749689}"
+    BG="${THEME_BG:-#282828}"
+    FG="${THEME_FG:-#ebdbb2}"
+    SEL="${THEME_SEL:-#3f3f3f}"
+    MUTED="${THEME_MUTED:-#4e4e4e}"
+    YELLOW="${THEME_YELLOW:-#d79921}"
+    BLUE="${THEME_BLUE:-#458588}"
+    ORANGE="${THEME_ORANGE:-#e78a4e}"
+fi
+
+HEADER=$(printf "Space: Select / Deselect (Multi-choice)  │  Up/Down: Navigate  │  Enter: Paste Selected into Prompt\nAlt+Enter: Stitch Paste  │  Ctrl+A: Select All  │  Ctrl+D: Delete  │  Esc: Cancel")
+
+SELECTED=$(printf '%s\n' "$items" | fzf \
+    -m \
+    --prompt=" Screenshots > " \
+    --header="$HEADER" \
+    --header-first \
+    --layout=reverse \
+    --height=100% \
+    --border=none \
+    --margin=0 \
+    --padding=0 \
+    --info=inline \
+    --ansi \
+    --delimiter=$'\t' \
+    --with-nth=1 \
+    --color="bg+:${SEL},fg+:${FG},pointer:${ORANGE},prompt:${ACCENT},hl:${YELLOW},hl+:${YELLOW},border:${MUTED},header:${BLUE},info:${MUTED}" \
+    --preview="$HOME/.local/bin/screenshot-preview {2}" \
+    --preview-window='right:55%:border-left:wrap' \
+    --bind="space:toggle+down" \
+    --bind="ctrl-a:select-all" \
+    --bind="ctrl-d:execute-silent(rm -f {2})+reload($HOME/.local/bin/screenshot-picker --list-raw)" \
+    --bind="ctrl-x:execute-silent(rm -f $BUF_DIR/shot_*.png)+abort" \
+    --expect="alt-enter" \
+    || true)
+
+[ -z "$SELECTED" ] && exit 0
+
+# Parse expect key and selected files
+KEY=""
+CHOSEN_FILES=()
+
+while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    if [ "$line" = "alt-enter" ]; then
+        KEY="alt-enter"
+        continue
+    fi
+    file_path="${line##*$'\t'}"
+    if [ -f "$file_path" ]; then
+        CHOSEN_FILES+=("$file_path")
+    fi
+done <<< "$SELECTED"
+
+total_chosen="${#CHOSEN_FILES[@]}"
+[ "$total_chosen" -eq 0 ] && exit 0
+
+# Wait briefly for picker window to close and active chat / browser to regain focus
+sleep 0.18
+
+# Lock buffer during paste
+touch "$BUF_DIR/.pasting"
+trap 'rm -f "$BUF_DIR/.pasting"' EXIT
+
+if [ "$KEY" = "alt-enter" ]; then
+    # Stitch selected screenshots into one composite and paste
+    STITCH_FILE="$BUF_DIR/stitched_$(date +%s%N).png"
+    if [ "$total_chosen" -eq 1 ]; then
+        cp "${CHOSEN_FILES[0]}" "$STITCH_FILE"
+    else
+        magick "${CHOSEN_FILES[@]}" -append "$STITCH_FILE" 2>/dev/null || true
+    fi
+
+    wl-copy -t image/png < "$STITCH_FILE"
+    sleep 0.1
+    wtype -m shift -m win -m alt -M ctrl -k v -m ctrl 2>/dev/null || true
+
+    mv "${CHOSEN_FILES[@]}" "$ARCHIVE_DIR/" 2>/dev/null || true
+    mv "$STITCH_FILE" "$ARCHIVE_DIR/" 2>/dev/null || true
+    notify-send -a "Screenshot Buffer" -t 1500 -i edit-paste \
+        "Stitched Paste Complete" "Merged and pasted $total_chosen screenshot(s)."
+else
+    # Sequentially paste selected screenshots
+    for img in "${CHOSEN_FILES[@]}"; do
+        [ -f "$img" ] || continue
+        wl-copy -t image/png < "$img"
+        sleep 0.12
+        wtype -m shift -m win -m alt -M ctrl -k v -m ctrl 2>/dev/null || true
+        sleep 0.35
+    done
+
+    mv "${CHOSEN_FILES[@]}" "$ARCHIVE_DIR/" 2>/dev/null || true
+    notify-send -a "Screenshot Buffer" -t 1500 -i edit-paste \
+        "Batch Paste Complete" "Pasted $total_chosen screenshot(s) to prompt."
+fi
+
+# Clean archive older than 2 hours
+find "$ARCHIVE_DIR" -type f -mmin +120 -delete 2>/dev/null || true
