@@ -96,6 +96,7 @@ It distinguishes measured runtime state, implemented fixes, and remaining limita
 ### 9. [Personal Guides (`docs/personal/`)](file:///home/onyx/docs/personal)
 - [`real-world-networking.md`](file:///home/onyx/docs/personal/real-world-networking.md) — Real-world networking and troubleshooting reference: MTU, TCP vs UDP, DNS pipelines (UDP 53 vs DoT 853 vs DoH 443), ISP DPI censorship mechanics (plaintext SNI vs ECH), and socket programming primitives.
 - [`linux-filesystem-btrfs.md`](file:///home/onyx/docs/personal/linux-filesystem-btrfs.md) — Linux Root Filesystem, Filesystem Hierarchy Standard (FHS), and Btrfs subvolume architecture reference.
+- [`wayland-screen-share-overlay-cloaking.md`](file:///home/onyx/docs/personal/wayland-screen-share-overlay-cloaking.md) — Wayland screen sharing & overlay cloaking architecture (Sway virtual headless display decoupling, wlroots screencopy mechanics, borderless tiling stacking order, and zero-leak interview setups).
 - [`meetingly-windows-setup.md`](file:///home/onyx/docs/meetingly-windows-setup.md) — Meetingly AI and local Ollama setup guide on Windows (RTX 5050 8 GB VRAM budget, WASAPI loopback routing, Win32 window cloaking, and hybrid cloud web search).
 
 ### 10. [Projects (`docs/projects/`)](file:///home/onyx/docs/projects)
