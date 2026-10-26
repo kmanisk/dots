@@ -5,15 +5,14 @@
 # into AI prompts (ChatGPT, Claude, etc.) or editors.
 #
 # Controls:
-#   Space / Ctrl+Space -> Toggle selection on/off (ballot box [x] / [ ])
-#   Up / Down          -> Navigate screenshot queue
-#   Enter              -> Paste selected screenshots sequentially into active window
-#   Alt+Enter          -> Stitch selected screenshots into one image and paste
-#   Alt+d              -> Delete highlighted screenshot from queue (refreshes menu)
-#   Alt+x              -> Wipe entire screenshot buffer queue and exit
-#   Esc                -> Close without pasting
+#   Shift+Return / Return -> Select & paste into active window
+#   Up / Down             -> Navigate screenshot queue
+#   Alt+Enter             -> Stitch selected screenshots into one image and paste
+#   Alt+d / Shift+Delete  -> Delete highlighted screenshot from queue (refreshes menu)
+#   Alt+x / Ctrl+x        -> Wipe entire screenshot buffer queue and exit
+#   Esc                   -> Close without pasting
 # ==============================================================================
-set -euo pipefail
+set -u
 
 export PATH="$HOME/.local/bin:/usr/bin:/bin:$PATH"
 
@@ -64,14 +63,13 @@ while true; do
         exit 0
     fi
 
-    # Launch Rofi with multi-select enabled and space bound to ballot toggle
-    chosen=$(display_items | rofi -dmenu \
+    items=$(display_items)
+    [ -z "$items" ] && exit 0
+
+    chosen=$(printf '%s\n' "$items" | rofi -dmenu \
         -multi-select \
-        -ballot-selected-str "[x] " \
-        -ballot-unselected-str "[ ] " \
         -p "Screenshots" \
-        -mesg "Space: Toggle Select  │  Enter: Paste Selected  │  Alt+Enter: Stitch Paste  │  Alt+d: Delete  │  Alt+x: Clear" \
-        -kb-row-select "space,Control+space" \
+        -mesg "Enter: Paste  │  Alt+Enter: Stitch Paste  │  Alt+d: Delete  │  Alt+x: Clear" \
         -kb-custom-1 "Alt+Return,Control+Return" \
         -kb-custom-2 "Alt+d,Shift+Delete" \
         -kb-custom-3 "Alt+x,Control+x" \
@@ -137,7 +135,6 @@ while true; do
         trap 'rm -f "$BUF_DIR/.pasting"' EXIT
 
         if [ "$exit_code" -eq 10 ]; then
-            # Stitch selected screenshots vertically into one composite and paste
             STITCH_FILE="$BUF_DIR/stitched_$(date +%s%N).png"
             if [ "$total_chosen" -eq 1 ]; then
                 cp "${chosen_files[0]}" "$STITCH_FILE"
@@ -153,7 +150,6 @@ while true; do
             mv "$STITCH_FILE" "$ARCHIVE_DIR/" 2>/dev/null || true
             notify "Stitched Paste Complete" "Merged and pasted $total_chosen screenshot(s)."
         else
-            # Sequentially paste selected screenshots
             for img in "${chosen_files[@]}"; do
                 [ -f "$img" ] || continue
                 wl-copy -t image/png < "$img"
@@ -166,7 +162,6 @@ while true; do
             notify "Batch Paste Complete" "Pasted $total_chosen screenshot(s) to prompt."
         fi
 
-        # Clean archive entries older than 2 hours
         find "$ARCHIVE_DIR" -type f -mmin +120 -delete 2>/dev/null || true
         exit 0
     fi

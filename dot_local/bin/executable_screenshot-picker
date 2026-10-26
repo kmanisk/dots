@@ -18,11 +18,34 @@ set -euo pipefail
 
 export PATH="$HOME/.local/bin:/usr/bin:/bin:$PATH"
 
+TARGET_ID=""
+TARGET_APP=""
+
+# Parse flags
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --target-id=*)
+            TARGET_ID="${1#*=}"
+            shift
+            ;;
+        --target-app=*)
+            TARGET_APP="${1#*=}"
+            shift
+            ;;
+        --list-raw)
+            TARGET_ID="list-raw"
+            break
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
 BUF_DIR="${XDG_RUNTIME_DIR:-/tmp}/screenshot-buffer-$UID"
 ARCHIVE_DIR="$BUF_DIR/archive"
 mkdir -p "$BUF_DIR" "$ARCHIVE_DIR"
 
-# Subcommand: --list-raw (for dynamic fzf reload on deletion)
 list_raw() {
     local shots=()
     mapfile -t shots < <(find "$BUF_DIR" -maxdepth 1 -name "shot_*.png" 2>/dev/null | sort -V)
@@ -42,7 +65,7 @@ list_raw() {
     done
 }
 
-if [ "${1:-}" = "--list-raw" ]; then
+if [ "${TARGET_ID:-}" = "list-raw" ]; then
     list_raw
     exit 0
 fi
@@ -105,31 +128,45 @@ SELECTED=$(printf '%s\n' "$items" | fzf \
 
 [ -z "$SELECTED" ] && exit 0
 
-# Parse expect key and selected files
 KEY=""
 CHOSEN_FILES=()
 
+first_line=1
 while IFS= read -r line; do
-    [ -z "$line" ] && continue
-    if [ "$line" = "alt-enter" ]; then
-        KEY="alt-enter"
+    if [ "$first_line" -eq 1 ]; then
+        first_line=0
+        if [ "$line" = "alt-enter" ]; then
+            KEY="alt-enter"
+        fi
         continue
     fi
-    file_path="${line##*$'\t'}"
-    if [ -f "$file_path" ]; then
-        CHOSEN_FILES+=("$file_path")
+    [ -z "$line" ] && continue
+    if [[ "$line" =~ (shot_[0-9]+\.png) ]]; then
+        fname="${BASH_REMATCH[1]}"
+        if [ -f "$BUF_DIR/$fname" ]; then
+            CHOSEN_FILES+=("$BUF_DIR/$fname")
+        fi
     fi
 done <<< "$SELECTED"
 
 total_chosen="${#CHOSEN_FILES[@]}"
 [ "$total_chosen" -eq 0 ] && exit 0
 
-# Wait briefly for picker window to close and active chat / browser to regain focus
+# Wait briefly for picker window to close and refocus previous target window
 sleep 0.18
+if [ -n "$TARGET_ID" ]; then
+    swaymsg "[con_id=$TARGET_ID] focus" 2>/dev/null || true
+    sleep 0.12
+fi
 
 # Lock buffer during paste
 touch "$BUF_DIR/.pasting"
 trap 'rm -f "$BUF_DIR/.pasting"' EXIT
+
+is_terminal=0
+if [[ "${TARGET_APP,,}" =~ (foot|alacritty|kitty|term) ]]; then
+    is_terminal=1
+fi
 
 if [ "$KEY" = "alt-enter" ]; then
     # Stitch selected screenshots into one composite and paste
@@ -142,7 +179,11 @@ if [ "$KEY" = "alt-enter" ]; then
 
     wl-copy -t image/png < "$STITCH_FILE"
     sleep 0.1
-    wtype -m shift -m win -m alt -M ctrl -k v -m ctrl 2>/dev/null || true
+    if [ "$is_terminal" -eq 1 ]; then
+        wtype "$STITCH_FILE " 2>/dev/null || true
+    else
+        wtype -m shift -m win -m alt -M ctrl -k v -m ctrl 2>/dev/null || true
+    fi
 
     mv "${CHOSEN_FILES[@]}" "$ARCHIVE_DIR/" 2>/dev/null || true
     mv "$STITCH_FILE" "$ARCHIVE_DIR/" 2>/dev/null || true
@@ -154,7 +195,11 @@ else
         [ -f "$img" ] || continue
         wl-copy -t image/png < "$img"
         sleep 0.12
-        wtype -m shift -m win -m alt -M ctrl -k v -m ctrl 2>/dev/null || true
+        if [ "$is_terminal" -eq 1 ]; then
+            wtype "$img " 2>/dev/null || true
+        else
+            wtype -m shift -m win -m alt -M ctrl -k v -m ctrl 2>/dev/null || true
+        fi
         sleep 0.35
     done
 
