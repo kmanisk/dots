@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # screen-black: Instant DPMS toggle for overnight sleep audio & background tasks
-# - Win+Alt+L toggles screen OFF / ON instantly (0ms latency, zero delay).
-# - Prevents sleep/suspend and lid-close suspension while screen is black.
-# - Any mouse movement or keyboard activity also triggers resume.
+# - Win+Alt+L toggles screen OFF / ON instantly.
+# - Inhibits idle, sleep, and lid-close suspension (HandleLidSwitch blocked).
+# - Pauses swayidle so no auto-lock or timeout can turn display back on.
+# - Audio and background agents continue running indefinitely with lid closed.
 # ==============================================================================
 set -euo pipefail
 
@@ -21,6 +22,19 @@ if [ -z "${SWAYSOCK:-}" ] || [ -z "${WAYLAND_DISPLAY:-}" ]; then
 fi
 
 STATE_FILE="${XDG_RUNTIME_DIR:-/tmp}/screen-black.state"
+PID_FILE="${XDG_RUNTIME_DIR:-/tmp}/screen-black.pid"
+
+cleanup_inhibitor() {
+    if [ -f "$PID_FILE" ]; then
+        local pid
+        pid=$(cat "$PID_FILE" 2>/dev/null || true)
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null || true
+        fi
+        rm -f "$PID_FILE"
+    fi
+    pkill -f "screen-black-inhibitor" 2>/dev/null || true
+}
 
 # Check if eDP-1 is currently on
 IS_ON="true"
@@ -28,24 +42,36 @@ if command -v jq >/dev/null 2>&1; then
     IS_ON=$(swaymsg -t get_outputs 2>/dev/null | jq -r '.[] | select(.name=="eDP-1") | .dpms' 2>/dev/null || echo "true")
 fi
 
-if [ "$IS_ON" = "false" ] || [ -f "$STATE_FILE" ]; then
+if [ -f "$STATE_FILE" ] || [ "$IS_ON" = "false" ]; then
     # --- SCREEN IS CURRENTLY OFF: REGAIN SCREEN IMMEDIATELY ---
     rm -f "$STATE_FILE"
-    pkill -f "screen-black-watcher" 2>/dev/null || true
+    cleanup_inhibitor
+
+    # Resume swayidle timer
+    pkill -CONT -x swayidle 2>/dev/null || true
+
+    # Turn display panel on
     swaymsg "output * dpms on" 2>/dev/null || true
-    notify-send -a "Display" -t 1200 -i display "Display Restored" "Screen active"
+    notify-send -a "Display" -t 1500 -i display "Display Restored" "Screen active"
 else
-    # --- SCREEN IS CURRENTLY ON: TURN OFF IMMEDIATELY ---
+    # --- SCREEN IS CURRENTLY ON: TURN OFF FOR OVERNIGHT SLEEP ---
     touch "$STATE_FILE"
+
+    # Turn display panel off immediately
     swaymsg "output * dpms off" 2>/dev/null || true
 
-    # Launch background watcher & sleep inhibitor
-    nohup systemd-inhibit --what=idle:sleep:handle-lid-switch \
-        --who="Sleep Audio" \
-        --why="Rain video audio and background agent" \
-        bash -c '
-            exec -a screen-black-watcher swayidle -w \
-                timeout 1 "true" \
-                resume "swaymsg \"output * dpms on\" && rm -f '"$STATE_FILE"' && exit 0"
-        ' >/dev/null 2>&1 &
+    # Pause swayidle so timeouts or switch events cannot wake screen or lock session
+    pkill -STOP -x swayidle 2>/dev/null || true
+
+    # Clean any stale inhibitor
+    cleanup_inhibitor
+
+    # Start sleep, idle, and lid-close inhibitor in background
+    systemd-inhibit --what=idle:sleep:handle-lid-switch \
+        --who="screen-black" \
+        --why="Overnight sleep audio and background tasks" \
+        --mode=block \
+        bash -c 'exec -a screen-black-inhibitor sleep infinity' >/dev/null 2>&1 &
+
+    echo "$!" > "$PID_FILE"
 fi
