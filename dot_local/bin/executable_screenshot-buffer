@@ -16,6 +16,9 @@
 # ==============================================================================
 set -euo pipefail
 
+# Resolve helper binaries even under stripped launcher environments (xremap)
+export PATH="$HOME/.local/bin:/usr/bin:/bin:${PATH:-}"
+
 # Ensure Wayland / Sway environment
 if [ -z "${SWAYSOCK:-}" ] || [ -z "${WAYLAND_DISPLAY:-}" ]; then
     if command -v systemctl >/dev/null 2>&1; then
@@ -56,22 +59,42 @@ CMD="${1:-snip}"
 
 case "$CMD" in
     menu)
+        mapfile -t shots < <(find "$BUF_DIR" -maxdepth 1 -name "shot_*.png" 2>/dev/null | sort -V)
+        if [ "${#shots[@]}" -eq 0 ]; then
+            notify-send -a "Screenshot Buffer" -t 1500 -u low -i camera-photo \
+                "Buffer Empty" "No screenshots queued. Caps+Space captures one."
+            exit 0
+        fi
         TARGET_ID=$(swaymsg -t get_tree 2>/dev/null | jq -r '.. | select(.focused? == true) | .id' 2>/dev/null || true)
         TARGET_APP=$(swaymsg -t get_tree 2>/dev/null | jq -r '.. | select(.focused? == true) | .app_id // .window_properties.class // empty' 2>/dev/null || true)
 
+        # Single instance: pressing the key twice must not stack two pickers
+        LOCK="${XDG_RUNTIME_DIR:-/run/user/$UID}/screenshot-picker.lock"
+        exec 9>"$LOCK"
+        flock -n 9 || exit 0
+
         SOCK="${XDG_RUNTIME_DIR:-/run/user/$UID}/foot.sock"
         if [ -S "$SOCK" ]; then
-            footclient -s "$SOCK" --app-id=clip-term \
+            ferr=$(footclient -s "$SOCK" --app-id=clip-term \
                 -o font="VictorMono Nerd Font:size=14.0:style=Bold" \
                 -o pad=14x14 \
-                -w 1760x1040 \
-                "$HOME/.local/bin/screenshot-picker" --target-id="${TARGET_ID:-}" --target-app="${TARGET_APP:-}" && exit 0
+                -w 1900x1160 \
+                "$HOME/.local/bin/screenshot-picker" --target-id="${TARGET_ID:-}" --target-app="${TARGET_APP:-}" 2>&1 >/dev/null) && exit 0
+            frc=$?
+            # footclient exits with the picker's status when the window ran, and
+            # only prints "failed to connect" when the socket is dead. Falling
+            # back on any non-zero status reopened the picker after the user
+            # closed it, which looked like two windows.
+            case "$ferr" in
+                *"failed to connect"*) : ;;
+                *) exit "$frc" ;;
+            esac
         fi
 
         exec foot -a clip-term \
             -o font="VictorMono Nerd Font:size=14.0:style=Bold" \
             -o pad=14x14 \
-            -w 1760x1040 \
+            -w 1900x1160 \
             "$HOME/.local/bin/screenshot-picker" --target-id="${TARGET_ID:-}" --target-app="${TARGET_APP:-}"
         ;;
 
@@ -97,7 +120,7 @@ case "$CMD" in
 
             count=$(find "$BUF_DIR" -maxdepth 1 -name "shot_*.png" 2>/dev/null | wc -l)
             notify-send -a "Screenshot Buffer" -t 1500 -i camera-photo \
-                "Screenshot Buffered" "#$count queued. Caps+. to paste all."
+                "Screenshot Buffered" "#$count queued. Caps+Shift+Space to pick."
         fi
         ;;
 
@@ -122,7 +145,7 @@ case "$CMD" in
             [ -f "$img" ] || continue
             wl-copy -t image/png < "$img"
             sleep 0.1
-            wtype -m shift -m win -m alt -M ctrl -k v -m ctrl 2>/dev/null || true
+            "$HOME/.local/bin/wtype-paste" 2>/dev/null || true
             sleep 0.35
         done
 
@@ -159,7 +182,7 @@ case "$CMD" in
         sleep 0.2
         wl-copy -t image/png < "$STITCH_FILE"
         sleep 0.1
-        wtype -m shift -m win -m alt -M ctrl -k v -m ctrl 2>/dev/null || true
+        "$HOME/.local/bin/wtype-paste" 2>/dev/null || true
 
         mv "${shots[@]}" "$ARCHIVE_DIR/" 2>/dev/null || true
         mv "$STITCH_FILE" "$ARCHIVE_DIR/" 2>/dev/null || true

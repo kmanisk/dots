@@ -100,5 +100,5 @@ fi
 # Windows Win+V behavior: Enter simulates paste into previous active window
 if [ "$KEY" = "enter" ]; then
     sleep 0.12
-    wtype -m shift -m win -m alt -M ctrl -k v -m ctrl 2>/dev/null || true
+    "$HOME/.local/bin/wtype-paste" 2>/dev/null || true
 fi

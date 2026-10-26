@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# wtype-paste: send the correct clipboard-paste shortcut to the focused window.
+#
+# Terminals need Ctrl+Shift+V. Everything else needs Ctrl+V. Sending a combined
+# Ctrl+Shift+Alt+Super+V (the previous behaviour in the screenshot tools) is not
+# a paste shortcut in any application, so the clipboard never reached the prompt.
+#
+# Usage:
+#   wtype-paste            # detect the focused window via swaymsg
+#   wtype-paste footclient # explicit app_id / class override
+# ==============================================================================
+set -euo pipefail
+
+app="${1:-}"
+
+if [ -z "$app" ]; then
+    app=$(swaymsg -t get_tree 2>/dev/null \
+        | jq -r '.. | select(.focused? == true) | (.app_id // .window_properties.class // "")' 2>/dev/null \
+        | head -n 1 || true)
+fi
+
+case "${app,,}" in
+    *foot*|*alacritty*|*kitty*|*wezterm*|*term*)
+        exec wtype -M ctrl -M shift -k v -m shift -m ctrl
+        ;;
+    *)
+        exec wtype -M ctrl -k v -m ctrl
+        ;;
+esac

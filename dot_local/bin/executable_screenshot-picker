@@ -100,7 +100,7 @@ if [ -f "$HOME/.local/state/theme/colors.sh" ]; then
     ORANGE="${THEME_ORANGE:-#e78a4e}"
 fi
 
-HEADER=$(printf "Space: Select / Deselect (Multi-choice)  │  Up/Down: Navigate  │  Enter: Paste Selected into Prompt\nAlt+Enter: Stitch Paste  │  Ctrl+A: Select All  │  Ctrl+D: Delete  │  Esc: Cancel")
+HEADER=$(printf "Space: Select / Deselect (Multi-choice)  │  Up/Down: Navigate  │  Enter: Paste Selected into Prompt\nAlt+Enter: Stitch Paste  │  Ctrl+A: Select All  │  Ctrl+D: Delete Selected  │  Esc: Cancel")
 
 SELECTED=$(printf '%s\n' "$items" | fzf \
     -m \
@@ -121,7 +121,7 @@ SELECTED=$(printf '%s\n' "$items" | fzf \
     --preview-window='right:55%:border-left:wrap' \
     --bind="space:toggle+down" \
     --bind="ctrl-a:select-all" \
-    --bind="ctrl-d:execute-silent(rm -f {2})+reload($HOME/.local/bin/screenshot-picker --list-raw)" \
+    --bind="ctrl-d:execute-silent(rm -f {+2})+reload($HOME/.local/bin/screenshot-picker --list-raw)" \
     --bind="ctrl-x:execute-silent(rm -f $BUF_DIR/shot_*.png)+abort" \
     --expect="alt-enter" \
     || true)
@@ -182,7 +182,7 @@ if [ "$KEY" = "alt-enter" ]; then
     if [ "$is_terminal" -eq 1 ]; then
         wtype "$STITCH_FILE " 2>/dev/null || true
     else
-        wtype -m shift -m win -m alt -M ctrl -k v -m ctrl 2>/dev/null || true
+        "$HOME/.local/bin/wtype-paste" "$TARGET_APP" 2>/dev/null || true
     fi
 
     mv "${CHOSEN_FILES[@]}" "$ARCHIVE_DIR/" 2>/dev/null || true
@@ -198,7 +198,7 @@ else
         if [ "$is_terminal" -eq 1 ]; then
             wtype "$img " 2>/dev/null || true
         else
-            wtype -m shift -m win -m alt -M ctrl -k v -m ctrl 2>/dev/null || true
+            "$HOME/.local/bin/wtype-paste" "$TARGET_APP" 2>/dev/null || true
         fi
         sleep 0.35
     done

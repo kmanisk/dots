@@ -67,8 +67,11 @@ keymap:
       CapsLock-f: C-f
       # Copy / Paste (AHK migration: , = SelectAll+Copy, . = Smart Paste)
       CapsLock-COMMA: [C-a, C-c]
-      CapsLock-DOT:
-        launch: ["/home/onyx/.local/bin/paste-smart"]
+      CapsLock-DOT: C-v
+      # Screenshot buffer picker (multi-select bulk paste). Separate from Caps+.
+      # so the paste key stays paste-only.
+      CapsLock-Shift-Space:
+        launch: ["/home/onyx/.local/bin/screenshot-buffer", "menu"]
       # F-key row
       CapsLock-1: F1
       CapsLock-2: F2

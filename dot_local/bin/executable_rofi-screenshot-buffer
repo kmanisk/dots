@@ -144,7 +144,7 @@ while true; do
 
             wl-copy -t image/png < "$STITCH_FILE"
             sleep 0.1
-            wtype -m shift -m win -m alt -M ctrl -k v -m ctrl 2>/dev/null || true
+            "$HOME/.local/bin/wtype-paste" 2>/dev/null || true
 
             mv "${chosen_files[@]}" "$ARCHIVE_DIR/" 2>/dev/null || true
             mv "$STITCH_FILE" "$ARCHIVE_DIR/" 2>/dev/null || true
@@ -154,7 +154,7 @@ while true; do
                 [ -f "$img" ] || continue
                 wl-copy -t image/png < "$img"
                 sleep 0.12
-                wtype -m shift -m win -m alt -M ctrl -k v -m ctrl 2>/dev/null || true
+                "$HOME/.local/bin/wtype-paste" 2>/dev/null || true
                 sleep 0.35
             done
 

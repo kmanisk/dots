@@ -20,17 +20,30 @@ fi
 
 SOCK="${XDG_RUNTIME_DIR:-/run/user/$UID}/foot.sock"
 
+# Single instance: pressing the key twice must not stack two pickers
+LOCK="${XDG_RUNTIME_DIR:-/run/user/$UID}/clipboard-picker.lock"
+exec 9>"$LOCK"
+flock -n 9 || exit 0
+
 if [ -S "$SOCK" ]; then
-    footclient -s "$SOCK" --app-id=clip-term \
+    ferr=$(footclient -s "$SOCK" --app-id=clip-term \
         -o font="VictorMono Nerd Font:size=14.0:style=Bold" \
         -o pad=14x14 \
-        -w 1760x1040 \
-        "$HOME/.local/bin/clipboard-picker" "$@" && exit 0
+        -w 1900x1160 \
+        "$HOME/.local/bin/clipboard-picker" "$@" 2>&1 >/dev/null) && exit 0
+    frc=$?
+    # footclient exits with the picker's status when the window ran, and only
+    # prints "failed to connect" when the socket is dead. Falling back on any
+    # non-zero status reopened the picker after the user closed it.
+    case "$ferr" in
+        *"failed to connect"*) : ;;
+        *) exit "$frc" ;;
+    esac
 fi
 
 # Fallback to standalone foot if footclient exited with error or socket unavailable
 exec foot -a clip-term \
     -o font="VictorMono Nerd Font:size=14.0:style=Bold" \
     -o pad=14x14 \
-    -w 1760x1040 \
+    -w 1900x1160 \
     "$HOME/.local/bin/clipboard-picker" "$@"

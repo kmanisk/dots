@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# paste-smart: Unified smart paste handler for Caps + . (Caps-DOT)
-# - If screenshot buffer has items: opens interactive multi-selection picker modal
-#   (Space to choose/toggle, Arrow keys to navigate, Enter to paste into prompt).
-# - If screenshot buffer is empty: performs standard Ctrl+V paste.
+# paste-smart: clipboard paste handler for Caps + . (Caps-DOT)
+#
+# Sends the paste shortcut the focused window actually understands:
+#   - terminals (foot, alacritty, kitty, wezterm) -> Ctrl+Shift+V
+#   - everything else                             -> Ctrl+V
+#
+# This key is paste-only. The screenshot buffer picker lives on
+# Caps+Shift+Space, so Caps+. never opens a window.
 # ==============================================================================
 set -euo pipefail
 
 export PATH="$HOME/.local/bin:/usr/bin:/bin:$PATH"
 
-# Resolve Sway / Wayland environment
+# Resolve Sway / Wayland environment (launched from xremap, not a login shell)
 if [ -z "${SWAYSOCK:-}" ] || [ -z "${WAYLAND_DISPLAY:-}" ]; then
     while IFS='=' read -r k v; do
         case "$k" in
@@ -20,33 +24,6 @@ if [ -z "${SWAYSOCK:-}" ] || [ -z "${WAYLAND_DISPLAY:-}" ]; then
     done < <(systemctl --user show-environment 2>/dev/null || true)
 fi
 
-BUF_DIR="${XDG_RUNTIME_DIR:-/tmp}/screenshot-buffer-$UID"
-shots=()
-if [ -d "$BUF_DIR" ]; then
-    mapfile -t shots < <(find "$BUF_DIR" -maxdepth 1 -name "shot_*.png" 2>/dev/null | sort -V)
-fi
-
-if [ "${#shots[@]}" -gt 0 ]; then
-    # Record currently focused window ID and application before popping picker
-    TARGET_ID=$(swaymsg -t get_tree 2>/dev/null | jq -r '.. | select(.focused? == true) | .id' 2>/dev/null || true)
-    TARGET_APP=$(swaymsg -t get_tree 2>/dev/null | jq -r '.. | select(.focused? == true) | .app_id // .window_properties.class // empty' 2>/dev/null || true)
-
-    SOCK="${XDG_RUNTIME_DIR:-/run/user/$UID}/foot.sock"
-    if [ -S "$SOCK" ]; then
-        footclient -s "$SOCK" --app-id=clip-term \
-            -o font="VictorMono Nerd Font:size=14.0:style=Bold" \
-            -o pad=14x14 \
-            -w 1760x1040 \
-            "$HOME/.local/bin/screenshot-picker" --target-id="${TARGET_ID:-}" --target-app="${TARGET_APP:-}" "$@" && exit 0
-    fi
-
-    exec foot -a clip-term \
-        -o font="VictorMono Nerd Font:size=14.0:style=Bold" \
-        -o pad=14x14 \
-        -w 1760x1040 \
-        "$HOME/.local/bin/screenshot-picker" --target-id="${TARGET_ID:-}" --target-app="${TARGET_APP:-}" "$@"
-else
-    # Give xremap time to register CapsLock release
-    sleep 0.05
-    exec wtype -m shift -m win -m alt -M ctrl -k v -m ctrl
-fi
+# Give xremap a moment to settle the CapsLock virtual modifier
+sleep 0.05
+exec "$HOME/.local/bin/wtype-paste"

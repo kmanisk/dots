@@ -92,7 +92,7 @@ if [ -n "${WAYLAND_DISPLAY:-}" ] || [ -n "${SWAYSOCK:-}" ]; then
                 mkdir -p "$BUF_DIR"
                 cp "$FILE" "$BUF_DIR/shot_$(date +%s%N).png"
                 count=$(find "$BUF_DIR" -maxdepth 1 -name "shot_*.png" 2>/dev/null | wc -l)
-                notify-send -a "Screenshot Buffer" -t 1500 -i camera-photo "Screenshot Buffered" "#$count in queue. Caps+. to paste all."
+                notify-send -a "Screenshot Buffer" -t 1500 -i camera-photo "Screenshot Buffered" "#$count in queue. Caps+Shift+Space to pick."
             fi
         else
             rm -f "$FILE"
@@ -117,7 +117,7 @@ else
                 mkdir -p "$BUF_DIR"
                 cp "$FILE" "$BUF_DIR/shot_$(date +%s%N).png"
                 count=$(find "$BUF_DIR" -maxdepth 1 -name "shot_*.png" 2>/dev/null | wc -l)
-                notify-send -a "Screenshot Buffer" -t 1500 -i camera-photo "Screenshot Buffered" "#$count in queue. Caps+. to paste all."
+                notify-send -a "Screenshot Buffer" -t 1500 -i camera-photo "Screenshot Buffered" "#$count in queue. Caps+Shift+Space to pick."
             fi
         else
             notify-send -a "Screenshot" -t 1500 -i camera-photo "Screenshot" "Fullscreen copied to clipboard"
