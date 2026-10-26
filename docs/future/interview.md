@@ -89,6 +89,8 @@ Managed via chezmoi in [`~/.config/sway/config.d/30-window-rules.conf`](file:///
 ```ini
 for_window [app_id="(?i)^meetingly.*"] floating enable, sticky enable, border pixel 1
 for_window [class="(?i)^meetingly.*"] floating enable, sticky enable, border pixel 1
+# Tile wl-mirror without borders on eDP-1 so floating Meetingly floats strictly on top
+for_window [app_id="^wl-mirror$"] border none, move to output eDP-1
 ```
 
 ### 3.4 Sway Screen Cloaking via Virtual Headless Display
@@ -97,7 +99,7 @@ Because Wayland intentionally lacks an arbitrary per-surface window-hiding API (
 ```
 [ Physical Display: eDP-1 ]                    [ Virtual Display: HEADLESS-1 ]
 +---------------------------------------+      +-------------------------------+
-| - Displays wl-mirror of HEADLESS-1    |      | - Assigned to Workspaces 1-9  |
+| - Displays tiled wl-mirror (no border)|      | - Assigned to Workspaces 1-9  |
 | - Meetingly overlay floats ON TOP     |      | - Houses IDE, Browser, Term   |
 |   (Rendered only to physical monitor) |      |                               |
 +---------------------------------------+      +---------------+---------------+
@@ -108,21 +110,32 @@ Because Wayland intentionally lacks an arbitrary per-surface window-hiding API (
                                                     [ Screen Share Stream ]
 ```
 
-1. **Create Virtual Output**:
+1. **Create Virtual Output & Match Physical Panel Resolution Dynamically**:
    ```bash
-   swaymsg create_output
+   read -r W H < <(swaymsg -t get_outputs | jq -r '.[] | select(.name=="eDP-1") | "\(.current_mode.width) \(.current_mode.height)"')
+   HEADLESS_OUT=$(swaymsg -t get_outputs | jq -r '.[].name | select(startswith("HEADLESS-"))' | head -n1)
+   [[ -z "$HEADLESS_OUT" ]] && { swaymsg create_output; HEADLESS_OUT=$(swaymsg -t get_outputs | jq -r '.[].name | select(startswith("HEADLESS-"))' | head -n1); }
+   swaymsg output "$HEADLESS_OUT" resolution "${W}x${H}" position "$W" 0
    ```
-   Sway instantiates virtual monitor `HEADLESS-1`.
-2. **Assign Workspaces**: Direct working workspaces (browser, VS Code, terminal) to `HEADLESS-1`.
-3. **Mirror Virtual Display to Physical Panel**:
+2. **Assign Workspaces**: Direct working workspaces (browser, VS Code, terminal) to `$HEADLESS_OUT`.
+3. **Return Focus to eDP-1**:
    ```bash
-   wl-mirror HEADLESS-1
+   swaymsg focus output eDP-1 2>/dev/null || swaymsg workspace 2
    ```
-4. **Overlay Pinning**: Meetingly is pinned to physical display `eDP-1` floating over the mirror window.
-5. **Screen Share Selection**: When Zoom/Google Meet prompts for screen share, select `HEADLESS-1`. Meetingly does not exist in `HEADLESS-1`'s memory buffer, keeping the feed completely clean.
-6. **Teardown**:
+4. **Mirror Virtual Display to Physical Panel (Tiled, Not Fullscreen)**:
    ```bash
-   swaymsg output HEADLESS-1 unplug
+   wl-mirror "$HEADLESS_OUT" > /dev/null 2>&1 &
+   ```
+   *Note: `wl-mirror` is tiled borderless rather than fullscreened so that Sway's floating layer (Meetingly) renders strictly on top.*
+5. **Overlay Pinning**: Meetingly is pinned to physical display `eDP-1` floating over the tiled mirror.
+6. **Screen Share Selection**: When Zoom/Google Meet prompts for screen share, select `$HEADLESS_OUT`. Meetingly does not exist in `$HEADLESS_OUT`'s memory buffer, keeping the feed completely clean.
+7. **Teardown**:
+   ```bash
+   pkill -x wl-mirror || true
+   swaymsg workspace 1 output eDP-1
+   for out in $(swaymsg -t get_outputs | jq -r '.[].name | select(startswith("HEADLESS-"))'); do
+       swaymsg output "$out" unplug || true
+   done
    ```
 
 ---
