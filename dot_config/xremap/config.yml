@@ -108,6 +108,8 @@ keymap:
       # Clipboard menu (centered floating foot picker with prompt preview & deep search)
       CapsLock-c:
         launch: ["/home/onyx/.local/bin/clipboard-menu"]
+      CapsLock-C:
+        launch: ["/home/onyx/.local/bin/clipboard-menu"]
       CapsLock-t: t
       # Clipboard image viewer (clipboard image -> imv)
       CapsLock-v:

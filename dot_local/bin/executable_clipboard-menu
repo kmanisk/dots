@@ -21,15 +21,16 @@ fi
 SOCK="${XDG_RUNTIME_DIR:-/run/user/$UID}/foot.sock"
 
 if [ -S "$SOCK" ]; then
-    exec footclient -s "$SOCK" -E --app-id=clip-term \
+    footclient -s "$SOCK" --app-id=clip-term \
         -o font="VictorMono Nerd Font:size=14.0:style=Bold" \
         -o pad=14x14 \
         -w 1500x860 \
-        "$HOME/.local/bin/clipboard-picker" "$@"
-else
-    exec foot -a clip-term \
-        -o font="VictorMono Nerd Font:size=14.0:style=Bold" \
-        -o pad=14x14 \
-        -w 1500x860 \
-        "$HOME/.local/bin/clipboard-picker" "$@"
+        "$HOME/.local/bin/clipboard-picker" "$@" && exit 0
 fi
+
+# Fallback to standalone foot if footclient exited with error or socket unavailable
+exec foot -a clip-term \
+    -o font="VictorMono Nerd Font:size=14.0:style=Bold" \
+    -o pad=14x14 \
+    -w 1500x860 \
+    "$HOME/.local/bin/clipboard-picker" "$@"
