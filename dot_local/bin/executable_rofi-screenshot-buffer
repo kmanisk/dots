@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# rofi-screenshot-buffer: Floating Rofi multi-selection modal for screenshot queue
+# Allows selecting multiple screenshots with Space/Arrow keys and pasting directly
+# into AI prompts (ChatGPT, Claude, etc.) or editors.
+#
+# Controls:
+#   Space / Ctrl+Space -> Toggle selection on/off (ballot box [x] / [ ])
+#   Up / Down          -> Navigate screenshot queue
+#   Enter              -> Paste selected screenshots sequentially into active window
+#   Alt+Enter          -> Stitch selected screenshots into one image and paste
+#   Alt+d              -> Delete highlighted screenshot from queue (refreshes menu)
+#   Alt+x              -> Wipe entire screenshot buffer queue and exit
+#   Esc                -> Close without pasting
+# ==============================================================================
+set -euo pipefail
+
+export PATH="$HOME/.local/bin:/usr/bin:/bin:$PATH"
+
+# Resolve Sway / Wayland environment
+if [ -z "${SWAYSOCK:-}" ] || [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    while IFS='=' read -r k v; do
+        case "$k" in
+            SWAYSOCK|WAYLAND_DISPLAY|DISPLAY|XDG_CURRENT_DESKTOP)
+                [ -n "$v" ] && export "$k"="$v"
+                ;;
+        esac
+    done < <(systemctl --user show-environment 2>/dev/null || true)
+fi
+
+BUF_DIR="${XDG_RUNTIME_DIR:-/tmp}/screenshot-buffer-$UID"
+ARCHIVE_DIR="$BUF_DIR/archive"
+mkdir -p "$BUF_DIR" "$ARCHIVE_DIR"
+THEME="$HOME/.config/rofi/screenshot-buffer.rasi"
+
+notify() {
+    notify-send -a "Screenshot Buffer" -u low -i camera-photo "$1" "$2" 2>/dev/null || true
+}
+
+display_items() {
+    local shots=()
+    mapfile -t shots < <(find "$BUF_DIR" -maxdepth 1 -name "shot_*.png" 2>/dev/null | sort -V)
+    [ "${#shots[@]}" -eq 0 ] && return 0
+
+    local idx=1
+    for s in "${shots[@]}"; do
+        [ -f "$s" ] || continue
+        local mtime size_b size_kb t_str fname
+        mtime=$(stat -c %Y "$s" 2>/dev/null || date +%s)
+        size_b=$(stat -c %s "$s" 2>/dev/null || echo 0)
+        size_kb=$(( (size_b + 1023) / 1024 ))
+        t_str=$(date -d "@$mtime" +%H:%M:%S 2>/dev/null || date +%H:%M:%S)
+        fname=$(basename "$s")
+        printf "[%02d]  %s  │  %4d KB  │  %s\n" "$idx" "$t_str" "$size_kb" "$fname"
+        idx=$((idx + 1))
+    done
+}
+
+# Main interactive selection loop
+while true; do
+    shots_count=$(find "$BUF_DIR" -maxdepth 1 -name "shot_*.png" 2>/dev/null | wc -l)
+    if [ "$shots_count" -eq 0 ]; then
+        notify "Buffer Empty" "No screenshots in queue."
+        exit 0
+    fi
+
+    # Launch Rofi with multi-select enabled and space bound to ballot toggle
+    chosen=$(display_items | rofi -dmenu \
+        -multi-select \
+        -ballot-selected-str "[x] " \
+        -ballot-unselected-str "[ ] " \
+        -p "Screenshots" \
+        -mesg "Space: Toggle Select  │  Enter: Paste Selected  │  Alt+Enter: Stitch Paste  │  Alt+d: Delete  │  Alt+x: Clear" \
+        -kb-row-select "space,Control+space" \
+        -kb-custom-1 "Alt+Return,Control+Return" \
+        -kb-custom-2 "Alt+d,Shift+Delete" \
+        -kb-custom-3 "Alt+x,Control+x" \
+        -theme "$THEME" \
+        "$@")
+    exit_code=$?
+
+    # Esc or window closed / canceled
+    [ -z "$chosen" ] && exit 0
+    [ "$exit_code" -eq 1 ] && exit 0
+
+    # Action: Alt+x (Wipe buffer)
+    if [ "$exit_code" -eq 12 ]; then
+        mapfile -t all_shots < <(find "$BUF_DIR" -maxdepth 1 -name "shot_*.png" 2>/dev/null)
+        if [ "${#all_shots[@]}" -gt 0 ]; then
+            mv "${all_shots[@]}" "$ARCHIVE_DIR/" 2>/dev/null || true
+        fi
+        notify "Buffer Cleared" "Wiped all queued screenshots."
+        exit 0
+    fi
+
+    # Action: Alt+d (Delete highlighted / selected entry, then reload menu)
+    if [ "$exit_code" -eq 11 ]; then
+        deleted_count=0
+        while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            if [[ "$line" =~ (shot_[0-9]+\.png) ]]; then
+                fname="${BASH_REMATCH[1]}"
+                if [ -f "$BUF_DIR/$fname" ]; then
+                    mv "$BUF_DIR/$fname" "$ARCHIVE_DIR/" 2>/dev/null || true
+                    deleted_count=$((deleted_count + 1))
+                fi
+            fi
+        done <<< "$chosen"
+
+        if [ "$deleted_count" -gt 0 ]; then
+            notify "Deleted Entry" "Removed $deleted_count screenshot(s) from queue."
+        fi
+        continue
+    fi
+
+    # Actions: Enter (exit code 0) or Alt+Enter (exit code 10)
+    if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 10 ]; then
+        chosen_files=()
+        while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            if [[ "$line" =~ (shot_[0-9]+\.png) ]]; then
+                fname="${BASH_REMATCH[1]}"
+                if [ -f "$BUF_DIR/$fname" ]; then
+                    chosen_files+=("$BUF_DIR/$fname")
+                fi
+            fi
+        done <<< "$chosen"
+
+        total_chosen="${#chosen_files[@]}"
+        [ "$total_chosen" -eq 0 ] && exit 0
+
+        # Wait briefly for Rofi window to close and active window to regain focus
+        sleep 0.18
+
+        # Lock buffer during paste
+        touch "$BUF_DIR/.pasting"
+        trap 'rm -f "$BUF_DIR/.pasting"' EXIT
+
+        if [ "$exit_code" -eq 10 ]; then
+            # Stitch selected screenshots vertically into one composite and paste
+            STITCH_FILE="$BUF_DIR/stitched_$(date +%s%N).png"
+            if [ "$total_chosen" -eq 1 ]; then
+                cp "${chosen_files[0]}" "$STITCH_FILE"
+            else
+                magick "${chosen_files[@]}" -append "$STITCH_FILE" 2>/dev/null || true
+            fi
+
+            wl-copy -t image/png < "$STITCH_FILE"
+            sleep 0.1
+            wtype -m shift -m win -m alt -M ctrl -k v -m ctrl 2>/dev/null || true
+
+            mv "${chosen_files[@]}" "$ARCHIVE_DIR/" 2>/dev/null || true
+            mv "$STITCH_FILE" "$ARCHIVE_DIR/" 2>/dev/null || true
+            notify "Stitched Paste Complete" "Merged and pasted $total_chosen screenshot(s)."
+        else
+            # Sequentially paste selected screenshots
+            for img in "${chosen_files[@]}"; do
+                [ -f "$img" ] || continue
+                wl-copy -t image/png < "$img"
+                sleep 0.12
+                wtype -m shift -m win -m alt -M ctrl -k v -m ctrl 2>/dev/null || true
+                sleep 0.35
+            done
+
+            mv "${chosen_files[@]}" "$ARCHIVE_DIR/" 2>/dev/null || true
+            notify "Batch Paste Complete" "Pasted $total_chosen screenshot(s) to prompt."
+        fi
+
+        # Clean archive entries older than 2 hours
+        find "$ARCHIVE_DIR" -type f -mmin +120 -delete 2>/dev/null || true
+        exit 0
+    fi
+
+    exit 0
+done

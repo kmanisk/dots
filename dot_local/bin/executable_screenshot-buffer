@@ -56,20 +56,24 @@ CMD="${1:-snip}"
 
 case "$CMD" in
     menu)
-        SOCK="${XDG_RUNTIME_DIR:-/run/user/$UID}/foot.sock"
-        if [ -S "$SOCK" ]; then
-            footclient -s "$SOCK" --app-id=clip-term \
+        if command -v rofi >/dev/null 2>&1; then
+            exec "$HOME/.local/bin/rofi-screenshot-buffer" "$@"
+        else
+            SOCK="${XDG_RUNTIME_DIR:-/run/user/$UID}/foot.sock"
+            if [ -S "$SOCK" ]; then
+                footclient -s "$SOCK" --app-id=clip-term \
+                    -o font="VictorMono Nerd Font:size=14.0:style=Bold" \
+                    -o pad=14x14 \
+                    -w 1760x1040 \
+                    "$HOME/.local/bin/screenshot-picker" && exit 0
+            fi
+
+            exec foot -a clip-term \
                 -o font="VictorMono Nerd Font:size=14.0:style=Bold" \
                 -o pad=14x14 \
                 -w 1760x1040 \
-                "$HOME/.local/bin/screenshot-picker" && exit 0
+                "$HOME/.local/bin/screenshot-picker"
         fi
-
-        exec foot -a clip-term \
-            -o font="VictorMono Nerd Font:size=14.0:style=Bold" \
-            -o pad=14x14 \
-            -w 1760x1040 \
-            "$HOME/.local/bin/screenshot-picker"
         ;;
 
     snip)

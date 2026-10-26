@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # paste-smart: Unified smart paste handler for Caps + . (Caps-DOT)
-# - If screenshot buffer has items: opens interactive multi-selection picker
+# - If screenshot buffer has items: opens interactive Rofi multi-selection modal
 #   (Space to choose/toggle, Arrow keys to navigate, Enter to paste into prompt).
 # - If screenshot buffer is empty: performs standard Ctrl+V paste.
 # ==============================================================================
@@ -27,20 +27,24 @@ if [ -d "$BUF_DIR" ]; then
 fi
 
 if [ "${#shots[@]}" -gt 0 ]; then
-    SOCK="${XDG_RUNTIME_DIR:-/run/user/$UID}/foot.sock"
-    if [ -S "$SOCK" ]; then
-        footclient -s "$SOCK" --app-id=clip-term \
+    if command -v rofi >/dev/null 2>&1; then
+        exec "$HOME/.local/bin/rofi-screenshot-buffer" "$@"
+    else
+        SOCK="${XDG_RUNTIME_DIR:-/run/user/$UID}/foot.sock"
+        if [ -S "$SOCK" ]; then
+            footclient -s "$SOCK" --app-id=clip-term \
+                -o font="VictorMono Nerd Font:size=14.0:style=Bold" \
+                -o pad=14x14 \
+                -w 1760x1040 \
+                "$HOME/.local/bin/screenshot-picker" "$@" && exit 0
+        fi
+
+        exec foot -a clip-term \
             -o font="VictorMono Nerd Font:size=14.0:style=Bold" \
             -o pad=14x14 \
             -w 1760x1040 \
-            "$HOME/.local/bin/screenshot-picker" "$@" && exit 0
+            "$HOME/.local/bin/screenshot-picker" "$@"
     fi
-
-    exec foot -a clip-term \
-        -o font="VictorMono Nerd Font:size=14.0:style=Bold" \
-        -o pad=14x14 \
-        -w 1760x1040 \
-        "$HOME/.local/bin/screenshot-picker" "$@"
 else
     # Give xremap time to register CapsLock release
     sleep 0.05
