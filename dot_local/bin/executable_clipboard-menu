@@ -24,7 +24,7 @@ if [ -S "$SOCK" ]; then
     footclient -s "$SOCK" --app-id=clip-term \
         -o font="VictorMono Nerd Font:size=14.0:style=Bold" \
         -o pad=14x14 \
-        -w 1500x860 \
+        -w 1760x1040 \
         "$HOME/.local/bin/clipboard-picker" "$@" && exit 0
 fi
 
@@ -32,5 +32,5 @@ fi
 exec foot -a clip-term \
     -o font="VictorMono Nerd Font:size=14.0:style=Bold" \
     -o pad=14x14 \
-    -w 1500x860 \
+    -w 1760x1040 \
     "$HOME/.local/bin/clipboard-picker" "$@"

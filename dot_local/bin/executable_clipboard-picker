@@ -49,7 +49,7 @@ if [ -z "$items" ]; then
     exit 0
 fi
 
-HEADER="Enter: Paste  │  Alt+Enter/Ctrl+Y: Copy  │  Ctrl+F: Deep Search  │  Ctrl+D: Del  │  Esc: Exit"
+HEADER=$(printf "Enter: Paste  │  Alt+Enter: Copy  │  Shift+Up/Down: Scroll Preview\nCtrl+F: Deep Search  │  Ctrl+D: Delete  │  Ctrl+X: Wipe  │  Esc: Close")
 
 SELECTED=$(printf '%s\n' "$items" | fzf \
     --prompt=" Clipboard > " \
@@ -63,11 +63,11 @@ SELECTED=$(printf '%s\n' "$items" | fzf \
     --info=inline \
     --ansi \
     --color="bg+:${SEL},fg+:${FG},pointer:${ORANGE},prompt:${ACCENT},hl:${YELLOW},hl+:${YELLOW},border:${MUTED},header:${BLUE},info:${MUTED}" \
-    --preview='~/.local/bin/clipboard-preview {}' \
-    --preview-window='right:58%:border-left:wrap' \
+    --preview="$HOME/.local/bin/clipboard-preview {}" \
+    --preview-window='right:55%:border-left:wrap' \
     --bind="ctrl-d:execute-silent(cliphist delete <<< {})+reload(cliphist list)" \
-    --bind="ctrl-x:execute-silent(~/.local/bin/clipboard-wipe)+reload(cliphist list)" \
-    --bind="ctrl-f:reload(~/.local/bin/clipboard-search {q})" \
+    --bind="ctrl-x:execute-silent($HOME/.local/bin/clipboard-wipe)+reload(cliphist list)" \
+    --bind="ctrl-f:reload($HOME/.local/bin/clipboard-search {q})" \
     --bind="ctrl-r:reload(cliphist list)" \
     --bind="shift-up:preview-up,shift-down:preview-down,page-up:preview-page-up,page-down:preview-page-down" \
     --expect="alt-enter,ctrl-y" \
