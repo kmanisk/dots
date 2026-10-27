@@ -168,7 +168,16 @@ function M.setup()
 
     vim.api.nvim_create_autocmd({ "BufDelete", "BufWipeout" }, {
         group = vim.api.nvim_create_augroup("DashboardAfterLastBuffer", { clear = true }),
-        callback = function()
+        callback = function(args)
+            if busy then
+                return
+            end
+            local ok, ft = pcall(function()
+                return vim.bo[args.buf].filetype
+            end)
+            if ok and ft == "alpha" then
+                return
+            end
             vim.schedule(open_start_page)
         end,
         desc = "Show the start page when the last buffer is closed",
