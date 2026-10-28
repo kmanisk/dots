@@ -76,6 +76,7 @@ Canonical dimensions: `1700x1050`, centered on display. Windows are **lazy-loade
 2. **Notes Scratchpad:** `Win + n` (Spawns/toggles Neovim on `~/notes.md`).
 3. **Spotify Scratchpad:** `Win + m` (Spawns/toggles Spotify window).
 4. **Video Player (mpv):** `Win + -` or `Win + _` (1280x720 floating scratchpad).
+5. **Desktop Commander Scratchpad:** `Win + Alt + D` (1500x950 floating monitor streaming live ChatGPT tool-call activity).
 
 ### Cursor Controls (`toggle-cursor-theme` & `adjust-cursor-size`)
 * **Theme Polarity Toggle:** `Alt + Shift + c` (Toggles between `phinger-cursors-gruvbox-material` and `phinger-cursors-gruvbox-material-light`).

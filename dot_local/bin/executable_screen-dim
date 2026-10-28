@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# screen-dim: Save current brightness and dim screen for idle power saving
+# Does not hamper CPU, network, or background tasks in any way.
+# ==============================================================================
+set -euo pipefail
+
+export PATH="$HOME/.gemini/antigravity-cli/bin:$HOME/.local/bin:/usr/bin:$PATH"
+
+STATE_FILE="${XDG_RUNTIME_DIR:-/tmp}/screen-dim.saved"
+LOG_FILE="$HOME/.local/state/screen-dim.log"
+
+# Read current hardware brightness percentage
+CUR=$(brightnessctl -m 2>/dev/null | cut -d, -f4 | tr -d '%' || echo "")
+[[ -z "$CUR" ]] && CUR=100
+
+# Save current brightness value only if we are not already dimmed
+if [ ! -f "$STATE_FILE" ]; then
+    echo "$CUR" > "$STATE_FILE"
+    brightnessctl -s >/dev/null 2>&1 || true
+fi
+
+# Dim down to 10% (or minimum 1% if already very low)
+TARGET=10
+if (( CUR <= 15 )); then
+    TARGET=1
+fi
+
+brightnessctl set "${TARGET}%" >/dev/null 2>&1 || true
+printf '[%s] [DIM] Idle timeout reached. Brightness dimmed from %s%% to %s%%\n' \
+    "$(date '+%Y-%m-%d %H:%M:%S')" "$CUR" "$TARGET" >> "$LOG_FILE"

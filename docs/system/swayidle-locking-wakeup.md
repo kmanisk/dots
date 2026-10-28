@@ -101,3 +101,40 @@ Inspect recent suspend and resume transitions:
 ```bash
 journalctl -b 0 | grep -iE "PM: suspend|nvidia-resume|nvidia-suspend"
 ```
+
+---
+
+## 6. Overnight Audio & Background Agent Mode (`screen-black`)
+
+When playing long media (e.g. 10-hour rain videos/audio) while running background tasks:
+1. **Trigger:** Press **`Win + Alt + L`** or run `screen-black`.
+2. **Behavior:**
+   - Panel backlight is immediately turned off via `swaymsg "output * dpms off"` in <5ms with zero sleep delays.
+   - Pressing **`Win + Alt + L`** again instantly turns the display back on (`swaymsg "output * dpms on"`).
+   - In the background, `systemd-inhibit --what=idle:sleep:handle-lid-switch --mode=block` prevents hardware `s2idle` suspend, logind timeouts, and lid-close suspension even if the laptop lid is shut.
+   - Automatically pauses `swayidle` (`pkill -STOP -x swayidle`) while sleep mode is active so that idle timeouts, lock events, or switch triggers cannot awaken the screen or suspend the machine.
+   - Audio playback (PipeWire/WirePlumber), browser/MPV media players, and Antigravity agents continue running indefinitely with the lid closed.
+3. **Restoration:** Pressing **`Win + Alt + L`** cleanly restores DPMS to on, unpauses `swayidle`, releases the low-level inhibitor lock, and returns the workspace to active state.
+
+---
+
+## 7. Keep-Awake, Screen Dimming & Clamshell Mode (`keep-awake`)
+
+To allow headless background execution (e.g. Desktop Commander, AI agents, long compilations) while still protecting the display panel and battery:
+
+### Idle Profiles
+
+| Feature | Keep-Awake Active (Default) | Keep-Awake Inactive (`Win + Ctrl + I`) |
+| :--- | :--- | :--- |
+| **Idle 120s (2m)** | Dims backlight to 10% (`screen-dim`) | Dims backlight to 10% (`screen-dim`) |
+| **Idle 300s (5m)** | Powers off screen (`output * dpms off`) | Locks session with `swaylock -f -c 000000` |
+| **Idle 600s (10m)** | Screen remains off (DPMS) | Powers off screen (`output * dpms off`) |
+| **Resume (Key/Mouse)** | Powers on display and restores brightness immediately; **no password prompt** | Powers on display; prompts for password |
+| **Lid Closed** | Powers off `eDP-1` via DPMS; **laptop stays awake** | Powers off screen; **laptop suspends (`s2idle`)** |
+| **Background Tasks** | **100% full speed** (CPU, WiFi, Desktop Commander unaffected) | Suspended upon lid close |
+
+### Architecture
+- **Inhibitor Unit:** `keep-awake-inhibitor.service` running `systemd-inhibit --what=idle:sleep:handle-lid-switch --mode=block sleep infinity`.
+- **Lid Switch Hook:** Sway `bindswitch --locked lid:on` runs [`lid-handler close`](file:///home/onyx/.local/bin/lid-handler) and `lid:off` runs `lid-handler open`.
+- **Systemd Logind Policy:** `/etc/systemd/logind.conf.d/10-lid-inhibit.conf` enforces `LidSwitchIgnoreInhibited=no`.
+- **Event Logging:** All dimming, undimming, lid-close, and lid-open actions are timestamped in `~/.local/state/screen-dim.log`.

@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# keep-awake: Inhibit idle lock & lid-sleep, while preserving screen dimming
+# - Active (Default): Dims screen at 120s, DPMS off at 300s. Never locks, never suspends.
+#   Lid close keeps laptop running (start/tasks stay active).
+# - Inactive: Dims at 120s, locks with swaylock at 300s, DPMS off at 600s.
+#   Lid close suspends laptop.
+# ==============================================================================
+set -euo pipefail
+
+export PATH="$HOME/.gemini/antigravity-cli/bin:$HOME/.local/bin:/usr/bin:/bin:$PATH"
+
+# Resolve Wayland / Sway environment
+if [ -z "${SWAYSOCK:-}" ] || [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    while IFS='=' read -r k v; do
+        case "$k" in
+            SWAYSOCK|WAYLAND_DISPLAY|DISPLAY|XDG_CURRENT_DESKTOP)
+                [ -n "$v" ] && export "$k"="$v"
+                ;;
+        esac
+    done < <(systemctl --user show-environment 2>/dev/null || true)
+fi
+
+STATE_FILE="${XDG_RUNTIME_DIR:-/tmp}/keep-awake.state"
+DISABLE_FILE="${XDG_RUNTIME_DIR:-/tmp}/keep-awake.disabled"
+UNIT_NAME="keep-awake-inhibitor"
+QUIET="${QUIET:-0}"
+
+# Check for --quiet / -q in args
+for arg in "$@"; do
+    if [ "$arg" = "--quiet" ] || [ "$arg" = "-q" ]; then
+        QUIET=1
+    fi
+done
+
+enable_keep_awake() {
+    rm -f "$DISABLE_FILE"
+    touch "$STATE_FILE"
+
+    # Ensure display is currently powered on and undimmed
+    swaymsg "output * dpms on" >/dev/null 2>&1 || true
+    "$HOME/.local/bin/screen-undim" >/dev/null 2>&1 || true
+
+    # Inhibit systemd-level idle, sleep, and lid switch
+    systemctl --user stop "${UNIT_NAME}.service" 2>/dev/null || true
+    systemd-run --user --unit="$UNIT_NAME" \
+        systemd-inhibit --what=idle:sleep:handle-lid-switch \
+        --who="keep-awake" \
+        --why="Keep-Awake active: lid close keeps laptop running, idle lock disabled" \
+        --mode=block \
+        sleep infinity >/dev/null 2>&1 || true
+
+    # Kill any existing swayidle instance
+    pkill -KILL -x swayidle 2>/dev/null || true
+
+    # Launch keep-awake idle daemon under Sway compositor session
+    swaymsg exec "swayidle -w \
+        timeout 120 '$HOME/.local/bin/screen-dim' resume '$HOME/.local/bin/screen-undim' \
+        timeout 300 'swaymsg \"output * dpms off\"' resume 'swaymsg \"output * dpms on\"; $HOME/.local/bin/screen-undim'" >/dev/null 2>&1 || true
+
+    if [ "$QUIET" -ne 1 ]; then
+        notify-send -a "Screen Keep-Awake" -t 2000 -i display \
+            "Keep-Awake Active" "Screen dims after 2m, off at 5m. Lock & sleep disabled." 2>/dev/null || true
+    fi
+}
+
+disable_keep_awake() {
+    rm -f "$STATE_FILE"
+    touch "$DISABLE_FILE"
+
+    # Stop systemd inhibitor
+    systemctl --user stop "${UNIT_NAME}.service" 2>/dev/null || true
+
+    # Ensure display is currently powered on and undimmed
+    swaymsg "output * dpms on" >/dev/null 2>&1 || true
+    "$HOME/.local/bin/screen-undim" >/dev/null 2>&1 || true
+
+    # Kill any existing swayidle instance
+    pkill -KILL -x swayidle 2>/dev/null || true
+
+    # Launch standard strict security swayidle under Sway compositor session
+    swaymsg exec "swayidle -w \
+        timeout 120 '$HOME/.local/bin/screen-dim' resume '$HOME/.local/bin/screen-undim' \
+        timeout 300 'swaylock -f -c 000000; $HOME/.local/bin/bt-katana >/dev/null 2>&1 &' \
+        timeout 600 'swaymsg \"output * dpms off\"' resume 'swaymsg \"output * dpms on\"; $HOME/.local/bin/screen-undim; $HOME/.local/bin/bt-katana >/dev/null 2>&1 &' \
+        before-sleep 'swaylock -f -c 000000' \
+        after-resume 'swaymsg \"output * dpms on\"; $HOME/.local/bin/screen-undim; $HOME/.local/bin/bt-katana >/dev/null 2>&1 &'" >/dev/null 2>&1 || true
+
+    if [ "$QUIET" -ne 1 ]; then
+        notify-send -a "Screen Keep-Awake" -t 2000 -i display \
+            "Keep-Awake Inactive" "Automatic lock restored (5m lock / 10m sleep). Lid suspends." 2>/dev/null || true
+    fi
+}
+
+is_active() {
+    [ -f "$STATE_FILE" ]
+}
+
+ACTION="${1:-toggle}"
+# Strip leading flag if first param is --quiet
+if [ "$ACTION" = "--quiet" ] || [ "$ACTION" = "-q" ]; then
+    ACTION="${2:-init}"
+fi
+
+case "$ACTION" in
+    init)
+        # Default behavior: active unless explicitly disabled by user during this session
+        if [ ! -f "$DISABLE_FILE" ]; then
+            QUIET=1 enable_keep_awake
+        else
+            QUIET=1 disable_keep_awake
+        fi
+        ;;
+    on|enable|start)
+        enable_keep_awake
+        ;;
+    off|disable|stop)
+        disable_keep_awake
+        ;;
+    toggle)
+        if is_active; then
+            disable_keep_awake
+        else
+            enable_keep_awake
+        fi
+        ;;
+    status)
+        if is_active; then
+            echo "Keep-Awake: ACTIVE (screen dims at 2m, DPMS at 5m; lock/sleep disabled)"
+            exit 0
+        else
+            echo "Keep-Awake: INACTIVE (screen dims at 2m, locks at 5m; lid suspends)"
+            exit 1
+        fi
+        ;;
+    *)
+        echo "Usage: keep-awake [on|off|toggle|status|init] [--quiet]" >&2
+        exit 2
+        ;;
+esac

@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# screen-undim: Restore saved brightness on user activity resume
+# ==============================================================================
+set -euo pipefail
+
+export PATH="$HOME/.gemini/antigravity-cli/bin:$HOME/.local/bin:/usr/bin:$PATH"
+
+STATE_FILE="${XDG_RUNTIME_DIR:-/tmp}/screen-dim.saved"
+LOG_FILE="$HOME/.local/state/screen-dim.log"
+
+# Restore hardware brightness if saved state exists
+if [ -f "$STATE_FILE" ]; then
+    SAVED=$(cat "$STATE_FILE" 2>/dev/null || echo "")
+    brightnessctl -r >/dev/null 2>&1 || true
+    rm -f "$STATE_FILE"
+    printf '[%s] [UNDIM] User activity detected. Brightness restored to %s%%\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S')" "$SAVED" >> "$LOG_FILE"
+fi
+
+# Ensure display is awake
+if [ -n "${SWAYSOCK:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
+    swaymsg "output * dpms on" >/dev/null 2>&1 || true
+fi

@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# lid-handler: Sway laptop lid event handler
+# - close: Powers off internal display (eDP-1) to protect panel and save battery.
+#          If keep-awake is ON (default): Laptop stays awake (start/tasks run).
+#          If keep-awake is OFF: Locks session and suspends laptop.
+# - open:  Restores internal display (eDP-1) and reconnects peripherals.
+# ==============================================================================
+set -euo pipefail
+
+export PATH="$HOME/.local/bin:/usr/bin:/bin:$PATH"
+
+# Resolve Wayland / Sway environment
+if [ -z "${SWAYSOCK:-}" ] || [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    while IFS='=' read -r k v; do
+        case "$k" in
+            SWAYSOCK|WAYLAND_DISPLAY|DISPLAY|XDG_CURRENT_DESKTOP)
+                [ -n "$v" ] && export "$k"="$v"
+                ;;
+        esac
+    done < <(systemctl --user show-environment 2>/dev/null || true)
+fi
+
+ACTION="${1:-close}"
+LOG_FILE="$HOME/.local/state/screen-dim.log"
+
+case "$ACTION" in
+    close)
+        # Power off internal screen immediately to prevent heat trapped under lid
+        swaymsg "output eDP-1 dpms off" >/dev/null 2>&1 || true
+
+        # Check if Keep-Awake / caffeine mode is active
+        if ~/.local/bin/keep-awake status >/dev/null 2>&1; then
+            printf '[%s] [LID CLOSE] Screen powered off via DPMS. Laptop remaining awake for background tasks.\n' \
+                "$(date '+%Y-%m-%d %H:%M:%S')" >> "$LOG_FILE"
+            exit 0
+        else
+            printf '[%s] [LID CLOSE] Keep-Awake OFF. Suspending laptop.\n' \
+                "$(date '+%Y-%m-%d %H:%M:%S')" >> "$LOG_FILE"
+            swaylock -f -c 000000 >/dev/null 2>&1 &
+            systemctl suspend >/dev/null 2>&1 || true
+        fi
+        ;;
+    open)
+        # Restore internal display power
+        swaymsg "output eDP-1 dpms on" >/dev/null 2>&1 || true
+
+        # Reconnect Katana keyboard if needed
+        ~/.local/bin/bt-katana >/dev/null 2>&1 &
+
+        printf '[%s] [LID OPEN] Screen powered on via DPMS. Peripherals reconnected.\n' \
+            "$(date '+%Y-%m-%d %H:%M:%S')" >> "$LOG_FILE"
+        ;;
+    *)
+        echo "Usage: lid-handler [close|open]" >&2
+        exit 2
+        ;;
+esac
