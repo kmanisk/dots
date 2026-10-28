@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+import json, os, platform, shutil, socket, subprocess
+from datetime import datetime
+from pathlib import Path
+
+STATE = Path.home() / ".local/share/agent/environment.json"
+
+def run(*cmd):
+    try:
+        return subprocess.run(cmd, text=True, capture_output=True, timeout=2).stdout.strip()
+    except Exception:
+        return ""
+
+def os_name():
+    try:
+        vals = {}
+        for line in Path("/etc/os-release").read_text().splitlines():
+            if "=" in line:
+                k, v = line.split("=", 1)
+                vals[k] = v.strip('"')
+        return vals.get("PRETTY_NAME", vals.get("NAME", "Linux"))
+    except Exception:
+        return "Linux"
+
+def sway_socket():
+    sock = os.environ.get("SWAYSOCK", "")
+    if sock:
+        return sock
+    runtime = Path(f"/run/user/{os.getuid()}")
+    sockets = sorted(runtime.glob("sway-ipc.*.sock"), key=lambda p: p.stat().st_mtime, reverse=True)
+    return str(sockets[0]) if sockets else ""
+
+def sway_outputs(sock):
+    if not shutil.which("swaymsg") or not sock:
+        return []
+    raw = run("swaymsg", "-s", sock, "-t", "get_outputs", "-r")
+    try:
+        outputs = []
+        for o in json.loads(raw):
+            if not o.get("active"):
+                continue
+            m = o.get("current_mode") or {}
+            outputs.append({
+                "name": o.get("name"),
+                "resolution": f"{m.get('width')}x{m.get('height')}" if m else None,
+                "refresh_hz": round((m.get("refresh") or 0) / 1000, 3) if m else None,
+                "focused": bool(o.get("focused")),
+            })
+        return outputs
+    except Exception:
+        return []
+
+sock = sway_socket()
+data = {
+    "updated": datetime.now().astimezone().isoformat(timespec="seconds"),
+    "host": socket.gethostname(),
+    "home": str(Path.home()),
+    "os": os_name(),
+    "kernel": platform.release(),
+    "arch": platform.machine(),
+    "shell": os.environ.get("SHELL", ""),
+    "session": "wayland" if sock or os.environ.get("WAYLAND_DISPLAY") else os.environ.get("XDG_SESSION_TYPE", "unknown"),
+    "wm": "sway" if sock else os.environ.get("XDG_CURRENT_DESKTOP", "unknown"),
+    "outputs": sway_outputs(sock),
+    "gpu_mode": run("supergfxctl", "-g") if shutil.which("supergfxctl") else "",
+    "desktop_commander": run("systemctl", "--user", "is-active", "desktop-commander.service") or "unknown",
+    "projects_root": "/home/onyx/Projects",
+    "docs_root": "/home/onyx/docs",
+}
+STATE.parent.mkdir(parents=True, exist_ok=True)
+tmp = STATE.with_suffix(".tmp")
+tmp.write_text(json.dumps(data, indent=2) + "\n")
+tmp.replace(STATE)
+if "--quiet" not in os.sys.argv:
+    print(STATE)
+    print(json.dumps(data, indent=2))

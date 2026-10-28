@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+import json, os, subprocess, sys
+from pathlib import Path
+
+BASE = Path.home() / ".local/share/agent"
+REGISTRY = BASE / "projects.json"
+GLOBAL = BASE / "GLOBAL.md"
+
+
+def run(cmd, cwd=None):
+    try:
+        return subprocess.run(cmd, cwd=cwd, text=True, capture_output=True, timeout=4).stdout.strip()
+    except Exception:
+        return ""
+
+
+def read(path):
+    try:
+        return Path(path).read_text().rstrip()
+    except Exception:
+        return "(missing)"
+
+
+def resolve(name, projects):
+    if not name or name in {"system", "linux"}:
+        return None, None
+    key = name.lower()
+    for k, info in projects.items():
+        if key == k.lower() or key == Path(info["path"]).name.lower():
+            return k, Path(info["path"])
+    tele = Path("/home/onyx/Projects/tele") / name
+    if tele.is_dir():
+        return name, tele
+    p = Path(name).expanduser()
+    if p.is_dir():
+        return p.name, p.resolve()
+    return None, None
+
+run([str(Path.home() / ".local/bin/agent-refresh"), "--quiet"])
+projects = json.loads(REGISTRY.read_text())
+env = json.loads((BASE / "environment.json").read_text())
+name = sys.argv[1] if len(sys.argv) > 1 else ""
+key, root = resolve(name, projects)
+
+if not name:
+    print("Usage: agent-context <project|system>\n")
+    print("Projects:")
+    for k, v in projects.items():
+        print(f"  {k:<24} {v['path']}")
+    sys.exit(0)
+if name not in {"system", "linux"} and root is None:
+    print(f"Unknown project: {name}", file=sys.stderr)
+    sys.exit(2)
+
+print("=== LIVE ENVIRONMENT ===")
+print(json.dumps(env, indent=2))
+print("\n=== SHARED RULES ===")
+print(read(GLOBAL))
+
+if root is None:
+    print("\n=== SYSTEM DOCS ===")
+    print("/home/onyx/docs/system")
+    sys.exit(0)
+
+print("\n=== PROJECT ===")
+print(f"name: {key}")
+print(f"root: {root}")
+if key in projects:
+    print(f"stack: {projects[key].get('stack', '')}")
+    checks = projects[key].get("check", [])
+    if checks:
+        print("validation:")
+        for c in checks:
+            print(f"  - {c}")
+
+print("\n=== PARENT CODING RULES ===")
+print(read("/home/onyx/Projects/AGENTS.md"))
+print("\n=== PROJECT RULES ===")
+rules = root / "AGENTS.md"
+if not rules.exists() and str(root).startswith("/home/onyx/Projects/tele/"):
+    rules = Path("/home/onyx/Projects/tele/AGENTS.md")
+print(read(rules))
+print("\n=== HANDOFF ===")
+print(read(root / "HANDOFF.md"))
+
+if (root / ".git").exists() or run(["git", "-C", str(root), "rev-parse", "--is-inside-work-tree"]):
+    print("\n=== GIT ===")
+    print("branch:", run(["git", "-C", str(root), "branch", "--show-current"]) or "(detached)")
+    print("commit:", run(["git", "-C", str(root), "rev-parse", "--short", "HEAD"]))
+    status = run(["git", "-C", str(root), "status", "--short"])
+    print("status:")
+    print(status or "  clean")
+    remote = run(["git", "-C", str(root), "remote", "get-url", "origin"])
+    if remote:
+        print("origin:", remote)

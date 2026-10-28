@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# dc-start: Desktop Commander Remote background service controller
+# ==============================================================================
+set -euo pipefail
+
+ACTION="${1:-status}"
+
+case "$ACTION" in
+    start)
+        systemctl --user start desktop-commander.service
+        echo "Desktop Commander Remote: STARTED"
+        ;;
+    stop)
+        systemctl --user stop desktop-commander.service
+        echo "Desktop Commander Remote: STOPPED"
+        ;;
+    restart)
+        systemctl --user restart desktop-commander.service
+        echo "Desktop Commander Remote: RESTARTED"
+        ;;
+    logs|log)
+        LOG_FILE=$(ls -t "$HOME"/.desktop-commander-device/remote-*.log 2>/dev/null | head -n 1 || true)
+        if [ -n "$LOG_FILE" ] && [ -f "$LOG_FILE" ]; then
+            exec tail -f "$LOG_FILE"
+        else
+            echo "No log file found."
+        fi
+        ;;
+    status|*)
+        if ! systemctl --user is-active desktop-commander.service >/dev/null 2>&1; then
+            systemctl --user start desktop-commander.service
+            sleep 1
+        fi
+
+        if systemctl --user is-active desktop-commander.service >/dev/null 2>&1; then
+            echo "Desktop Commander Remote: ACTIVE (Running headlessly in background)"
+            LOG_FILE=$(ls -t "$HOME"/.desktop-commander-device/remote-*.log 2>/dev/null | head -n 1 || true)
+            if [ -n "$LOG_FILE" ] && [ -f "$LOG_FILE" ]; then
+                echo "Log File: $LOG_FILE"
+                echo "--------------------------------------------------"
+                tail -n 6 "$LOG_FILE"
+            fi
+        else
+            echo "Desktop Commander Remote: INACTIVE"
+        fi
+        ;;
+esac

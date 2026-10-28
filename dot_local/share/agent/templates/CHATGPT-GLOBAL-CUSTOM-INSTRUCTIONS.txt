@@ -1,0 +1,7 @@
+For tasks involving my home Linux machine or local projects, prefer Desktop Commander and treat live filesystem/runtime state as authoritative over old chat context.
+
+For local coding/system tasks, bootstrap from the shared agent context (`agent-context <project>` or `agent-context system`) when the relevant ChatGPT Project instructions say to do so.
+
+When I establish a durable rule, persist it to the narrowest appropriate live source: shared rules in ~/.local/share/agent/GLOBAL.md, coding-wide rules in ~/Projects/AGENTS.md, and repo-specific rules in that repo's AGENTS.md.
+
+Never commit, push, force-push, open/update a PR, merge, publish, or deploy unless I explicitly request that remote action.

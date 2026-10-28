@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+HOME_REAL="/home/onyx"
+SAFE_RW=(
+  "$HOME_REAL/Projects"
+  "$HOME_REAL/Downloads"
+)
+EXTRA_RW=()
+EXTRA_RO=()
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  dc-remote-safe
+  dc-remote-safe --allow PATH [--allow PATH ...]
+  dc-remote-safe --allow-ro PATH [--allow-ro PATH ...]
+
+Default writable access:
+  ~/Projects
+  ~/Downloads
+
+Everything else in your home directory and host system is hidden by bubblewrap,
+except Desktop Commander's own state, npm cache, and minimal read-only network/CA files.
+
+--allow PATH     Expose PATH read/write for this run only (asks for confirmation).
+--allow-ro PATH  Expose PATH read-only for this run only (asks for confirmation).
+-h, --help       Show this help.
+USAGE
+}
+
+canon_existing() {
+  local p="$1"
+  if [[ "$p" == ~* ]]; then
+    p="${p/#\~/$HOME_REAL}"
+  fi
+  realpath -e -- "$p"
+}
+
+confirm_extra() {
+  local mode="$1" path="$2"
+  if [[ ! -t 0 ]]; then
+    printf 'Refusing extra %s access without an interactive terminal: %s\n' "$mode" "$path" >&2
+    exit 2
+  fi
+  printf 'One-time %s access requested for:\n  %s\n' "$mode" "$path"
+  read -r -p 'Allow only for this Desktop Commander session? [y/N] ' reply
+  case "$reply" in
+    y|Y|yes|YES|Yes) ;;
+    *) printf 'Denied.\n' >&2; exit 1 ;;
+  esac
+}
+
+while (($#)); do
+  case "$1" in
+    --allow)
+      [[ $# -ge 2 ]] || { echo '--allow requires PATH' >&2; exit 2; }
+      p="$(canon_existing "$2")"
+      confirm_extra 'read/write' "$p"
+      EXTRA_RW+=("$p")
+      shift 2
+      ;;
+    --allow-ro)
+      [[ $# -ge 2 ]] || { echo '--allow-ro requires PATH' >&2; exit 2; }
+      p="$(canon_existing "$2")"
+      confirm_extra 'read-only' "$p"
+      EXTRA_RO+=("$p")
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      printf 'Unknown option: %s\n' "$1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+mkdir -p "$HOME_REAL/.npm" "$HOME_REAL/.desktop-commander-device"
+
+BWRAP=(
+  /usr/bin/bwrap
+  --die-with-parent
+  --new-session
+  --unshare-pid
+  --unshare-ipc
+  --unshare-uts
+
+  --ro-bind /usr /usr
+  --symlink usr/bin /bin
+  --symlink usr/lib /lib
+  --symlink usr/lib /lib64
+
+  --proc /proc
+  --dev /dev
+  --tmpfs /tmp
+
+  --dir /home
+  --dir "$HOME_REAL"
+
+  --dir /etc
+  --ro-bind /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+  --ro-bind /etc/hosts /etc/hosts
+  --ro-bind /etc/nsswitch.conf /etc/nsswitch.conf
+  --ro-bind /etc/ssl /etc/ssl
+  --ro-bind /etc/ca-certificates /etc/ca-certificates
+
+  --bind "$HOME_REAL/.npm" "$HOME_REAL/.npm"
+  --bind "$HOME_REAL/.desktop-commander-device" "$HOME_REAL/.desktop-commander-device"
+
+  --setenv HOME "$HOME_REAL"
+  --setenv USER onyx
+  --setenv LOGNAME onyx
+  --setenv PATH /usr/bin:/bin
+)
+
+for p in "${SAFE_RW[@]}"; do
+  [[ -e "$p" ]] && BWRAP+=(--bind "$p" "$p")
+done
+for p in "${EXTRA_RW[@]}"; do
+  BWRAP+=(--bind "$p" "$p")
+done
+for p in "${EXTRA_RO[@]}"; do
+  BWRAP+=(--ro-bind "$p" "$p")
+done
+
+cat <<'SUMMARY'
+Desktop Commander sandbox:
+  RW: ~/Projects, ~/Downloads
+  Hidden: ~/.ssh, ~/.gnupg, ~/.config, browser/keyring data, /root, /boot,
+          /var, /sys, host /proc, mounted drives, and other home files.
+  System binaries: visible read-only from /usr.
+  Network support: minimal DNS/CA files visible read-only.
+  Telemetry: disabled in Desktop Commander config.
+SUMMARY
+
+if ((${#EXTRA_RW[@]})); then
+  printf '  One-time RW:'
+  printf ' %q' "${EXTRA_RW[@]}"
+  printf '\n'
+fi
+if ((${#EXTRA_RO[@]})); then
+  printf '  One-time RO:'
+  printf ' %q' "${EXTRA_RO[@]}"
+  printf '\n'
+fi
+
+exec "${BWRAP[@]}" /usr/bin/npx @wonderwhy-er/desktop-commander@latest remote

@@ -13,16 +13,21 @@
 # `alacritty --class Alacritty,<instance>` when passed through a binding.
 set -u
 
-mode="${1:?usage: scratch-toggle <term|notes|spotify>}"
+mode="${1:?usage: scratch-toggle <term|notes|spotify|dc>}"
 
 case "$mode" in
     # CANONICAL SCRATCHPAD GEOMETRY (single source of truth).
     # These MUST match the for_window rules in sway config:
-    #   term 1700x1050 | notes 1700x1050 | spotify 1700x1050.
+    #   term 1700x1050 | notes 1700x1050 | spotify 1700x1050 | dc 1500x950.
     # Order on show is always: resize set W H, then move position center.
+    dc|commander)
+        instance="dc-term"
+        spawn="footclient --app-id=dc-term --title=\"Desktop Commander Monitor\" -o font=\"Iosevka Nerd Font Mono:size=20:style=Regular\" -o include=${HOME}/.config/foot/foot-colors.ini ~/.local/bin/dc-start logs 2>>/tmp/dc-term-err.log"
+        geom="1500 950"
+        ;;
     term)
         instance="scratch-term"
-        spawn="footclient --app-id=scratch-term --title=scratch-term -o selection-target=both -o mouse-bindings.primary-paste=none -o mouse-bindings.clipboard-paste=BTN_MIDDLE -o mouse-bindings.font-increase=none -o mouse-bindings.font-decrease=none -o mouse-bindings.scrollback-up-mouse=\"BTN_WHEEL_BACK Control+Mod1+BTN_WHEEL_BACK Mod1+Control+BTN_WHEEL_BACK Control+BTN_WHEEL_BACK Mod1+BTN_WHEEL_BACK Mod4+BTN_WHEEL_BACK Control+Mod4+BTN_WHEEL_BACK\" -o mouse-bindings.scrollback-down-mouse=\"BTN_WHEEL_FORWARD Control+Mod1+BTN_WHEEL_FORWARD Mod1+Control+BTN_WHEEL_FORWARD Control+BTN_WHEEL_FORWARD Mod1+BTN_WHEEL_FORWARD Mod4+BTN_WHEEL_FORWARD Control+Mod4+BTN_WHEEL_FORWARD\" -o locked-title=yes -o include=${HOME}/.config/foot/foot-colors.ini 2>>/tmp/scratch-term-err.log"
+        spawn="footclient --app-id=scratch-term --title=scratch-term -o font=\"Iosevka Nerd Font Mono:size=21:style=Regular\" -o selection-target=both -o mouse-bindings.primary-paste=none -o mouse-bindings.clipboard-paste=BTN_MIDDLE -o mouse-bindings.font-increase=none -o mouse-bindings.font-decrease=none -o mouse-bindings.scrollback-up-mouse=\"BTN_WHEEL_BACK Control+Mod1+BTN_WHEEL_BACK Mod1+Control+BTN_WHEEL_BACK Control+BTN_WHEEL_BACK Mod1+BTN_WHEEL_BACK Mod4+BTN_WHEEL_BACK Control+Mod4+BTN_WHEEL_BACK\" -o mouse-bindings.scrollback-down-mouse=\"BTN_WHEEL_FORWARD Control+Mod1+BTN_WHEEL_FORWARD Mod1+Control+BTN_WHEEL_FORWARD Control+BTN_WHEEL_FORWARD Mod1+BTN_WHEEL_FORWARD Mod4+BTN_WHEEL_FORWARD Control+Mod4+BTN_WHEEL_FORWARD\" -o locked-title=yes -o include=${HOME}/.config/foot/foot-colors.ini 2>>/tmp/scratch-term-err.log"
         geom="1700 1050"
         ;;
     notes)
@@ -129,6 +134,19 @@ print(result[0])
 }
 
 show_it() {
+    cur_state="$(win_state)"
+    if [ "$cur_state" = "visible" ]; then
+        if [ "$IPC_CMD" = "swaymsg" ]; then
+            swaymsg "[app_id=\"$instance\"] move scratchpad" >/dev/null 2>&1 || \
+            swaymsg "[class=\"(?i)$instance\"] move scratchpad" >/dev/null 2>&1 || \
+            swaymsg "[instance=\"$instance\"] move scratchpad" >/dev/null 2>&1
+        else
+            i3-msg "[instance=\"$instance\"] move scratchpad" >/dev/null 2>&1 || \
+            i3-msg "[class=\"(?i)$instance\"] move scratchpad" >/dev/null 2>&1
+        fi
+        return
+    fi
+
     if [ "$IPC_CMD" = "swaymsg" ]; then
         swaymsg "[app_id=\"$instance\"] scratchpad show" >/dev/null 2>&1 || \
         swaymsg "[class=\"(?i)$instance\"] scratchpad show" >/dev/null 2>&1 || \

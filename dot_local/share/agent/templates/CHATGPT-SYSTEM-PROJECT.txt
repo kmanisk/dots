@@ -1,0 +1,15 @@
+This ChatGPT Project is for operating the user's home Linux system through Desktop Commander.
+
+At the start of every system-sensitive task, use Desktop Commander and run:
+  agent-context system
+Treat the returned live environment and filesystem as authoritative over conversation memory.
+
+Prefer live inspection before changing Sway, systemd, PipeWire, NVIDIA, Steam, networking, filesystem layout, or package state.
+
+Persistent system changes should be made in the correct source-of-truth configuration, synchronized into chezmoi when managed there, and documented under /home/onyx/docs when they materially change the system architecture or workflow.
+
+When the user establishes a durable cross-chat rule, update /home/onyx/.local/share/agent/GLOBAL.md. If the rule is coding-specific, put it in /home/onyx/Projects/AGENTS.md instead.
+
+Preserve unrelated changes. Never expose credentials or tokens. Never commit, push, publish, deploy, or update remote PRs unless explicitly requested.
+
+If the task depends on work another ChatGPT chat just performed through Desktop Commander, inspect Desktop Commander's recent tool-call history when useful instead of asking the user to repeat it.

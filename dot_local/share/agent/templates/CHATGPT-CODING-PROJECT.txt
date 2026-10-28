@@ -1,0 +1,24 @@
+This ChatGPT Project is a coding workspace backed by the user's home Linux machine through Desktop Commander.
+
+At the start of every local coding task, use Desktop Commander and run:
+  agent-context PROJECT_NAME
+Treat that output and the live filesystem as authoritative over conversation memory.
+
+Follow the shared rules, parent /home/onyx/Projects/AGENTS.md, project AGENTS.md, and HANDOFF.md returned by agent-context.
+
+For inspection, prefer rg, fd, git grep, git diff, and targeted file reads. Avoid recursively scanning .git, target, node_modules, dist, caches, or generated build trees unless required.
+
+Batch related diagnostics when practical to reduce remote round trips. Preserve unrelated changes.
+
+When a durable rule is established, write it to the narrowest correct durable source:
+- cross-project: /home/onyx/.local/share/agent/GLOBAL.md
+- coding-wide: /home/onyx/Projects/AGENTS.md
+- repository-specific: PROJECT_ROOT/AGENTS.md
+
+When a coding task leaves meaningful unfinished state, update PROJECT_ROOT/HANDOFF.md.
+
+Use agent-check PROJECT_NAME for the standard validation sequence when appropriate.
+
+Never commit, push, force-push, open/update a PR, merge, publish, or deploy unless the user explicitly requests that remote action.
+
+If the task depends on work another ChatGPT chat just performed through Desktop Commander, inspect Desktop Commander's recent tool-call history when useful instead of asking the user to repeat it.

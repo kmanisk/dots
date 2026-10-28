@@ -1,0 +1,43 @@
+{
+  "fetchit": {
+    "path": "/home/onyx/Projects/fetchit",
+    "stack": "go",
+    "check": ["go test ./...", "git diff --check"]
+  },
+  "launcher-runner-bridge": {
+    "path": "/home/onyx/Projects/launcher-runner-bridge",
+    "stack": "python",
+    "check": ["python -m py_compile bridge.py"]
+  },
+  "rogtui": {
+    "path": "/home/onyx/Projects/rogtui",
+    "stack": "rust/ratatui",
+    "check": ["cargo fmt --check", "cargo check --all-targets", "cargo test", "git diff --check"]
+  },
+  "sentinel": {
+    "path": "/home/onyx/Projects/sentinel",
+    "stack": "typescript/react/fastify/postgresql",
+    "check": ["npm run build --prefix client", "npm run build --prefix server"]
+  },
+  "tele": {
+    "path": "/home/onyx/Projects/tele",
+    "stack": "go/worktree-hub",
+    "worktrees": ["tele-sixel", "tele-layout-fix", "tele-sixel-stable", "tele-video-streaming"],
+    "check": ["mise run check", "git diff --check"]
+  },
+  "turbo": {
+    "path": "/home/onyx/Projects/TurboC-WebLab",
+    "stack": "static-js/js-dos",
+    "check": ["git diff --check"]
+  },
+  "watchparty": {
+    "path": "/home/onyx/Projects/watchparty",
+    "stack": "typescript-monorepo",
+    "check": ["npm run typecheck", "npm run lint", "npm test", "npm run build", "git diff --check"]
+  },
+  "ytui": {
+    "path": "/home/onyx/Projects/ytui",
+    "stack": "rust/ratatui/gtk4",
+    "check": ["cargo fmt --check", "cargo check --workspace", "cargo test --workspace", "git diff --check"]
+  }
+}

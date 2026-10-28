@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# toggle-dc: Toggle Desktop Commander Monitor scratchpad
+# ==============================================================================
+set -euo pipefail
+
+exec ~/.local/bin/scratch-toggle dc

@@ -1,0 +1,20 @@
+[Unit]
+Description=Desktop Commander Remote Service (ChatGPT Bridge)
+Documentation=https://github.com/wonderwhy-er/DesktopCommanderMCP
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=HOME=/home/onyx
+Environment=PATH=/home/onyx/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/npx --yes @wonderwhy-er/desktop-commander@latest remote
+Restart=always
+RestartSec=5s
+KillMode=process
+
+# Resource controls
+MemoryMax=1.5G
+
+[Install]
+WantedBy=default.target
