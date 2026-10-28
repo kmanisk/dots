@@ -1,34 +1,25 @@
 #!/bin/sh
 # ==============================================================================
-# steam-workspace - Background Steam Launcher & Workspace 3 Router
+# steam-workspace - background Steam launcher for workspace 3
 # ==============================================================================
-# 2026-10-18 rewrite (Caps+E): Steam is spawned and PUSHED to workspace 3 in
-# the background. The current viewport is never switched and focus is never
-# stolen; switch to ws3 yourself (Win+o) when ready.
+# Behavior: always background. The viewport and keyboard focus are never moved
+# away from the workspace you are using.
 #
-# - Cold boot: launches Steam (DGPU env honored), routes window to ws3 on map.
-# - Background/tray: re-opens the main window via steam://open/main, routes
-#   it to ws3 without switching the view.
-# - Window already visible: silently re-routes it to ws3 if it sits elsewhere.
-# - Legacy flags (e.g. --silent) are accepted and ignored: launching is now
-#   always background / silent with respect to workspace focus.
+#   - Steam not running: launches the client normally (a real window, not
+#     `-silent`) and lets the ws3 assign rules place it there in the background.
+#   - Steam running with the window hidden/tray: asks it to map the main window,
+#     which lands on ws3 in the background.
+#   - Window already mapped: ensures it stays on ws3. It is focused only when
+#     you are already looking at ws3.
+#
+# Why this exists:
+#   - `steam -silent` maps no window at all, so a background launch left Steam
+#     in the tray and nothing on ws3.
+#   - `systemd-run --user` does not inherit the caller environment, which
+#     silently dropped STEAM_DGPU and the PRIME offload variables.
+#   - a transient unit left in `failed` state blocked every later launch.
 # ==============================================================================
 set -u
-
-# ---- detach from the caller's cgroup -----------------------------------------
-# Caps+E runs this through xremap.service, so Steam (and every game it starts)
-# used to inherit that unit's cgroup. bt-autoconnect restarts xremap.service on
-# every Bluetooth keyboard reconnect, and the default KillMode=control-group
-# SIGKILLs the whole cgroup - Steam and CS2 died with it. Re-exec once inside a
-# transient user scope so Steam always lives in its own cgroup.
-if [ "${STEAM_WORKSPACE_SCOPED:-0}" != "1" ] && command -v systemd-run >/dev/null 2>&1; then
-    export STEAM_WORKSPACE_SCOPED=1
-    if systemd-run --user --scope --quiet --collect -p KillMode=process -- "$0" "$@"; then
-        exit 0
-    fi
-fi
-
-WS=3
 
 # Compositor IPC: swaymsg on Wayland, i3-msg on X11
 IPC_CMD="i3-msg"
@@ -36,53 +27,125 @@ if [ -n "${SWAYSOCK:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
     IPC_CMD="swaymsg"
 fi
 
-has_window() {
-    $IPC_CMD -t get_tree 2>/dev/null | grep -qE '"instance": ?"steamwebhelper"'
+WS=3
+
+# RTX 5050 offload. Kept in the environment so the nohup fallback works too;
+# systemd-run needs them repeated as --setenv (it does not inherit the caller).
+export STEAM_DGPU="${STEAM_DGPU:-1}"
+export __NV_PRIME_RENDER_OFFLOAD=1
+export __VK_LAYER_NV_optimus=NVIDIA_only
+export __GLX_VENDOR_LIBRARY_NAME=nvidia
+export GDK_SCALE=1
+export STEAM_FORCE_DESKTOPUI_SCALING="${STEAM_FORCE_DESKTOPUI_SCALING:-1}"
+
+# --- sway helpers -------------------------------------------------------------
+
+focused_ws() {
+    $IPC_CMD -t get_workspaces 2>/dev/null | python3 -c '
+import json, sys
+try:
+    ws = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+print(next((w.get("num", 0) for w in ws if w.get("focused")), 0))
+'
 }
 
-# Push every Steam UI window to ws3. Never focuses, never switches viewport.
+has_steam_window() {
+    $IPC_CMD -t get_tree 2>/dev/null | python3 -c '
+import json, sys
+try:
+    tree = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+
+def scan(node):
+    props = node.get("window_properties") or {}
+    cls = (props.get("class") or node.get("class") or "").lower()
+    inst = (props.get("instance") or node.get("app_id") or "").lower()
+    if (cls == "steam" or inst == "steamwebhelper") and node.get("name") == "Steam":
+        return True
+    for c in node.get("nodes", []) + node.get("floating_nodes", []):
+        if scan(c):
+            return True
+    return False
+
+sys.exit(0 if scan(tree) else 1)
+'
+}
+
 route_to_ws3() {
-    $IPC_CMD "[instance=\"steamwebhelper\"] move to workspace number $WS" >/dev/null 2>&1 || true
+    $IPC_CMD '[class="(?i)^steam$"] move to workspace number '"$WS" >/dev/null 2>&1 || true
+    $IPC_CMD '[app_id="(?i)^steam$"] move to workspace number '"$WS" >/dev/null 2>&1 || true
+    $IPC_CMD '[instance="steamwebhelper"] move to workspace number '"$WS" >/dev/null 2>&1 || true
 }
 
-# Backstop: poll until the Steam window maps, then route it to ws3.
-# Runs detached so the launcher itself exits immediately.
-watch_and_route() {
-    i=0
-    while [ "$i" -lt "$1" ]; do
+focus_main() {
+    $IPC_CMD '[class="(?i)^steam$"] focus' >/dev/null 2>&1 || true
+    $IPC_CMD '[app_id="(?i)^steam$"] focus' >/dev/null 2>&1 || true
+}
+
+# Wait for the main window to map, then keep it on ws3. Focus is only taken when
+# the user is already on ws3, so a background launch never steals anything.
+watch_for_window() {
+    _i=0
+    while [ "$_i" -lt "$1" ]; do
         sleep "$2"
-        if has_window; then
+        if has_steam_window; then
             route_to_ws3
-            return
+            if [ "$(focused_ws)" = "$WS" ]; then
+                focus_main
+            fi
+            return 0
         fi
-        i=$((i + 1))
+        _i=$((_i + 1))
     done
+    return 1
 }
 
-if [ -n "${SWAYSOCK:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
-    export STEAM_FORCE_DESKTOPUI_SCALING="${STEAM_FORCE_DESKTOPUI_SCALING:-1}"
-    export GDK_SCALE=1
+# --- launch -------------------------------------------------------------------
+
+launch_steam() {
+    if command -v systemd-run >/dev/null 2>&1; then
+        # Clear a stale failed transient unit, otherwise the name is busy and
+        # the launch dies silently.
+        systemctl --user reset-failed steam-launcher.service >/dev/null 2>&1 || true
+        systemd-run --user --quiet --collect --unit=steam-launcher \
+            -p KillMode=process \
+            --setenv=STEAM_DGPU="$STEAM_DGPU" \
+            --setenv=__NV_PRIME_RENDER_OFFLOAD=1 \
+            --setenv=__VK_LAYER_NV_optimus=NVIDIA_only \
+            --setenv=__GLX_VENDOR_LIBRARY_NAME=nvidia \
+            --setenv=GDK_SCALE=1 \
+            --setenv=STEAM_FORCE_DESKTOPUI_SCALING="$STEAM_FORCE_DESKTOPUI_SCALING" \
+            -- "$HOME/.local/bin/steam" >/dev/null 2>&1 &
+        return 0
+    fi
+
+    nohup "$HOME/.local/bin/steam" >/dev/null 2>&1 &
+}
+
+# --- main ---------------------------------------------------------------------
+
+# 1. Window already mapped: keep it on ws3, focus only if ws3 is already focused.
+if has_steam_window; then
+    route_to_ws3
+    if [ "$(focused_ws)" = "$WS" ]; then
+        focus_main
+    fi
+    exit 0
 fi
 
-if ! pgrep -x steam >/dev/null 2>&1; then
-    # 1. Cold boot: Steam process is not running at all
-    # If launched under prime-run (Win+Shift+G), keep the offload env
-    # instead of letting the steam wrapper strip it.
-    if [ -n "${__NV_PRIME_RENDER_OFFLOAD:-}" ]; then
-        export STEAM_DGPU=1
-    fi
-    # STEAM_DGPU=1 without prime-run (rofi NVIDIA entry): apply the
-    # offload env here, same values as prime-run.
-    if [ "${STEAM_DGPU:-0}" = "1" ]; then
-        export __NV_PRIME_RENDER_OFFLOAD=1 __VK_LAYER_NV_optimus=NVIDIA_only __GLX_VENDOR_LIBRARY_NAME=nvidia
-    fi
-    nohup steam -silent >/dev/null 2>&1 &
-    watch_and_route 30 0.5 &
-elif ! has_window; then
-    # 2. Process is running in background/tray, but window is closed/hidden
-    nohup steam steam://open/main >/dev/null 2>&1 &
-    watch_and_route 15 0.2 &
-else
-    # 3. Window already exists: make sure it lives on ws3 (no focus change)
-    route_to_ws3
+# 2. Client alive with a hidden/tray window: map the main window on ws3.
+if pgrep -x steam >/dev/null 2>&1; then
+    nohup "$HOME/.local/bin/steam" steam://open/main >/dev/null 2>&1 &
+    watch_for_window 120 0.1 &
+    exit 0
 fi
+
+# 3. Cold start: a visible window (never `-silent`) routed to ws3 by the assign
+#    rules. The viewport stays wherever the user is.
+launch_steam
+watch_for_window 100 0.2 &
+
+exit 0

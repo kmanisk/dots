@@ -100,8 +100,8 @@ keymap:
       CapsLock-w:
         launch: ["/home/onyx/.local/bin/rofi-pkill"]
 
-      # Steam Launch (was Alt+Shift+S): spawns Steam and routes its window
-      # to WS 3 in the background - never switches the viewport.
+      # Steam Launch (was Alt+Shift+S): launches or reveals Steam in the
+      # background, window routed to WS 3. The viewport is never moved.
       CapsLock-e:
         launch: ["/bin/sh", "-c", "STEAM_DGPU=1 ~/.local/bin/steam-workspace"]
 
