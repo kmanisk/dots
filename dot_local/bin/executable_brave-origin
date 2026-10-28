@@ -31,9 +31,10 @@ if [ -z "$BRAVE_BIN" ]; then
 fi
 
 if [ -n "$SWAYSOCK" ] || [ -n "$WAYLAND_DISPLAY" ]; then
-    # Native Wayland: 1.25 device scale (middle ground; 1.0 too small, 1.33 too big).
-    # Page zoom stays per-site (Ctrl +/-); UI follows toolkit text scaling.
-    exec "$BRAVE_BIN" --ozone-platform=wayland --force-device-scale-factor=1.25 "$@"
+    # Native Wayland. Sway output scaling is the single source of UI scaling.
+    # Do not force an additional Chromium device scale here; it stacks with
+    # the compositor scale and makes Brave's chrome unnecessarily large.
+    exec "$BRAVE_BIN" --ozone-platform=wayland "$@"
 fi
 
-exec "$BRAVE_BIN" --force-device-scale-factor=1.0 "$@"
+exec "$BRAVE_BIN" "$@"

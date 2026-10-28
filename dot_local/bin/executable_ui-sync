@@ -1,0 +1,222 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# ui-sync - derive system chrome sizes from the current Sway UI scale
+# ==============================================================================
+# Sway scales the whole output, so every client grows together. That is right
+# for application content and wrong for transient chrome (OSD, notifications,
+# status bar, lock screen), which becomes enormous at 1.25x and above.
+#
+# This helper reads the active scale from config.d/99-ui-scale.conf, converts
+# the base sizes in ui-metrics.conf for that scale, and writes the result into
+# the config files the chrome actually reads. Run it after changing the scale;
+# ui-scale calls it automatically, and a theme-set hook re-runs it after a
+# theme switch so regenerated configs never lose the values.
+#
+#   ui-sync            apply and report
+#   ui-sync --quiet    apply silently (hooks, autostart)
+#
+# Environment:
+#   UI_CHROME_FOLLOW   0 = constant physical size (default), 1 = full follow
+# ==============================================================================
+set -euo pipefail
+
+CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
+
+SCALE_CONF="$CONFIG_HOME/sway/config.d/99-ui-scale.conf"
+METRICS_FILE="$CONFIG_HOME/ui-metrics.conf"
+MAKO_LINK="$CONFIG_HOME/mako/config"
+BAR_CONF="$STATE_HOME/theme/swaybar.conf"
+GTK_CSS="$STATE_HOME/theme/gtk.css"
+LOCK_CONF="$CONFIG_HOME/swaylock/config"
+
+QUIET=0
+for arg in "$@"; do
+    case "$arg" in
+        --quiet|-q) QUIET=1 ;;
+        --help|-h)
+            printf 'usage: ui-sync [--quiet]\n'
+            exit 0
+            ;;
+        *)
+            printf 'ui-sync: unknown option %s\n' "$arg" >&2
+            exit 2
+            ;;
+    esac
+done
+
+# --- base sizes, overridable from ui-metrics.conf -----------------------------
+MAKO_FONT_FAMILY="Iosevka Nerd Font"
+MAKO_FONT=13
+MAKO_PADDING=10
+MAKO_MARGIN=10
+MAKO_WIDTH=380
+MAKO_BORDER=2
+MAKO_RADIUS=8
+BAR_FONT_FAMILY="Iosevka Nerd Font"
+BAR_FONT=10
+SWAY_FONT_FAMILY="Iosevka Nerd Font"
+SWAY_TITLE_FONT=11
+TITLEBAR_PADDING=2
+TITLEBAR_BORDER=1
+LOCK_RADIUS=42
+LOCK_THICKNESS=8
+LOCK_FONT=13
+GTK_FONT=13
+
+if [ -r "$METRICS_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$METRICS_FILE"
+fi
+
+# Environment wins over the metrics file so it can be changed per invocation.
+FOLLOW="${UI_CHROME_FOLLOW:-${CHROME_FOLLOW:-0}}"
+
+# --- current scale ------------------------------------------------------------
+scale="1.00"
+if [ -r "$SCALE_CONF" ]; then
+    raw="$(grep -oE 'scale[[:space:]]+[0-9]+(\.[0-9]+)?' "$SCALE_CONF" \
+        | awk '{print $2}' | head -n1 || true)"
+    case "$raw" in
+        ''|*[!0-9.]*) ;;
+        *) scale="$raw" ;;
+    esac
+fi
+
+# base * scale^(FOLLOW-1), rounded, never below min
+calc() {
+    awk -v base="$1" -v s="$scale" -v f="$FOLLOW" -v lo="$2" 'BEGIN {
+        if (s <= 0) s = 1
+        v = base * (s ^ (f - 1))
+        if (v < lo) v = lo
+        printf "%d", int(v + 0.5)
+    }'
+}
+
+mako_font=$(calc "$MAKO_FONT" 6)
+mako_padding=$(calc "$MAKO_PADDING" 4)
+mako_margin=$(calc "$MAKO_MARGIN" 4)
+mako_width=$(calc "$MAKO_WIDTH" 200)
+mako_border=$(calc "$MAKO_BORDER" 1)
+mako_radius=$(calc "$MAKO_RADIUS" 2)
+bar_font=$(calc "$BAR_FONT" 6)
+lock_radius=$(calc "$LOCK_RADIUS" 16)
+lock_thickness=$(calc "$LOCK_THICKNESS" 3)
+lock_font=$(calc "$LOCK_FONT" 8)
+gtk_font=$(printf '%.1f' "$(awk -v base="$GTK_FONT" -v s="$scale" -v f="$FOLLOW" \
+    'BEGIN { if (s <= 0) s = 1; v = base * (s ^ (f - 1)); if (v < 6) v = 6; printf "%.2f", v }')")
+
+# --- mako (OSD + notifications) ----------------------------------------------
+# config is a symlink into the theme state dir; resolve it so the link survives
+rewrite_top_level() {
+    local file="$1" key="$2" value="$3" tmp
+    [ -f "$file" ] || return 0
+    tmp="$(mktemp)"
+    awk -v k="$key" -v v="$value" '
+        BEGIN { in_section = 0 }
+        /^[[:space:]]*\[/ { in_section = 1 }
+        in_section == 0 && index($0, k "=") == 1 { print k "=" v; next }
+        { print }
+    ' "$file" >"$tmp"
+    cat "$tmp" >"$file"
+    rm -f "$tmp"
+}
+
+mako_target="$(readlink -f "$MAKO_LINK" 2>/dev/null || true)"
+if [ -n "$mako_target" ] && [ -f "$mako_target" ]; then
+    rewrite_top_level "$mako_target" font "$MAKO_FONT_FAMILY $mako_font"
+    rewrite_top_level "$mako_target" padding "$mako_padding"
+    rewrite_top_level "$mako_target" margin "$mako_margin"
+    rewrite_top_level "$mako_target" width "$mako_width"
+    rewrite_top_level "$mako_target" border-size "$mako_border"
+    rewrite_top_level "$mako_target" border-radius "$mako_radius"
+    if pgrep -x mako >/dev/null 2>&1; then
+        makoctl reload >/dev/null 2>&1 || true
+    fi
+fi
+
+# --- sway decorations (tabbed-container tab bar) -------------------------------
+# The tab bar is compositor chrome: its height is the sway font plus
+# titlebar_padding and titlebar_border_thickness. A generated fragment loads
+# last, so it overrides the font set earlier in 00-variables.conf.
+CHROME_CONF="$CONFIG_HOME/sway/config.d/99-ui-chrome.conf"
+sway_title_font=$(calc "$SWAY_TITLE_FONT" 6)
+title_padding=$(calc "$TITLEBAR_PADDING" 0)
+title_border=$(calc "$TITLEBAR_BORDER" 0)
+
+chrome_body="# Generated by ui-sync for UI scale $scale. Do not edit by hand.
+# Base sizes live in ~/.config/ui-metrics.conf
+font pango:$SWAY_FONT_FAMILY $sway_title_font
+titlebar_padding $title_padding
+titlebar_border_thickness $title_border"
+
+chrome_changed=0
+if [ -f "$CHROME_CONF" ]; then
+    [ "$(cat "$CHROME_CONF")" = "$chrome_body" ] || chrome_changed=1
+else
+    chrome_changed=1
+fi
+
+if [ "$chrome_changed" -eq 1 ]; then
+    mkdir -p "$(dirname "$CHROME_CONF")"
+    printf '%s\n' "$chrome_body" >"$CHROME_CONF"
+fi
+
+# --- swaybar ------------------------------------------------------------------
+if [ -f "$BAR_CONF" ]; then
+    tmp="$(mktemp)"
+    awk -v fam="$BAR_FONT_FAMILY" -v n="$bar_font" '
+        /^[[:space:]]*font[[:space:]]+pango:/ {
+            match($0, /^[[:space:]]*/)
+            indent = substr($0, 1, RLENGTH)
+            print indent "font pango:" fam " " n
+            next
+        }
+        { print }
+    ' "$BAR_CONF" >"$tmp"
+    cat "$tmp" >"$BAR_CONF"
+    rm -f "$tmp"
+fi
+
+# --- GTK theme CSS (explicit font sizes only) ---------------------------------
+if [ -f "$GTK_CSS" ]; then
+    tmp="$(mktemp)"
+    awk -v n="$gtk_font" '
+        /font-size:[[:space:]]*[0-9.]+pt/ {
+            sub(/font-size:[[:space:]]*[0-9.]+pt/, "font-size: " n "pt")
+        }
+        { print }
+    ' "$GTK_CSS" >"$tmp"
+    cat "$tmp" >"$GTK_CSS"
+    rm -f "$tmp"
+fi
+
+# --- swaylock -----------------------------------------------------------------
+mkdir -p "$(dirname "$LOCK_CONF")"
+{
+    printf '# Generated by ui-sync for UI scale %s. Do not edit by hand.\n' "$scale"
+    printf '# Base sizes live in ~/.config/ui-metrics.conf\n'
+    printf 'indicator-radius=%s\n' "$lock_radius"
+    printf 'indicator-thickness=%s\n' "$lock_thickness"
+    printf 'font-size=%s\n' "$lock_font"
+} >"$LOCK_CONF"
+
+# --- reload sway if the decoration sizes changed -------------------------------
+# Sway only re-reads font and titlebar settings on reload. Skipped when nothing
+# changed so ordinary ui-sync runs stay free of reload side effects.
+if [ "$chrome_changed" -eq 1 ] && [ -n "${SWAYSOCK:-}" ] && command -v swaymsg >/dev/null 2>&1; then
+    swaymsg reload >/dev/null 2>&1 || true
+fi
+
+# --- report -------------------------------------------------------------------
+if [ "$QUIET" -ne 1 ]; then
+    printf 'ui-sync: scale %s (follow %s)\n' "$scale" "$FOLLOW"
+    printf '  mako    font %s  padding %s  margin %s  width %s  border %s  radius %s\n' \
+        "$mako_font" "$mako_padding" "$mako_margin" "$mako_width" "$mako_border" "$mako_radius"
+    printf '  swaybar font %s\n' "$bar_font"
+    printf '  sway tab bar font %s  padding %s  border %s\n' \
+        "$sway_title_font" "$title_padding" "$title_border"
+    printf '  gtk     font %spt\n' "$gtk_font"
+    printf '  swaylock radius %s  thickness %s  font %s\n' \
+        "$lock_radius" "$lock_thickness" "$lock_font"
+fi

@@ -15,12 +15,11 @@ if [ -n "$SWAYSOCK" ] || [ -n "$WAYLAND_DISPLAY" ]; then
     export LIBVA_DRIVER_NAME=nvidia
     # Classic DRI3 GLX offload: render on NVIDIA, present via Intel/XWayland
     export DRI_PRIME=1
+    # Sway output scaling owns the desktop scale; do not stack a Chromium
+    # device-scale override on top of it.
     exec prime-run "$BRAVE_BIN" \
         --ozone-platform=x11 \
-        --force-device-scale-factor=1.33 \
         "$@"
 fi
 
-exec prime-run "$BRAVE_BIN" \
-    --force-device-scale-factor=1.40 \
-    "$@"
+exec prime-run "$BRAVE_BIN" "$@"

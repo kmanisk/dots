@@ -6,6 +6,7 @@
 #   ~/.config/sway/config.d/20-input.conf         - Keyboard, Touchpad, Gestures
 #   ~/.config/sway/config.d/30-window-rules.conf  - Rules, Floating, Steam, Games
 #   ~/.config/sway/config.d/40-keybindings.conf   - Window nav, Launchers, Marks
+#   ~/.config/sway/config.d/45-ui-scale.conf      - Central UI scaling (all apps)
 #   ~/.config/sway/config.d/50-gaming-mode.conf   - Gaming passthrough mode
 #   ~/.config/sway/config.d/60-autostart.conf     - Daemons, Services, Scratchpads
 #   ~/.config/sway/config.d/70-bar.conf           - Swaybar status & theme

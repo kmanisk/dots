@@ -1,0 +1,5 @@
+#!/bin/sh
+# theme-set hook: a theme switch regenerates mako.conf, swaybar.conf and
+# gtk.css from templates, which restores their hardcoded sizes. Re-derive the
+# scale-aware values immediately so chrome never jumps back to oversized.
+exec "$HOME/.local/bin/ui-sync" --quiet
