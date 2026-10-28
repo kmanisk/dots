@@ -44,66 +44,118 @@ To share a full desktop without leaking an overlay, the capture pipeline must be
                    v                                         v
    [ Virtual Output: HEADLESS-X ]             [ Physical Output: eDP-1 ]
    +----------------------------+             +----------------------------+
-   | - Houses Work Workspace 1  |             | - Houses Workspace 2       |
-   | - Contains IDE, Browser,   |             | - Tiled borderless window: |
+   | - Houses Work Workspace 2  |             | - Houses Alternate WS      |
+   | - Contains Brave, IDE,     |             | - Tiled borderless window: |
    |   and active Terminal      |             |   wl-mirror (HEADLESS-X)   |
-   | - Target of Keyboard Focus |             | - Floating & Sticky Layer: |
-   +--------------+-------------+             |   Meetingly AI Overlay     |
-                  |                           +----------------------------+
-                  v                                         |
-        wlr-screencopy buffer                               v
-                  |                            Rendered ONLY to physical
-                  v                            panel (invisible to portal)
-      [ xdg-desktop-portal-wlr ]
-                  |
-                  v
-         [ PipeWire Stream ]
-                  |
-                  v
-       [ Google Meet / Zoom ]
+   | - Target of Keyboard Focus |             | - Floating Layer:          |
+   | - Spawns any new windows   |             |   Meetingly AI Overlay     |
+   | - Completely isolated from |             |   (Strictly pinned to      |
+   |   Meetingly overlay        |             |    physical output eDP-1)  |
+   +----------------------------+             +----------------------------+
+                   |                                         |
+                   v                                         v
+       [ wlr-screencopy Portal ]                      [ Physical Eyes ]
+                   |                               (Sees work + overlay)
+                   v
+          [ PipeWire Stream ]
+                   |
+                   v
+        [ Google Meet / Zoom ]
 ```
 
-### Core Components
+### Core Components & Dynamics
 1. **Dynamic Virtual Output (`HEADLESS-X`)**: Created in Sway userspace via `swaymsg create_output`. It functions as a fully operational monitor with its own workspace layout, but possesses no physical display panel.
-2. **Work Relocation**: Your working applications (VS Code, terminal, browser) are relocated onto Workspace 1 on `HEADLESS-X`.
-3. **Local Visual Bridge (`wl-mirror`)**: A lightweight Wayland client that captures the frame buffer of `HEADLESS-X` and renders it onto a window on your physical screen (`eDP-1`).
-4. **Physical Overlay Isolation**: Meetingly AI is configured via Sway rules to remain strictly on `eDP-1` in the floating layer. Because Meetingly never touches the frame buffer of `HEADLESS-X`, it is physically impossible for the screencopy capture stream to record it.
+2. **Workspace 2 as the Work Hub**: Workspace 2 hosts the entire interview workspace (Brave, code editor, terminals). In our Sway configuration, Brave is strictly bound via `assign` rules to Workspace 2 (`$ws2`). By migrating Workspace 2 to `HEADLESS-X`, all browser windows, meeting tabs, code editors, and terminals live on the shared display.
+3. **Opening New Windows & Apps Dynamically**: Once `meet-start.sh` transfers Workspace 2 to `HEADLESS-X` and focuses it, **any new application or window you launch (terminals via `Super+Enter`, new browser windows via `Super+b`, or editor windows) automatically spawns on Workspace 2 inside `HEADLESS-X`**. It immediately mirrors onto your screen through `wl-mirror` and streams to Google Meet.
+4. **Local Visual Bridge (`wl-mirror`)**: A lightweight Wayland client that captures the frame buffer of `HEADLESS-X` and renders it onto a window on your physical screen (`eDP-1`).
+5. **Physical Overlay Isolation**: Meetingly AI is configured via Sway rules to remain strictly on `eDP-1` in the floating layer without `sticky enable`. Because Meetingly never touches the frame buffer of `HEADLESS-X`, it is physically impossible for the screencopy capture stream to record it.
 
 ---
 
-## 3. Deep Dive: Three Critical Edge Cases and How They Were Solved
+## 3. Deep Dive: Edge Cases and Engineering Solutions
 
-During the engineering of this pipeline on CachyOS with an RTX 5050 Laptop GPU and Sway 1.12, three critical bugs had to be resolved.
+During live testing and implementation on CachyOS with Sway 1.12, seven distinct failure modes and edge cases were identified and solved.
 
-### Edge Case 1: Sway Stacking Order & Fullscreen Occlusion
-- **The Pitfall**: An intuitive approach is to launch `wl-mirror` and enter `fullscreen enable` so it covers the entire 1920x1200 laptop panel.
-- **The Mechanical Failure**: In Sway, when a window enters `fullscreen`, the compositor promotes that container above the workspace's floating layer. As a result, the fullscreen mirror completely occluded Meetingly, hiding the AI overlay from the user.
+### Edge Case 1: Sway Stacking Order and Fullscreen Occlusion
+- **The Pitfall**: Launching `wl-mirror` and entering `fullscreen enable` so it covers the entire 1920x1200 laptop panel.
+- **The Mechanical Failure**: In Sway, when a window enters `fullscreen`, the compositor promotes that container above the workspace floating layer. As a result, fullscreen `wl-mirror` completely occludes Meetingly, hiding the AI overlay from your view.
 - **The Engineering Fix**: Configure `wl-mirror` as a **tiled window with zero borders**:
+  ```ini
+  for_window [app_id="(?i).*(wl[-_]?mirror|at\.yrlf\.wl_mirror).*"] border none, move to output eDP-1
+  ```
+  Because Sway fills the output with tiled windows, a single borderless window covers 100% of the display area. Sway floating layers render strictly above tiled containers, guaranteeing Meetingly floats permanently visible on top of the mirror.
+
+### Edge Case 2: Output Assignment vs. Active Workspace Movement
+- **The Pitfall**: Attempting to relocate the workspace using passive assignment:
+  ```bash
+  swaymsg workspace 2 output "$HEADLESS_OUT"
+  ```
+- **The Mechanical Failure**: In Sway IPC, `workspace <num> output <name>` is a configuration directive defining where that workspace should be instantiated in the future. It does **not** move an active, existing workspace. Workspace 2 remained on `eDP-1`, leaving `wl-mirror` capturing an empty output.
+- **The Engineering Fix**: Use Sway criteria syntax to explicitly migrate the active container:
+  ```bash
+  swaymsg "[workspace=2] move workspace to output $HEADLESS_OUT"
+  ```
+
+### Edge Case 3: Workspace 2 Alignment (Brave Window Rules)
+- **The Pitfall**: Moving Workspace 1 while Brave is strictly locked to Workspace 2 via configuration:
+  ```ini
+  assign [app_id="(?i)^(brave|brave-browser|brave-origin...)$"] workspace number $ws2
+  for_window [app_id="(?i)^(brave...)$"] move to workspace number $ws2, floating disable, layout tabbed
+  ```
+- **The Mechanical Failure**: If the script targets Workspace 1, any new browser window or Google Meet tab gets forced back to Workspace 2 on `eDP-1`, colliding with `wl-mirror` and escaping the shared stream.
+- **The Engineering Fix**: Target Workspace 2 (`TARGET_WS=2`) as the universal presentation workspace. All browser instances, meeting tabs, editor windows, and terminals remain unified on Workspace 2.
+
+### Edge Case 4: The `sticky enable` Overlay Leak Trap
+- **The Pitfall**: Configuring Meetingly with `sticky enable` to follow workspace changes:
+  ```ini
+  for_window [app_id="(?i)^meetingly.*"] floating enable, sticky enable, border pixel 1
+  ```
+- **The Mechanical Failure**: In Sway, `sticky enable` binds a floating container to the output's active workspace. If Workspace 2 is active on `eDP-1` when Meetingly launches, running `swaymsg "[workspace=2] move workspace to output $HEADLESS_OUT"` migrates the workspace and all attached floating containers onto `HEADLESS-OUT`. Meetingly ends up rendered inside the `HEADLESS-OUT` buffer, leaking directly into the Google Meet stream.
+- **The Engineering Fix**: Drop `sticky enable` entirely. Instead, strictly pin Meetingly to `eDP-1`:
+  ```ini
+  for_window [app_id="(?i)^meetingly.*"] floating enable, move to output eDP-1, border pixel 1
+  for_window [class="(?i)^meetingly.*"] floating enable, move to output eDP-1, border pixel 1
+  ```
+  Additionally, `meet-start.sh` proactively relocates Meetingly to `eDP-1` before moving Workspace 2:
+  ```bash
+  swaymsg '[app_id="(?i)^meetingly.*"] move to output eDP-1' 2>/dev/null || true
+  swaymsg '[class="(?i)^meetingly.*"] move to output eDP-1' 2>/dev/null || true
+  ```
+  This guarantees that even if Meetingly was launched prior to presentation mode on Workspace 2, it is safely pulled onto `eDP-1` before Workspace 2 is transferred to the headless output.
+
+### Edge Case 5: `wl-mirror` Exact `app_id` Mismatch
+- **The Pitfall**: Writing window rules with exact name assumptions:
   ```ini
   for_window [app_id="^wl-mirror$"] border none, move to output eDP-1
   ```
-  Because Sway's default layout on `eDP-1` is tabbed/tiled, a single borderless window fills 100% of the display area. Sway's floating layer (`floating enable, sticky enable`) renders strictly above all tiled windows, guaranteeing that Meetingly floats permanently on top of the mirror.
+- **The Mechanical Failure**: Upstream `wl-mirror` exports its Wayland application ID as `at.yrlf.wl_mirror` (the author reverse-DNS ID). An exact regex match against `^wl-mirror$` silently fails. Without matching the `move to output eDP-1` rule, `wl-mirror` opens on whichever output currently has focus (`HEADLESS-OUT`), mirroring the headless display onto itself.
+- **The Engineering Fix**: Use a resilient regex that matches both standard names and the reverse-DNS identifier:
+  ```ini
+  for_window [app_id="(?i).*(wl[-_]?mirror|at\.yrlf\.wl_mirror).*"] border none, move to output eDP-1
+  ```
 
-### Edge Case 2: Output Assignment vs. Active Workspace Movement
-- **The Pitfall**: The initial script attempted to relocate the workspace using:
+### Edge Case 6: Input Focus Race Conditions
+- **The Pitfall**: Using a fixed `sleep 0.3` delay before refocusing Workspace 2:
   ```bash
-  swaymsg workspace 1 output "$HEADLESS_OUT"
-  ```
-- **The Mechanical Failure**: In Sway IPC, `workspace <num> output <name>` is a configuration directive that specifies where a workspace should be created *in the future*. It does **not** move an active, existing workspace. Workspace 1 remained on `eDP-1`, and `wl-mirror` ended up capturing an empty screen.
-- **The Engineering Fix**: Use Sway's container criteria command to explicitly relocate the active workspace:
-  ```bash
-  swaymsg "[workspace=1] move workspace to output $HEADLESS_OUT"
-  ```
-- **Focus Routing**: When Workspace 1 moves to the headless display, `eDP-1` automatically displays an alternate workspace (Workspace 2) to host `wl-mirror`. If focus remained on `eDP-1`, all keyboard strokes would be swallowed by `wl-mirror` (which drops input). The start script explicitly routes keyboard focus back to Workspace 1:
-  ```bash
+  wl-mirror "$HEADLESS_OUT" &
   sleep 0.3
-  swaymsg "[workspace=1] focus"
+  swaymsg "[workspace=2] focus"
   ```
-  Now, keyboard strokes go directly into your code editor on `HEADLESS-X`, while your eyes view the output through the mirror on `eDP-1`.
+- **The Mechanical Failure**: On cold launches or under GPU driver initialization latency, `wl-mirror` may take longer than 300 ms to map its Wayland surface. If the focus command executes before `wl-mirror` maps, `wl-mirror` maps afterwards and steals keyboard focus on `eDP-1`, swallowing all keystrokes.
+- **The Engineering Fix**: Implement an active polling loop that queries Sway tree state until `wl-mirror` is registered:
+  ```bash
+  for _ in $(seq 1 30); do
+      if swaymsg -t get_tree | jq -r '.. | select(.type?=="con" and .app_id?!=null) | .app_id' | grep -qiE 'wl[-_]mirror|at\.yrlf\.wl_mirror'; then
+          break
+      fi
+      sleep 0.1
+  done
+  swaymsg "[workspace=2] focus"
+  ```
 
-### Edge Case 3: Dynamic Display Resolution Matching
+### Edge Case 7: Dynamic Display Resolution Matching
 - **The Pitfall**: Hardcoding `1920x1200` breaks if the panel resolution changes or scaling is applied, resulting in black letterboxing or cropped video feeds in Google Meet.
-- **The Engineering Fix**: Dynamically query `eDP-1`'s active geometry using `jq`:
+- **The Engineering Fix**: Dynamically query `eDP-1` active geometry using `jq`:
   ```bash
   read -r W H < <(swaymsg -t get_outputs | jq -r '.[] | select(.name=="eDP-1") | "\(.current_mode.width) \(.current_mode.height)"')
   swaymsg output "$HEADLESS_OUT" resolution "${W}x${H}" position "$W" 0
@@ -114,33 +166,30 @@ During the engineering of this pipeline on CachyOS with an RTX 5050 Laptop GPU a
 
 ## 4. Audio Architecture & PipeWire Isolation
 
-A common concern when creating virtual displays is whether the audio stack gets disrupted.
+Virtual display output creation does not interfere with the PipeWire audio pipeline.
 
 ### Audio Pipeline Invariants
-1. **Zero Virtual Audio Nodes**: Sway's `create_output` command operates entirely inside the wlroots compositor display pipeline. It creates DRM/Wayland surfaces only; it registers zero ALSA devices or PipeWire audio sinks.
-2. **Source & Sink Verification**:
-   ```bash
-   pactl get-default-sink
-   # Output: alsa_output.pci-0000_00_1f.3.analog-stereo (or active Dolby sink)
-
-   pactl get-default-source
-   # Output: ghelper-audio (virtual mic with DPDFNet neural denoising)
-   ```
+1. **Zero Virtual Audio Nodes**: Sway's `create_output` command operates entirely inside the wlroots display pipeline. It creates DRM/Wayland surfaces only; it registers zero ALSA devices or PipeWire audio sinks.
+2. **Default Routing Remains Intact**:
+   - Audio Sink: Internal DAC or active speaker DSP runner (`alsa_output.pci-0000_00_1f.3.analog-stereo`).
+   - Recording Source: Virtual neural-denoised microphone (`ghelper-audio`).
 3. **Meetingly Dual-Stream Capture**:
-   - Candidate Speech: Captured via `ghelper-audio` (internal laptop mic array).
+   - Candidate Speech: Captured via `ghelper-audio` (internal laptop microphone array).
    - Interviewer Speech: Captured via the PipeWire monitor source of the active output sink.
 
 ---
 
-## 5. Complete Implementation & Script Architecture
+## 5. Production Implementation Scripts
 
 ### 5.1 Start Script: `meet-start.sh`
 Located at [`/home/onyx/.local/bin/meet-start.sh`](file:///home/onyx/.local/bin/meet-start.sh):
 
 ```bash
 #!/usr/bin/env bash
-# meet-start.sh - Start clean virtual presentation mode for Sway
+# meet-start.sh - Start clean virtual presentation mode for Sway (Target: Workspace 2)
 set -eo pipefail
+
+TARGET_WS=2
 
 # 1. Reuse or create HEADLESS output dynamically
 HEADLESS_OUT=$(swaymsg -t get_outputs | jq -r '.[].name | select(startswith("HEADLESS-"))' | head -n1)
@@ -150,8 +199,7 @@ if [[ -z "$HEADLESS_OUT" ]]; then
 fi
 
 if [[ -z "$HEADLESS_OUT" ]]; then
-    notify-send -a "Presentation Mode" -u critical -r 8899 -i dialog-error \
-        "Presentation Mode: ERROR" "Failed to create headless display"
+    notify-send -a "Presentation Mode" -u critical -r 8899 -i dialog-error "Presentation Mode: ERROR" "Failed to create headless display"
     exit 1
 fi
 
@@ -159,22 +207,37 @@ fi
 read -r W H < <(swaymsg -t get_outputs | jq -r '.[] | select(.name=="eDP-1") | "\(.current_mode.width) \(.current_mode.height)"')
 swaymsg output "$HEADLESS_OUT" resolution "${W}x${H}" position "$W" 0
 
-# 3. Move work workspace 1 to the headless display
-swaymsg "[workspace=1] move workspace to output $HEADLESS_OUT"
+# 3. Proactively isolate Meetingly onto physical panel eDP-1 before moving workspaces
+swaymsg '[app_id="(?i)^meetingly.*"] move to output eDP-1' 2>/dev/null || true
+swaymsg '[class="(?i)^meetingly.*"] move to output eDP-1' 2>/dev/null || true
 
-# 4. Launch wl-mirror (dragged to eDP-1 by window rule: border none, move to output eDP-1)
+# 4. Move target workspace (Workspace 2: Brave, editor, terminal) to the headless display
+swaymsg "[workspace=${TARGET_WS}] move workspace to output $HEADLESS_OUT"
+
+# 5. Launch wl-mirror if not already running (rule places it tiled borderless on eDP-1)
 if ! pgrep -x "wl-mirror" > /dev/null; then
     wl-mirror "$HEADLESS_OUT" > /dev/null 2>&1 &
 fi
 
-# 5. Ensure keyboard focus is on Workspace 1 so typing routes to active apps
-sleep 0.3
-swaymsg "[workspace=1] focus"
+# 6. Active polling loop: wait for wl-mirror container to appear in the tree (up to 3.0s)
+for _ in $(seq 1 30); do
+    if swaymsg -t get_tree | jq -r '.. | select(.type?=="con" and .app_id?!=null) | .app_id' | grep -qiE 'wl[-_]mirror|at\.yrlf\.wl_mirror'; then
+        break
+    fi
+    sleep 0.1
+done
 
-# 6. Display notification (synchronous replace ID 8899 for Mako)
+# 7. Re-verify Meetingly remains exclusively on eDP-1
+swaymsg '[app_id="(?i)^meetingly.*"] move to output eDP-1' 2>/dev/null || true
+swaymsg '[class="(?i)^meetingly.*"] move to output eDP-1' 2>/dev/null || true
+
+# 8. Return keyboard and window focus to Workspace 2 so typing and new windows route to HEADLESS-OUT
+swaymsg "[workspace=${TARGET_WS}] focus"
+
+# 9. Display notification (synchronous replace ID for Mako)
 notify-send -a "Presentation Mode" -u normal -t 4000 -r 8899 -i video-display \
     "Presentation Mode: ON" \
-    "Sharing Target: ${HEADLESS_OUT} (${W}x${H})\nMeetingly AI overlay cloaked"
+    "Sharing Target: ${HEADLESS_OUT} (Workspace ${TARGET_WS})\nMeetingly AI overlay cloaked"
 ```
 
 ### 5.2 Stop Script: `meet-stop.sh`
@@ -185,21 +248,24 @@ Located at [`/home/onyx/.local/bin/meet-stop.sh`](file:///home/onyx/.local/bin/m
 # meet-stop.sh - Stop clean virtual presentation mode and restore Sway state
 set -eo pipefail
 
+TARGET_WS=2
+
 # 1. Terminate wl-mirror
 pkill -x wl-mirror || true
 
-# 2. Restore workspace 1 back to the physical panel eDP-1 and focus it
-swaymsg "[workspace=1] move workspace to output eDP-1, workspace 1"
+# 2. Restore target workspace (Workspace 2) back to the physical panel eDP-1 and focus it
+swaymsg "[workspace=${TARGET_WS}] move workspace to output eDP-1"
+swaymsg "[workspace=${TARGET_WS}] focus"
 
 # 3. Unplug all active HEADLESS virtual outputs
 for out in $(swaymsg -t get_outputs | jq -r '.[].name | select(startswith("HEADLESS-"))'); do
     swaymsg output "$out" unplug || true
 done
 
-# 4. Display notification
+# 4. Display notification (synchronous replace ID for Mako)
 notify-send -a "Presentation Mode" -u normal -t 3000 -r 8899 -i video-display \
     "Presentation Mode: OFF" \
-    "Headless display unplugged\nRestored to eDP-1"
+    "Headless display unplugged\nWorkspace ${TARGET_WS} restored to eDP-1"
 ```
 
 ### 5.3 Toggle Script: `meet-toggle.sh`
@@ -226,10 +292,12 @@ fi
 Configured in [`~/.config/sway/config.d/30-window-rules.conf`](file:///home/onyx/.config/sway/config.d/30-window-rules.conf) and [`40-keybindings.conf`](file:///home/onyx/.config/sway/config.d/40-keybindings.conf):
 
 ```ini
-# Window Rules
-for_window [app_id="(?i)^meetingly.*"] floating enable, sticky enable, border pixel 1
-for_window [class="(?i)^meetingly.*"] floating enable, sticky enable, border pixel 1
-for_window [app_id="^wl-mirror$"] border none, move to output eDP-1
+# Window Rules (Dropped sticky enable to prevent buffer leaks across outputs)
+for_window [app_id="(?i)^meetingly.*"] floating enable, move to output eDP-1, border pixel 1
+for_window [class="(?i)^meetingly.*"] floating enable, move to output eDP-1, border pixel 1
+
+# Tile wl-mirror without borders so floating Meetingly floats on top
+for_window [app_id="(?i).*(wl[-_]?mirror|at\.yrlf\.wl_mirror).*"] border none, move to output eDP-1
 
 # Keybindings
 bindsym $mod+Shift+m exec --no-startup-id ~/.local/bin/meet-toggle.sh
@@ -238,21 +306,29 @@ bindsym $mod+Shift+n exec --no-startup-id ~/.local/bin/meet-stop.sh
 
 ---
 
-## 7. Operational Checklist for Interviews
+## 7. Pre-Interview Verification Checklist & Smoke Test
 
-1. **Before the Interview**:
-   - Launch your code editor, terminal, and Brave on Workspace 1.
+Perform this verification before using the setup in an actual interview:
+
+1. **Pre-Flight Launch**:
+   - Open your browser (Brave), IDE, and terminal on Workspace 2.
    - Launch Meetingly AI (`meetingly`).
-   - Press **`Super + Shift + M`**.
-   - Verify the Mako notification: `Presentation Mode: ON (Sharing Target: HEADLESS-X)`.
-2. **In Google Meet**:
+   - Press **`Super + Shift + M`** to activate Presentation Mode.
+   - Confirm the Mako desktop notification indicates `Presentation Mode: ON (Workspace 2)`.
+2. **Opening Applications While Active**:
+   - Press **`Super + Enter`** to spawn a new terminal, or **`Super + b`** for a new browser window.
+   - Confirm the window opens directly inside Workspace 2 on the virtual display and renders immediately inside `wl-mirror`.
+3. **Definitive Google Meet Self-View Verification**:
+   - Open a test meeting by visiting `meet.new` in Brave.
    - Click **Present now** -> select the **Entire Screen** tab.
-   - Choose **`HEADLESS-X`** (never select `eDP-1`).
-   - Click **Share**.
-3. **During the Interview**:
-   - Code, type, and navigate normally.
-   - Meetingly displays transcription and AI answers on your laptop screen.
-   - The remote video stream captures only `HEADLESS-X`, keeping the assistant 100% invisible.
-4. **Teardown**:
-   - Stop screen sharing in Google Meet.
-   - Press **`Super + Shift + M`** (or `Super + Shift + N`) to restore your desktop layout.
+   - Select **`HEADLESS-X`** as the sharing source (never choose `eDP-1`).
+   - Look directly at your own **Self-View Video Tile** in Google Meet:
+     - **Verification Pass**: Your shared desktop (IDE, browser, terminal) is visible in the video stream, but the Meetingly AI overlay is completely absent from the stream.
+     - **Visual Check**: On your physical laptop panel, Meetingly remains fully visible and interactive, floating over `wl-mirror`.
+4. **Focus & Keystroke Verification**:
+   - Click inside your IDE or terminal.
+   - Type sample code and verify keystrokes register immediately without focus loss.
+5. **Teardown Test**:
+   - Stop sharing in Google Meet.
+   - Press **`Super + Shift + M`** (or `Super + Shift + N`).
+   - Confirm `wl-mirror` exits, `HEADLESS-X` is unplugged, and Workspace 2 restores to `eDP-1`.

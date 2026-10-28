@@ -1,0 +1,10 @@
+# ==============================================================================
+# Cargo defaults for this machine
+# ==============================================================================
+# i5-13450HX: 10 physical cores / 16 logical threads, 15.2 GiB RAM.
+# Cargo's default parallelism ran 10+ ld.lld linkers at roughly 1 GiB each
+# during `cargo test --workspace`, which exhausted memory and pushed the
+# desktop into zram reclaim. Six jobs keeps builds progressing while leaving
+# memory, I/O and CPU headroom for the browser and compositor.
+[build]
+jobs = 6

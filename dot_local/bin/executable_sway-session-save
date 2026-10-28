@@ -232,7 +232,7 @@ def normalize(cmd, pid=None, title=""):
     if not cmd:
         return []
     s = " ".join(cmd).lower()
-    if "scratch-term" in s or "scratch-notes" in s:
+    if any(x in s for x in ("scratch-term", "scratch-notes", "meetingly", "wl-mirror", "wl_mirror")):
         return []
     if "steam" in s:
         return ["steam"]

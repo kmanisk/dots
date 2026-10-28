@@ -160,3 +160,29 @@ Local models operate strictly offline based on training weights. When interviews
 
 - **Local Mode (Default)**: Technical questions, DSA coding, and behavioral STAR stories are handled locally by Ollama. Latency is ~400 ms with complete privacy.
 - **Cloud Fallback (On Demand)**: Configure OpenRouter in Meetingly settings pointing to a web-search model (e.g. `perplexity/sonar` or `openai/gpt-4o-mini`). Switching requires a single toggle in Meetingly's provider tray.
+
+---
+
+## 6. Zero Autostart and Minimal On-Demand Policy
+
+To maintain maximum battery life, zero background resource consumption, and complete stealth, Meetingly must never run automatically on Windows boot:
+
+1. **In-App Setting**:
+   - Open Meetingly Settings (Gear icon).
+   - Set **Auto Launch on Startup** to `Disabled` / `Off`.
+2. **Windows Startup Check**:
+   - Press `Ctrl + Shift + Esc` to open Task Manager.
+   - Navigate to the **Startup apps** tab.
+   - If `Meetingly` is listed, right-click and select **Disable**.
+3. **Registry Verification**:
+   - Verify `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` contains no Meetingly autostart entry:
+     ```cmd
+     reg query HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v Meetingly
+     ```
+   - If present, remove it via:
+     ```cmd
+     reg delete HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v Meetingly /f
+     ```
+4. **On-Demand Workflow**:
+   - Launch Meetingly manually from the Start Menu only when starting an interview.
+   - When the meeting concludes, right-click the Meetingly tray icon and select **Quit** (or press `Ctrl + Q`) to terminate all Electron background helper processes.

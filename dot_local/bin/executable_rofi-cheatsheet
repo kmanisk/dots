@@ -17,6 +17,8 @@ entries=(
     "Caps + Space         Capture screenshot to buffer queue:~/.local/bin/screenshot-fullscreen"
     "Caps + v             View latest screenshot in imv:~/.local/bin/clipboard-view"
     "Win + Alt + L        Screen black / sleep mode (audio and agent stay active):~/.local/bin/screen-black"
+    "Win + Alt + D        Toggle Desktop Commander scratchpad (live agent monitor):~/.local/bin/toggle-dc"
+    "Win + Ctrl + I       Toggle Keep-Awake (prevent screen sleep & lock):~/.local/bin/keep-awake toggle"
     "Win + Alt + S        Snip region directly to screenshot buffer:~/.local/bin/screenshot-buffer snip"
     "Win + Alt + V        Screenshot buffer picker (Space multi-select, paste into prompt):~/.local/bin/screenshot-buffer menu"
     "Win + Alt + Shift + V Batch paste merged stitched image:~/.local/bin/screenshot-buffer stitch"

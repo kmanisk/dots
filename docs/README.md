@@ -58,6 +58,8 @@ It distinguishes measured runtime state, implemented fixes, and remaining limita
 
 ### 4. [System (`docs/system/`)](file:///home/onyx/docs/system)
 - [`clipboard-shortcuts.md`](file:///home/onyx/docs/system/clipboard-shortcuts.md) — System clipboard & screenshot cheatsheet (Win+V, Caps+c, Caps+., multi-screenshot AI buffer, sleep display).
+- [`desktop-commander-remote.md`](file:///home/onyx/docs/system/desktop-commander-remote.md) — Remote ChatGPT development bridge, headless systemd daemon, unrestricted filesystem access, Win+Alt+D live monitor scratchpad, and Clamshell integration.
+- [`agent-control-plane.md`](file:///home/onyx/docs/system/agent-control-plane.md) — Shared `agent-context`/`agent-refresh`/`agent-check` layer for cross-chat rules, live environment state, repo handoffs, and phone-first remote coding.
 - [`system-philosophy.md`](file:///home/onyx/docs/system/system-philosophy.md) — Anti-bloat, performance invariants, headless-first design principles.
 - [`audio-stack-status.md`](file:///home/onyx/docs/system/audio-stack-status.md) — Current state of MicStudio, 27 voice models, live audio controls, DAX3 speaker DSP, and WirePlumber routing policies.
 - [`audio-pipewire.md`](file:///home/onyx/docs/system/audio-pipewire.md) — PipeWire low latency, clock/quantum policies, in-process filter chains, and Cava visualizer theming.
