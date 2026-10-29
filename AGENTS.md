@@ -1,165 +1,77 @@
-# AI System Rules — CachyOS + i3wm/X11 Gaming Laptop
+# AI Agent Entry Point
 
-**Target machine:** CachyOS rolling (BORE/EEVDF, x86-64-v3) · i3wm (X11) @ 1920x1200 165Hz
-**Hardware:** Intel i5-13450HX + GeForce RTX 5050 Mobile (Optimus hybrid) · Btrfs on NVMe · fish + zsh + alacritty
+This repository is the chezmoi source of truth for the Linux workstation. This file is intentionally small: do not duplicate changing machine state here.
 
-Save this file as **`AGENTS.md`** in your project root for per-project rules, or
-**`~/.gemini/AGENTS.md`** for it to apply globally across every project — Antigravity CLI
-reads both automatically, no flag or registration step needed. (If you also use Claude Code
-or Cursor, both of those now read `AGENTS.md` too, so this one file covers all three.)
+## Mandatory bootstrap
 
----
+Before changing or diagnosing this system:
 
-## 1. Global Behavior Rules
+1. Read `docs/system/SYSTEM_CONTEXT.md`.
+2. Read `docs/system/system-philosophy.md`.
+3. Read only the subsystem documentation relevant to the task (`docs/audio/`, `docs/display/`, `docs/gaming/`, `docs/system/`, `docs/theme/`, `docs/virtualization/`, etc.).
+4. Inspect the current chezmoi source files that implement the behavior before editing them.
+5. If the live machine is available, run `agent-context system` or the relevant project context and verify runtime state. Never assume a documented version, device name, mount type, GPU mode, or service state is still current when it can be checked.
 
-- **Project placement:** Create every new project in its own named subfolder under `/home/onyx/Projects/`, such as `/home/onyx/Projects/watchparty/`. Keep source, manifests, dependencies, tests, generated files and project documentation inside that subfolder. Never scaffold directly in the home or Projects parent directory or replace parent files when initializing a project.
+## Authority order
 
-- **Token discipline:** never print full config files or command dumps unless asked. Use
-  unified diffs or targeted line replacements for dotfile edits.
-- **No unverified "verified" claims.** Before reporting a package, MCP server, or tool as
-  installed/working, actually check (`pip show`, `npm ls -g`, `which`, or the real repo page).
-  Don't report specific version numbers you haven't confirmed.
-- **Accurate performance language.** Say tearing/`immediate` window rules *reduce* input
-  latency — never claim they bring it to "zero."
-- **Snapshot before system changes.** Before `pacman -Syu`, `yay`, `paru`, or any package
-  install/removal, confirm a Snapper pre-update snapshot exists or trigger one first.
-- **Never run `pacman -Sy`** (partial upgrade risk) — always `pacman -Syu`.
-- **Never put a raw secret/token in this file or in any command it runs.**
-- **Zero emojis across the codebase:** Never add emojis to `README.md`, markdown documentation, shell scripts (`.sh`), source code, comments, or log messages. Keep formatting clean, technical, and professional.
-- **Mandatory Pre-Completion Verification & Collision Audit:** Never report a task complete without actively validating configs, services, and scripts. For Sway/i3, always run `sway -C`, audit for duplicate or shadowed keybindings across modes/scopes, and test live reload (`swaymsg reload`). For systemd units, check `systemctl --user status` and journal logs. For scripts, run syntax checks. Fix all regressions and collisions before marking the task done.
+When information conflicts, use this order:
 
----
+1. The user's explicit instruction in the current task.
+2. Freshly verified live-machine output.
+3. Current repository configuration/source on the working branch.
+4. `docs/system/SYSTEM_CONTEXT.md`.
+5. Relevant subsystem documentation.
+6. Dated audits and historical reports.
+7. Archived docs, old chats, cached agent memory, or assumptions.
 
-## 2. Dynamic GPU Architecture (Intel iGPU + RTX 5050 Mobile MUX)
+A lower-priority source must never silently override a higher-priority source.
 
-The machine supports dynamic switching via `supergfxctl` across three distinct architectures:
+## Change protocol
 
-1. **Integrated (`Integrated`)**:
-   - Desktop and apps run on Intel UHD Graphics (`LIBVA_DRIVER_NAME=iHD`).
-   - Hardware vibrance via Intel CRTC CTM (`ctm-test`).
-   - No NVIDIA offload variables; dGPU remains powered down.
+For every durable system change:
 
-2. **Hybrid (`Hybrid`)**:
-   - Desktop and 2D apps run on Intel UHD Graphics for idle power/thermals (`LIBVA_DRIVER_NAME=iHD`).
-   - Hardware vibrance via Intel CRTC CTM (`ctm-test`).
-   - Games/3D/CUDA offload explicitly via `prime-run` (`__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia`).
-   - dGPU suspended (D3cold) until an offloaded workload requests it.
+- Make the smallest robust change in the chezmoi source of truth.
+- Preserve unrelated files, local work, and working behavior.
+- Validate the changed subsystem before reporting success.
+- Update the relevant detailed subsystem document when architecture or behavior changed.
+- Update `docs/system/SYSTEM_CONTEXT.md` when the change alters current machine state, an invariant, a protected baseline, an important path, or an agent-facing assumption.
+- Append a concise verified entry to `docs/system/SYSTEM_CHANGELOG.md` for material system changes.
+- Do not document an intended state as current until verification succeeds.
+- If a previous document is now wrong, correct it or mark the conflicting statement stale; do not leave two apparently authoritative truths.
 
-3. **Direct dGPU MUX (`AsusMuxDgpu`)**:
-   - RTX 5050 Mobile connects directly to eDP-1 internal panel (hardware MUX bypasses iGPU).
-   - Desktop compositor (Sway) and video decode run on NVIDIA (`LIBVA_DRIVER_NAME=nvidia`).
-   - Hardware vibrance via NVIDIA NVKMS direct ioctl (`nvibrant`).
-   - No Intel VA-API forcing (`iHD`), no Intel CTM attempts, and no redundant PRIME offload variables in game launchers (`cs2-launch`).
+Implementation-only changes that do not affect agent-facing behavior do not require rewriting `SYSTEM_CONTEXT.md`.
 
-*(Note: Do not combine `gamemoderun` with `ananicy-cpp` unless ananicy-cpp is stopped/disabled for that session).*
+## Engineering rules
 
----
+- Assume CachyOS/Arch, Sway/Wayland, fish, systemd, PipeWire/WirePlumber, NVIDIA, and chezmoi unless current context proves otherwise.
+- Prefer minimal native Linux solutions with low CPU, RAM, wakeup, and background-service cost.
+- Measure before optimizing.
+- Diagnose root cause before changing configuration.
+- Use exact commands, paths, package names, and expected results.
+- Never use `pacman -Sy`; use a full supported upgrade path.
+- Before package or high-risk system changes, follow the current Snapper/snapshot policy after verifying that policy still applies.
+- Never commit plaintext secrets, tokens, private keys, or credentials.
+- Use `$HOME` or `~` rather than hardcoded usernames in portable configuration.
+- Do not hard-reset, clean, overwrite, or broadly reformat unrelated work.
+- Do not add persistent daemons when an on-demand mechanism is sufficient.
+- Keep documentation, scripts, source, comments, and README files free of emojis.
 
-## 3. i3 Window Rules (Gaming)
+## Validation expectations
 
-```ini
-for_window [class="^steam_app_.*$"] fullscreen enable
-```
+Use validation appropriate to the subsystem. Examples include:
 
----
+- Sway: `sway -C` plus targeted live reload/testing when safe.
+- Shell scripts: syntax check and focused execution/test.
+- systemd user units: unit verification/status plus relevant journal output.
+- PipeWire/WirePlumber: inspect graph/defaults/routes and perform silent routing tests where possible.
+- Git/chezmoi: inspect the diff and ensure only intended source-of-truth files changed.
 
-## 4. Btrfs / Snapper Safety
+Do not claim a task is verified if only static files were edited.
 
-- `chattr +C` (no-CoW) only affects files written **after** it's set. For an existing Steam
-  library: move the data out, `chattr +C` the empty directory, move the data back in.
-- If granting an agent sudo access to `snapper`/`btrfs`: **scope the sudoers rule to specific
-  snapper subcommands** (e.g. `create`, `list`, `rollback`), not a blanket passwordless `btrfs`
-  binary. Raw `btrfs` can delete subvolumes and snapshots outright — don't hand that out
-  passwordless.
+## Remote actions
 
----
+Do not commit, push, force-push, open/update/merge a PR, publish, or deploy unless the user explicitly asks for that remote action. When remote changes are requested, keep them focused and preserve unrelated history.
 
-## 5. MCP Server Configuration
+## Agent compatibility
 
-Prefer official, narrow servers over large custom ones — lower token overhead, easier to audit.
-
-```json
-{
-  "mcpServers": {
-    "official-filesystem": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem",
-                "~/.local/share/chezmoi", "~/.config"]
-    },
-    "official-git": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-git"]
-    },
-    "official-fetch": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-fetch"]
-    },
-    "official-github": {
-      "command": "~/.local/bin/github-mcp-wrapper",
-      "args": []
-    }
-  }
-}
-```
-
-Before adding any third-party MCP server (btrfs-snapper, systemd, gpu-tuning, steam, etc.),
-confirm it's real: check the actual PyPI/npm/GitHub page, not just a name someone mentioned.
-
----
-
-## 6. Secret Handling (chezmoi + age)
-
-**Never commit a plaintext token** — not even as a placeholder — as an unencrypted source file.
-Since you're using chezmoi's `age` encryption, fill in the real token locally, then add the
-*whole file* as encrypted, rather than templating a password-manager call:
-
-```bash
-chezmoi add --encrypt ~/.config/mcp/mcp_config.json
-```
-
-This stores it in your source repo as an `encrypted_` file (ASCII-armored age ciphertext) and
-`chezmoi apply` decrypts it automatically using the identity/recipient set in
-`~/.config/chezmoi/chezmoi.toml` (`encryption = "age"`, plus your `[age] identity` /
-`recipient`). To edit it later, use `chezmoi edit` — it decrypts, opens your editor, and
-re-encrypts on save. Never run a plain `chezmoi add` on this file once it contains the real
-token.
-
----
-
-## 7. Community Tools — Verify Before Trusting
-
-Any third-party MCP server or "community-vetted" server list should be checked against
-its real package/GitHub page (commit activity, real usage) before wiring it in — not taken on
-the strength of a description alone.
-
----
-
-## 8. Efficiency, Anti-Bloat & Research Philosophy
-
-- **Resource discipline:** Save disk space, RAM, and CPU cycles above all else. Retain what matters (responsiveness, latency, stability) rather than flashy animations, bloated eye-candy, or heavy background daemons.
-- **Headless services:** System features (such as autologin, clipboard) must run headless in the background; never require manual GUI interaction to activate essential system functions.
-- **Btrfs snapshot pruning:** Keep only verified stable baselines. Do not allow dozens of transient package snapshots to consume exclusive disk space.
-- **Fact-checked research via headless browser:** When researching technical solutions, driver quirks, or configurations, perform live web searches and headless browser fetches. Record verified outcomes in markdown skill files (`SKILL.md`) for persistent cross-session knowledge.
-- **Modular configuration & token efficiency:** Configurations must be structured modularly in subdirectories (e.g. `~/.config/sway/config.d/`, `~/.config/fish/conf.d/`). Agents must inspect only the relevant submodule file rather than dumping or reading full multi-hundred-line monolithic files.
-
----
-
-## 9. MangoHud Protection
-
-- **Never modify `~/.config/MangoHud/MangoHud.conf`**. The configuration is managed by chezmoi (`pci_dev=0000:01:00.0`, custom colors, font, and scaling).
-- Keep `~/.config/MangoHud/MangoHud.conf` protected (immutable) so GUI tools like Goverlay cannot overwrite it.
-
----
-
-## 10. Microphone & Bluetooth Audio Policy
-
-- **Always use the internal laptop microphone (`alsa_input.pci-0000_00_1f.3.analog-stereo` via `ghelper-audio`)**.
-- **Never allow Bluetooth headphones to switch into handsfree / headset mode (HSP/HFP / CVSD / mSBC)**. Bluetooth headphones must stay strictly in high-fidelity A2DP playback mode (`bluez5.roles = [ a2dp_sink a2dp_source ]`).
-- **All noise suppression, voice changing, and chat applications must use `ghelper-audio` as their recording input**, never a Bluetooth handsfree source.
-
----
-
-## 11. CS2 Launcher Protection
-
-- **Never modify `~/.local/bin/cs2-launch` or `dot_local/bin/executable_cs2-launch`**. The launcher is locked as a verified stable baseline (native Wayland, 1600x1200 4:3 stretched, automatic video config enforcement, P-core affinity, ASUS profile switching, explicit sync handling).
-- Keep `~/.local/bin/cs2-launch` protected (immutable via `chattr +i`) so no automated script or tool can alter or degrade this verified baseline.
+Codex, OpenCode, Antigravity/AGY, and other agents that support `AGENTS.md` should start here. Claude-specific bootstrap instructions live in `CLAUDE.md`, which points back to this file and the same canonical system context.
