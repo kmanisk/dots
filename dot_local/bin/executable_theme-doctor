@@ -3,7 +3,7 @@
 theme-doctor: Single comprehensive health audit for CachyOS theming system & display CTM.
 Audits:
   - Theme Engine, Schema 1 & Source Breakdown
-  - Validation (WCAG AA & completeness across all 288 themes)
+  - Validation (WCAG AA & completeness across all cached themes)
   - Subsystems (Cache, Manifest, Templates, App configs, Hooks)
   - Hardware CTM (Intel CRTC 151, eDP-1, saturation, vkBasalt status)
 """
@@ -133,8 +133,30 @@ def main():
     btop_ok = os.path.isdir(os.path.expanduser("~/.config/btop/themes"))
     cava_ok = os.path.exists(os.path.expanduser("~/.config/cava/config"))
     rofi_ok = os.path.exists(os.path.expanduser("~/.local/bin/rofi-theme"))
+    wallpaper_helper = os.path.expanduser("~/.local/bin/theme-wallpaper")
+    wallpaper_ok = os.path.isfile(wallpaper_helper) and os.access(wallpaper_helper, os.X_OK)
+    wallpaper_theme_count = 0
+    wallpaper_max = 0
+    for theme_path in cached_files:
+        try:
+            with open(theme_path, "r", encoding="utf-8") as theme_file:
+                theme_data = json.load(theme_file)
+            wallpaper_count = len((theme_data.get("assets") or {}).get("wallpapers") or [])
+            wallpaper_max = max(wallpaper_max, wallpaper_count)
+            wallpaper_theme_count += int(wallpaper_count > 0)
+        except Exception:
+            pass
+    wallpaper_ok = wallpaper_ok and wallpaper_max <= 5
     hooks_dir = os.path.expanduser("~/.config/theme/hooks.d")
     hooks_ok = os.path.isdir(hooks_dir)
+    hook_count = 0
+    if hooks_ok:
+        hook_count = sum(
+            1
+            for name in os.listdir(hooks_dir)
+            if os.path.isfile(os.path.join(hooks_dir, name))
+            and os.access(os.path.join(hooks_dir, name), os.X_OK)
+        )
 
     print(f"  Sway:                   {status_label(sway_ok)}")
     print(f"  GTK:                    {status_label(gtk_ok)}")
@@ -144,7 +166,8 @@ def main():
     print(f"  btop:                   {status_label(btop_ok)}")
     print(f"  Cava:                   {status_label(cava_ok, '(visualizer)')}")
     print(f"  Rofi:                   {status_label(rofi_ok)}")
-    print(f"  Hooks:                  {status_label(hooks_ok, f'({len(os.listdir(hooks_dir))} scripts)')}")
+    print(f"  Theme Wallpapers:       {status_label(wallpaper_ok, f'({wallpaper_theme_count}/{total_count} themes; max {wallpaper_max})')}")
+    print(f"  Hooks:                  {status_label(hooks_ok, f'({hook_count} executable scripts)')}")
 
     # 4. Hardware Display Vibrance & CTM
     print(colored("\nHardware Display Vibrance & CTM", "cyan"))

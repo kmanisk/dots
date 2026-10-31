@@ -1,14 +1,23 @@
 /**
- * NvChad Base46 / Omarchy Theme Picker — strong frame (2026-10-18).
- * Rebuilt for visibility after feedback that the old chrome was too weak
- * (1px border, unboxed rows, 10pt muted hints, invisible text on some
- * themes). Now conforms to the system baseline in system.rasi: 860px wide,
- * 2px accent border, boxed search row and hint/HUD row with a 4px accent
- * leading edge, 12pt hint text in the chrome foreground.
+ * NvChad Base46 / Omarchy Theme Picker — compact frame (2026-10-29).
+ *
+ * Reworked for scale, not just width: the old chrome ran 17/16/13/16pt with
+ * 10-16px paddings, which made a 860x690 window for nine short rows. Type scale
+ * is now 12 body / 12 bold prompt / 10 hint on a 4px spacing rhythm.
+ *
+ * Font is Iosevka Nerd Font Mono to match the system UI/mono font and the
+ * network menu. The row layout pads theme names to 26 characters, so the
+ * family must stay monospace or the [ACTIVE] badge and swatch column drift.
+ *
  * Functionality unchanged: Enter Apply, Ctrl+D Delete, Ctrl+R Sync,
  * Ctrl+I Preview HUD, [ACTIVE] badge, spectrum swatches.
  */
 @import "~/.config/rofi/system.rasi"
+
+/* System-wide default here is Iosevka; element rules below refine the sizes. */
+* {
+    font:                "Iosevka Nerd Font Mono 12";
+}
 
 configuration {
     show-icons:     false;
@@ -23,19 +32,19 @@ configuration {
 window {
     background-color:    @background;
     text-color:          @foreground;
-    border:              2px;
+    border:              1px;
     border-color:        @border-focus;
     border-radius:       0px;
-    width:               860px;
+    width:               600px;
     location:            center;
     anchor:              center;
-    padding:             16px 20px;
+    padding:             10px 12px;
 }
 
 mainbox {
     background-color:    transparent;
     children:            [ inputbar, message, listview ];
-    spacing:             10px;
+    spacing:             6px;
 }
 
 /* Search row: primary slot fill + 4px accent leading edge */
@@ -45,15 +54,15 @@ inputbar {
     border:              0px 0px 0px 4px;
     border-color:        @border-focus;
     border-radius:       0px;
-    padding:             12px 16px;
+    padding:             8px 10px;
     children:            [ prompt, entry ];
-    spacing:             14px;
+    spacing:             12px;
 }
 
 prompt {
     background-color:    transparent;
     text-color:          @accent-bright;
-    font:                "VictorMono Nerd Font Mono Bold 17";
+    font:                "Iosevka Nerd Font Mono Bold 12";
 }
 
 entry {
@@ -61,7 +70,7 @@ entry {
     text-color:          @foreground;
     placeholder:         "Search themes...";
     placeholder-color:   @gruvbox-fg2;
-    font:                "VictorMono Nerd Font Mono Bold 16";
+    font:                "Iosevka Nerd Font Mono 12";
 }
 
 /* Hint / HUD row: same boxed language, fill only */
@@ -70,20 +79,20 @@ message {
     text-color:          @foreground;
     border:              0px;
     border-radius:       0px;
-    padding:             10px 16px;
+    padding:             6px 10px;
 }
 
 textbox {
     background-color:    transparent;
     text-color:          @foreground;
-    font:                "VictorMono Nerd Font Mono Bold 13";
+    font:                "Iosevka Nerd Font Mono 10";
 }
 
 listview {
     background-color:    transparent;
     columns:             1;
     lines:               9;
-    spacing:             4px;
+    spacing:             2px;
     cycle:               true;
     dynamic:             true;
     layout:              vertical;
@@ -96,7 +105,7 @@ element {
     orientation:         horizontal;
     background-color:    transparent;
     text-color:          @foreground;
-    padding:             10px 14px;
+    padding:             5px 10px;
     border-radius:       0px;
     border:              0px;
     children:            [ element-text ];
@@ -113,7 +122,7 @@ element selected {
 element-text {
     background-color:    transparent;
     text-color:          inherit;
-    font:                "VictorMono Nerd Font Mono Bold 16";
+    font:                "Iosevka Nerd Font Mono 12";
     highlight:           bold;
     vertical-align:      0.5;
 }

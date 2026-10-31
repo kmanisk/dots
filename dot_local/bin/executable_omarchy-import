@@ -16,6 +16,8 @@ from theme_engine.importer import (
     import_git_theme,
     remove_imported_theme,
     import_catalog,
+    fetch_official_catalog,
+    _local_import_records,
 )
 from theme_engine.schema import normalize_theme
 
@@ -51,19 +53,24 @@ def main():
 
     # 1. Status Check
     if args[0] in ("--status", "status"):
-        from theme_engine.importer import fetch_official_catalog, IMPORTED_OMARCHY_DIR
-        try:
-            themes, url = fetch_official_catalog()
-            catalog_count = len(themes)
-        except Exception:
-            catalog_count = 168
-
-        local_files = [f for f in os.listdir(IMPORTED_OMARCHY_DIR) if f.endswith(".json")]
-        print(f"\nOmarchy Official Catalog Status:")
-        print(f"  catalog entries       = {catalog_count}")
-        print(f"  locally imported      = {len(local_files)}")
-        print(f"  rejected              = 0")
-        print(f"  missing               = 0")
+        themes, url = fetch_official_catalog()
+        records = _local_import_records()
+        catalog_repos = {
+            str(t.get("repo") or "").rstrip("/").lower()
+            for t in themes
+            if t.get("repo")
+        }
+        local_repos = {
+            str(repo).rstrip("/").lower()
+            for _, _, repo in records
+            if repo
+        }
+        print("\nOmarchy Theme Catalog Status:")
+        print(f"  source                = {url}")
+        print(f"  catalog entries       = {len(themes)}")
+        print(f"  locally imported      = {len(records)}")
+        print(f"  missing               = {len(catalog_repos - local_repos)}")
+        print(f"  no longer listed      = {len(local_repos - catalog_repos)}")
         sys.exit(0)
 
     # 2. Catalog Import

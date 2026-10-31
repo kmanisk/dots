@@ -61,7 +61,7 @@ Do not treat DRM card numbers, connector enumeration, or an old `eDP-1`/`eDP-2` 
 
 ### UI scaling
 
-Sway output scaling is the central application/UI scale source. Fresh live verification on 2026-10-31 found `eDP-1` at 1920x1200, approximately 165.004 Hz, runtime scale `1.20`, with GPU mode `AsusMuxDgpu`.
+Sway output scaling is the central application/UI scale source. Fresh live verification on 2026-11-01 found `eDP-1` at 1920x1200, approximately 165.004 Hz, runtime scale `1.30`, with GPU mode `AsusMuxDgpu`.
 
 Relevant files include:
 
@@ -79,6 +79,14 @@ Relevant files include:
 
 Do not reintroduce stacked Chromium/device-scale overrides unless there is a measured reason. Inspect the current generated scale state before changing font or chrome sizes.
 
+### Theme engine
+
+The current theme runtime is `theme-sync` + `theme-set`, documented under `docs/theme/`. Theme changes are on-demand and use no resident watcher/daemon. As of 2026-11-01, mutations are serialized by `~/.local/state/theme/.lock` (`fcntl.flock`) across staged compilation, atomic promotion, and ordered live reload; do not bypass that lock with parallel direct writes to `~/.local/state/theme/.next/`.
+
+The theme source fleet currently contains 351 source files (232 Omarchy community imports, 97 Base46 sources, 22 custom/built-in definitions). Provider/name reconciliation compiles 350 canonical inputs into 347 pre-dedupe cache names; `theme-sync` exposes 327 unique themes after suppressing 20 exact/near duplicates. It uses deterministic JSON ordering, write-if-changed semantics, stale generated-artifact pruning, palette-faithful normalization, portable preview metadata, and preview invalidation based on real content changes. Runtime `theme-set` reapplies the 3.0:1 non-text contrast floor after authored `base_30` aliases are selected. Duplicate decisions are recorded in `~/.cache/theme/dedup.json`; source definitions remain intact for provenance/rebuilds, and hand-written Neovim themes are never pruned unless they carry the `theme-sync` generated header.
+
+`omarchy-import --catalog` prefers Omarchy's published validated registry catalog and checks out registry-pinned commits when available; if that CDN is unavailable it falls back to the current `omarchy.org/themes` gallery, then legacy endpoints only as a last resort. During live verification on 2026-11-01 the registry hostname did not resolve from this machine, so the gallery fallback was used: 233 entries were listed, 232 repositories were reachable and mirrored into chezmoi, and `ankur311sudo/gruvu` returned repository-not-found. All 232 reachable community imports now record at most five deterministic wallpaper candidates; 21 of the 22 locally maintained official Omarchy built-ins also map to matching `omacom/omarchy` background sets (legacy `omarchy-osaka-jade` has no exact current upstream match). `theme-wallpaper` remains explicit/on-demand: import and `theme-set` never start network fetches. First-use fetches use a per-theme lock plus libcurl parallel transfers for up to five GitHub assets, with validated Python fallback only for failed files; cached selections live under `~/.cache/theme/wallpapers/<theme>/`. Neovim/NvChad reloads are verified rather than fire-and-forget: Base46 errors are surfaced, selected theme modules are invalidated before recompilation, a successful live RPC supplies the shared disk cache, and `~/.local/share/nvim/base46/current_theme` advances only after compilation succeeds; if no live socket works, normal headless NvChad startup repairs the cache. Theme normalization preserves authored hues and only changes lightness to satisfy readability/border thresholds; background luminance overrides clearly incorrect upstream dark/light labels. The former `ds3-wallpaper` helper is removed; `Win + Shift + W` and `Alt + Shift + W` now use `theme-wallpaper next` rather than the static DS3 pack.
+
 ### Auto-synchronized live workstation snapshot
 
 The block below is maintained by `scripts/sync-system-context.sh` for every durable workstation/configuration commit made from the live chezmoi repository. It records measured runtime facts across the desktop/GPU, audio stack, mounts, kernel, and basic system health. The repository pre-commit hook refreshes and stages only this generated block automatically; agents must still update the relevant semantic subsystem documentation and changelog themselves.
@@ -86,13 +94,13 @@ The block below is maintained by `scripts/sync-system-context.sh` for every dura
 <!-- AUTO:SYSTEM_STATE:BEGIN -->
 > Auto-synchronized from the live workstation by `scripts/sync-system-context.sh`. This is measured runtime state, not semantic documentation. Do not edit inside these markers.
 
-- Last live sync: **2026-10-31**.
+- Last live sync: **2026-11-01**.
 - OS/kernel: `CachyOS` / `7.3.0-4-cachyos`.
 - GPU mode: `AsusMuxDgpu`.
 - NVIDIA: `NVIDIA GeForce RTX 5050 Laptop GPU`, driver `615.78.08`.
-- Sway: `sway version 1.12`; validation: **not required for this commit**.
-- Active output: `eDP-1, 1920x1200 @ 165.004 Hz, scale 1.20, adaptive sync disabled`.
-- Persisted generated UI scale: `1.20`.
+- Sway: `sway version 1.12`; validation: **PASS**.
+- Active output: `eDP-1, 1920x1200 @ 165.004 Hz, scale 1.30, adaptive sync disabled`.
+- Persisted generated UI scale: `1.30`.
 - Sway reload path: `sway-safe-reload` (validates before `swaymsg reload`).
 - Audio: PipeWire `1.6.10`, WirePlumber `0.5.18`.
 - Default audio sink: `alsa_output.pci-0000_00_1f.3.analog-stereo`.
@@ -104,6 +112,7 @@ The block below is maintained by `scripts/sync-system-context.sh` for every dura
 
 These values are a convenience snapshot for cross-agent context. Exact runtime-sensitive values must still be re-queried before diagnosis or modification.
 <!-- AUTO:SYSTEM_STATE:END -->
+
 
 
 
@@ -183,7 +192,7 @@ Common components include:
 - Steam/Proton/native Wayland gaming tools.
 - systemd user services only where persistent behavior is justified.
 
-Iosevka Nerd Font is the current preferred UI/terminal family in recent configuration.
+Iosevka Nerd Font is the current preferred UI/terminal family in recent configuration; installing alternatives does not change that default. The full Omarchy-compatible programming-font set is package-managed as of 2026-11-01: JetBrainsMono Nerd Font, CaskaydiaCove/Cascadia, MesloLG Nerd Font, FiraCode Nerd Font, VictorMono Nerd Font, BitstromWera Nerd Font, and Iosevka Nerd Font.
 
 ## 8. Protected and high-risk areas
 
@@ -217,6 +226,8 @@ Runtime-generated state such as `~/.local/share/agent/environment.json` is evide
 See `docs/system/agent-control-plane.md` for the control-plane architecture.
 
 Cross-agent routing is centralized: Codex, Antigravity/AGY, and OpenCode global instruction files are thin pointers back to this repository, while `dot_agents/skills/` is the canonical procedural skill library. `sync-agent-skills` exposes that library to each agent without copying skill contents. Use `docs/system/SUBSYSTEM_MAP.md` to decide which docs and optional skill belong to a task.
+
+Desktop Commander Remote is a persistent user-systemd bridge on this workstation. `desktop-commander.service` is enabled under `default.target`, so it starts automatically with the user systemd session; chezmoi restores that enablement through `run_onchange_linux-20-reconcile-services.sh.tmpl`.
 
 ## 10. Documentation map
 

@@ -15,11 +15,14 @@ set -u
 
 mode="${1:?usage: scratch-toggle <term|notes|spotify|dc>}"
 
-# Scratchpad font size (pt). Overrides foot.ini's global size=17 so the
-# scratchpads stay readable but not oversized. Change once, applies to all
-# scratchpad terminals. Requires respawning the footclient (hide + reshow).
+# Scratchpad font sizes (pt). Overrides foot.ini's global size=16.6.
+# The Ctrl+Space terminal gets its own smaller size so it fits more output;
+# notes and dc keep the larger shared size. Requires respawning the
+# footclient: hiding and re-showing does not reload the font.
 SCRATCH_FONT_SIZE="${SCRATCH_FONT_SIZE:-17}"
+SCRATCH_TERM_FONT_SIZE="${SCRATCH_TERM_FONT_SIZE:-16.5}"
 SCRATCH_FONT="Iosevka Nerd Font Mono:size=${SCRATCH_FONT_SIZE}:style=Regular"
+SCRATCH_TERM_FONT="Iosevka Nerd Font Mono:size=${SCRATCH_TERM_FONT_SIZE}:style=Regular"
 
 case "$mode" in
     # CANONICAL SCRATCHPAD GEOMETRY (single source of truth).
@@ -33,7 +36,7 @@ case "$mode" in
         ;;
     term)
         instance="scratch-term"
-        spawn="footclient --app-id=scratch-term --title=scratch-term -o font=\"${SCRATCH_FONT}\" -o selection-target=both -o mouse-bindings.primary-paste=none -o mouse-bindings.clipboard-paste=BTN_MIDDLE -o mouse-bindings.font-increase=none -o mouse-bindings.font-decrease=none -o mouse-bindings.scrollback-up-mouse=\"BTN_WHEEL_BACK Control+Mod1+BTN_WHEEL_BACK Mod1+Control+BTN_WHEEL_BACK Control+BTN_WHEEL_BACK Mod1+BTN_WHEEL_BACK Mod4+BTN_WHEEL_BACK Control+Mod4+BTN_WHEEL_BACK\" -o mouse-bindings.scrollback-down-mouse=\"BTN_WHEEL_FORWARD Control+Mod1+BTN_WHEEL_FORWARD Mod1+Control+BTN_WHEEL_FORWARD Control+BTN_WHEEL_FORWARD Mod1+BTN_WHEEL_FORWARD Mod4+BTN_WHEEL_FORWARD Control+Mod4+BTN_WHEEL_FORWARD\" -o locked-title=yes -o include=${HOME}/.config/foot/foot-colors.ini 2>>/tmp/scratch-term-err.log"
+        spawn="footclient --app-id=scratch-term --title=scratch-term -o font=\"${SCRATCH_TERM_FONT}\" -o selection-target=both -o mouse-bindings.primary-paste=none -o mouse-bindings.clipboard-paste=BTN_MIDDLE -o mouse-bindings.font-increase=none -o mouse-bindings.font-decrease=none -o mouse-bindings.scrollback-up-mouse=\"BTN_WHEEL_BACK Control+Mod1+BTN_WHEEL_BACK Mod1+Control+BTN_WHEEL_BACK Control+BTN_WHEEL_BACK Mod1+BTN_WHEEL_BACK Mod4+BTN_WHEEL_BACK Control+Mod4+BTN_WHEEL_BACK\" -o mouse-bindings.scrollback-down-mouse=\"BTN_WHEEL_FORWARD Control+Mod1+BTN_WHEEL_FORWARD Mod1+Control+BTN_WHEEL_FORWARD Control+BTN_WHEEL_FORWARD Mod1+BTN_WHEEL_FORWARD Mod4+BTN_WHEEL_FORWARD Control+Mod4+BTN_WHEEL_FORWARD\" -o locked-title=yes -o include=${HOME}/.config/foot/foot-colors.ini 2>>/tmp/scratch-term-err.log"
         geom="1700 1050"
         ;;
     notes)

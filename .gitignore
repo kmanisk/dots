@@ -16,3 +16,7 @@ key.txt
 **/*.tmp
 **/*.log
 .DS_Store
+
+# Python bytecode caches
+**/__pycache__/
+**/*.py[cod]

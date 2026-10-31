@@ -16,6 +16,8 @@ import shutil
 import subprocess
 import tempfile
 import urllib.request
+import html as html_module
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 import tomllib
@@ -32,7 +34,19 @@ from theme_engine.schema import (
     relative_luminance,
 )
 
-CATALOG_URLS = [
+REGISTRY_CATALOG_URLS = [
+    "https://themes.omarchy.org/v1/catalog.min.json",
+    "https://themes.omarchy.org/v1/catalog.json",
+]
+
+GALLERY_URLS = [
+    "https://raw.githubusercontent.com/omacom/omarchy-site/master/themes/index.html",
+    "https://raw.githubusercontent.com/omacom/omarchy-site/main/themes/index.html",
+    "https://omarchy.org/themes/",
+]
+
+# Legacy endpoints are last-resort compatibility fallbacks only.
+LEGACY_CATALOG_URLS = [
     "https://cdn.themes.omarchy.org/v1/catalog.json",
     "https://raw.githubusercontent.com/omacom/omarchy-theme-marketplace/master/data/catalog.json",
 ]
@@ -41,11 +55,81 @@ IMPORTED_OMARCHY_DIR = os.path.expanduser("~/.config/theme/imported/omarchy")
 PREVIEWS_DIR = os.path.expanduser("~/.cache/theme/previews")
 IMPORT_TMP_BASE = os.path.expanduser("~/.cache/theme/import-tmp")
 WALLPAPERS_CACHE = os.path.expanduser("~/.cache/theme/wallpapers")
+MAX_WALLPAPERS_PER_THEME = 5
 
 os.makedirs(IMPORTED_OMARCHY_DIR, exist_ok=True)
 os.makedirs(PREVIEWS_DIR, exist_ok=True)
 os.makedirs(IMPORT_TMP_BASE, exist_ok=True)
 os.makedirs(WALLPAPERS_CACHE, exist_ok=True)
+
+
+def sync_to_chezmoi_source(target_path):
+    """Persist an imported live file into chezmoi when this machine uses it."""
+    if not shutil.which("chezmoi") or not os.path.exists(target_path):
+        return
+    try:
+        subprocess.run(
+            ["chezmoi", "add", target_path],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+        )
+    except Exception as exc:
+        print(f"Warning: could not sync {target_path} into chezmoi: {exc}", file=sys.stderr)
+
+
+def remove_from_chezmoi_source(target_path):
+    """Remove the managed source copy for a target file, if one exists."""
+    if not shutil.which("chezmoi"):
+        return
+    try:
+        proc = subprocess.run(
+            ["chezmoi", "source-path", target_path],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        source_path = proc.stdout.strip() if proc.returncode == 0 else ""
+        if source_path and os.path.isfile(source_path):
+            os.remove(source_path)
+    except Exception as exc:
+        print(f"Warning: could not remove chezmoi source for {target_path}: {exc}", file=sys.stderr)
+
+
+def sync_import_directory_to_chezmoi():
+    """Batch-persist the imported-theme directory with one chezmoi process."""
+    if not shutil.which("chezmoi") or not os.path.isdir(IMPORTED_OMARCHY_DIR):
+        return
+    try:
+        subprocess.run(
+            ["chezmoi", "add", "--recursive", IMPORTED_OMARCHY_DIR],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=30,
+        )
+    except Exception as exc:
+        print(f"Warning: could not batch-sync imported themes into chezmoi: {exc}", file=sys.stderr)
+
+
+def prune_chezmoi_import_source_to_live():
+    """Make the managed imported-theme file set match the live imported set."""
+    if not shutil.which("chezmoi"):
+        return
+    try:
+        proc = subprocess.run(
+            ["chezmoi", "source-path"], capture_output=True, text=True, timeout=5, check=True
+        )
+        source_dir = os.path.join(proc.stdout.strip(), "dot_config/theme/imported/omarchy")
+        if not os.path.isdir(source_dir):
+            return
+        live_names = {f for f in os.listdir(IMPORTED_OMARCHY_DIR) if f.endswith(".json")}
+        for filename in os.listdir(source_dir):
+            if filename.endswith(".json") and filename not in live_names:
+                os.remove(os.path.join(source_dir, filename))
+    except Exception as exc:
+        print(f"Warning: could not prune chezmoi imported-theme source: {exc}", file=sys.stderr)
 
 
 def normalize_git_url(raw_url):
@@ -96,13 +180,31 @@ def clone_repo_safely(repo_url, target_dir, commit=None):
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"Git clone failed for {repo_url}: {e.stderr.strip()}")
 
-    # If specific commit requested (e.g. from catalog)
+    # If the validated registry pins a commit, failure to fetch/check it out is
+    # fatal. Falling back silently to repository HEAD would defeat validation.
     if commit:
         try:
-            subprocess.run(["git", "-C", target_dir, "fetch", "--depth", "1", "origin", commit], env=env, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(["git", "-C", target_dir, "checkout", "--quiet", commit], env=env, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception:
-            pass
+            subprocess.run(
+                ["git", "-C", target_dir, "fetch", "--depth", "1", "origin", str(commit)],
+                env=env,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            subprocess.run(
+                ["git", "-C", target_dir, "checkout", "--quiet", str(commit)],
+                env=env,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                f"Could not checkout validated catalog commit {commit} for {repo_url}: "
+                f"{(exc.stderr or '').strip()}"
+            ) from exc
 
     # Extract commit and branch
     rev_res = subprocess.run(["git", "-C", target_dir, "rev-parse", "HEAD"], capture_output=True, text=True)
@@ -348,6 +450,52 @@ def find_candidate_files(repo_dir, max_depth=3):
         candidates[k].sort(key=lambda p: (p.count(os.sep), len(p)))
 
     return candidates
+
+
+def select_wallpaper_candidates(paths, limit=MAX_WALLPAPERS_PER_THEME):
+    """Return at most `limit` deterministic, primary wallpaper paths.
+
+    Prefer the repository's canonical `backgrounds/` directory. Historical,
+    alternate, and portrait/vertical directories are only used when there are
+    not enough primary images. This keeps a small useful set without copying
+    every image a community theme has ever shipped.
+    """
+    def natural_key(value):
+        value = value.replace("\\", "/").lower()
+        return re.sub(r"\d+", lambda m: f"{int(m.group()):08d}", value)
+
+    def priority(path):
+        p = path.replace("\\", "/").lstrip("./")
+        low = p.lower()
+        top = low.split("/", 1)[0]
+        historical = any(token in low for token in (
+            "old-background", "backgrounds-old", "backgrounds_alt",
+            "backgrounds-alt", "vertical", "portrait",
+        ))
+        if top == "backgrounds" and not historical:
+            bucket = 0
+        elif top in {"wallpapers", "wallpaper"} and not historical:
+            bucket = 1
+        elif not historical and ("/backgrounds/" in f"/{low}" or "/wallpapers/" in f"/{low}"):
+            bucket = 2
+        elif historical:
+            bucket = 4
+        else:
+            bucket = 3
+        return (bucket, natural_key(p))
+
+    selected = []
+    seen = set()
+    for path in sorted(paths or [], key=priority):
+        normalized = path.replace("\\", "/")
+        key = normalized.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        selected.append(normalized)
+        if len(selected) >= max(0, int(limit)):
+            break
+    return selected
 
 
 def parse_alacritty_dict(data):
@@ -659,6 +807,8 @@ def analyze_repository(repo_dir, git_url=None, owner="Unknown", repo_name=""):
     Returns (raw_theme, analysis_summary)
     """
     candidates = find_candidate_files(repo_dir)
+    wallpapers_found = len(candidates["wallpapers"])
+    candidates["wallpapers"] = select_wallpaper_candidates(candidates["wallpapers"])
 
     # Derive slug
     if git_url:
@@ -700,13 +850,36 @@ def analyze_repository(repo_dir, git_url=None, owner="Unknown", repo_name=""):
     semantic_keys = [
         "background", "foreground", "accent", "cursor", "selection",
         "selection_foreground", "selection_background", "readable_muted",
-        "text_accent", "warning_text", "border", "muted", "dark_fg",
-        "light_fg", "bright_fg", "dark_bg", "darker_bg", "lighter_bg"
+        "text_accent", "warning_text", "border", "muted",
+        "dark_foreground", "light_foreground", "bright_foreground",
+        "dark_background", "darker_background", "lighter_background",
+        "dark_fg", "light_fg", "bright_fg", "dark_bg", "darker_bg", "lighter_bg",
     ]
     semantic_overrides = {}
     for sk in semantic_keys:
         if sk in primary_data and HEX_RE.match(clean_hex(str(primary_data[sk]))):
             semantic_overrides[sk] = clean_hex(str(primary_data[sk]))
+
+    # Current Omarchy themes may publish an explicit visible window border. Keep
+    # it as the semantic border instead of falling back to a generic surface.
+    active_border = primary_data.get("active_border_color")
+    if active_border and HEX_RE.match(clean_hex(str(active_border))):
+        semantic_overrides["border"] = clean_hex(str(active_border))
+
+    authored_base30 = {
+        "black": clean_hex(primary_data.get("background") or b16["BASE00"]),
+        "darker_black": clean_hex(primary_data.get("darker_background") or primary_data.get("darker_bg") or b16["BASE01"]),
+        "one_bg": clean_hex(primary_data.get("dark_background") or primary_data.get("dark_bg") or b16["BASE01"]),
+        "one_bg2": clean_hex(primary_data.get("selection") or b16["BASE02"]),
+        "one_bg3": clean_hex(primary_data.get("lighter_background") or primary_data.get("lighter_bg") or b16["BASE03"]),
+        "grey": clean_hex(primary_data.get("muted") or b16["BASE03"]),
+        "grey_fg": clean_hex(primary_data.get("dark_foreground") or primary_data.get("dark_fg") or b16["BASE04"]),
+        "white": clean_hex(primary_data.get("foreground") or b16["BASE05"]),
+        "red": b16["BASE08"], "orange": b16["BASE09"], "yellow": b16["BASE0A"],
+        "green": b16["BASE0B"], "cyan": b16["BASE0C"], "teal": b16["BASE0C"],
+        "blue": b16["BASE0D"], "purple": b16["BASE0E"], "pink": b16["BASE0F"],
+        "folder_bg": accent,
+    }
 
     capabilities = {
         "palette": True,
@@ -738,8 +911,10 @@ def analyze_repository(repo_dir, git_url=None, owner="Unknown", repo_name=""):
         if cava_parsed:
             apps["cava"] = cava_parsed
 
-    # Previews
+    # Previews. Use the expanded path for the local copy, but persist a
+    # home-relative path in source metadata so catalog JSON stays portable.
     preview_dest = None
+    preview_meta = None
     if candidates["previews"]:
         # Sort so preview.png / theme-preview come first
         candidates["previews"].sort(key=lambda p: (
@@ -749,8 +924,10 @@ def analyze_repository(repo_dir, git_url=None, owner="Unknown", repo_name=""):
         preview_dest = os.path.join(PREVIEWS_DIR, f"{slug}.png")
         try:
             shutil.copy2(preview_src, preview_dest)
+            preview_meta = f"~/.cache/theme/previews/{slug}.png"
         except Exception:
             preview_dest = None
+            preview_meta = None
 
     raw_theme = {
         "schema": 1,
@@ -769,11 +946,18 @@ def analyze_repository(repo_dir, git_url=None, owner="Unknown", repo_name=""):
             "accent": accent,
             "base_16": b16,
         },
+        "authored": {
+            "semantic": semantic_overrides,
+            "base_30": authored_base30,
+        },
+        # Raw aliases are supplied for this first normalization pass. Canonical
+        # files preserve them under `authored` so future syncs remain idempotent.
         "semantic": semantic_overrides,
+        "base_30": authored_base30,
         "apps": apps,
         "assets": {
             "wallpapers": candidates["wallpapers"],
-            "preview": preview_dest,
+            "preview": preview_meta,
         }
     }
 
@@ -786,6 +970,7 @@ def analyze_repository(repo_dir, git_url=None, owner="Unknown", repo_name=""):
         "ignored_files": sorted(set(candidates["ignored"])),
         "cava_gradient_count": apps.get("cava", {}).get("gradient_count", 8) if "cava" in apps else 8,
         "wallpapers_count": len(candidates["wallpapers"]),
+        "wallpapers_found": wallpapers_found,
     }
 
     return raw_theme, summary
@@ -844,7 +1029,12 @@ def print_theme_analysis(summary, branch="master", commit=""):
                 c_status = f"yes ({summary.get('cava_gradient_count', 8)} colors)" if has_cap else "no (system synthesizes 8 colors)"
                 print(f"  {cap_name.capitalize():<12} {c_status}")
             elif cap_name == "wallpaper":
-                w_status = f"yes ({summary.get('wallpapers_count', 0)} found)" if has_cap else "no"
+                if has_cap:
+                    kept = summary.get("wallpapers_count", 0)
+                    found = summary.get("wallpapers_found", kept)
+                    w_status = f"yes ({kept} kept of {found} found; max {MAX_WALLPAPERS_PER_THEME})"
+                else:
+                    w_status = "no"
                 print(f"  {cap_name.capitalize():<12} {w_status}")
             elif cap_name == "zed":
                 status = "yes (upstream file)" if has_cap else "no (system generates template)"
@@ -872,7 +1062,16 @@ def print_theme_analysis(summary, branch="master", commit=""):
 
 
 
-def import_git_theme(git_url, dry_run=False, info_only=False, force_update=False, apply_theme_flag=False):
+def import_git_theme(
+    git_url,
+    dry_run=False,
+    info_only=False,
+    force_update=False,
+    apply_theme_flag=False,
+    sync_cache=True,
+    sync_source=True,
+    commit=None,
+):
     """
     Main transactional Git import pipeline.
     """
@@ -895,7 +1094,7 @@ def import_git_theme(git_url, dry_run=False, info_only=False, force_update=False
     clone_dir = os.path.join(IMPORT_TMP_BASE, safe_id)
 
     try:
-        commit_sha, branch = clone_repo_safely(clean_url, clone_dir)
+        commit_sha, branch = clone_repo_safely(clean_url, clone_dir, commit=commit)
 
         # Check existing commit for duplicate detection
         if existing_target and not force_update and not info_only and not dry_run:
@@ -948,18 +1147,23 @@ def import_git_theme(git_url, dry_run=False, info_only=False, force_update=False
         # If previous alt_file existed (e.g. omarchy-slug.json), clean it up so no duplicate exists
         if existing_target and existing_target != dest_file and os.path.exists(existing_target):
             try:
+                if sync_source:
+                    remove_from_chezmoi_source(existing_target)
                 os.remove(existing_target)
             except Exception:
                 pass
 
         tmp_dest = f"{dest_file}.tmp"
         with open(tmp_dest, "w", encoding="utf-8") as f:
-            json.dump(canonical, f, indent=2)
+            json.dump(canonical, f, indent=2, sort_keys=True)
         os.replace(tmp_dest, dest_file)
+        if sync_source:
+            sync_to_chezmoi_source(dest_file)
 
-        print("\nSyncing cache...")
-        subprocess.run([os.path.expanduser("~/.local/bin/theme-sync")], check=True)
-        print("Done.")
+        if sync_cache:
+            print("\nSyncing cache...")
+            subprocess.run([os.path.expanduser("~/.local/bin/theme-sync")], check=True)
+            print("Done.")
         print("\nTheme imported successfully.")
 
         if apply_theme_flag:
@@ -991,6 +1195,7 @@ def remove_imported_theme(theme_name):
         print(f"Error: Imported theme '{theme_name}' not found in {IMPORTED_OMARCHY_DIR}", file=sys.stderr)
         return False
 
+    remove_from_chezmoi_source(target)
     os.remove(target)
     print(f"Removed: {target}")
     print("Syncing cache...")
@@ -999,146 +1204,290 @@ def remove_imported_theme(theme_name):
     return True
 
 
-def fetch_official_catalog():
-    """Fetches the official catalog using CDN with GitHub fallback."""
-    for url in CATALOG_URLS:
+def _catalog_entries_from_json(data):
+    """Normalize current/legacy registry JSON shapes into theme entry dicts."""
+    if isinstance(data, dict):
+        entries = data.get("themes") or data.get("entries") or data.get("items") or []
+    elif isinstance(data, list):
+        entries = data
+    else:
+        entries = []
+
+    normalized = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        repo = entry.get("repo") or entry.get("repository") or entry.get("url")
+        if not repo:
+            continue
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Antigravity-OmarchyImporter/1.0"})
+            clean_repo, _, _, derived_slug = normalize_git_url(str(repo))
+        except ValueError:
+            continue
+        item = dict(entry)
+        item["repo"] = clean_repo
+        item["slug"] = item.get("slug") or derived_slug
+        item["name"] = item.get("name") or item["slug"]
+        commit = item.get("commit") or item.get("sha")
+        if not commit and isinstance(item.get("version"), dict):
+            commit = item["version"].get("commit") or item["version"].get("sha")
+        if commit:
+            item["commit"] = str(commit)
+        normalized.append(item)
+    return normalized
+
+
+def fetch_registry_catalog():
+    """Fetch Omarchy's validated published catalog when its CDN is reachable."""
+    for url in REGISTRY_CATALOG_URLS:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Omarchy-Theme-Importer/2.0"})
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-                if "themes" in data:
-                    return data["themes"], url
+            entries = _catalog_entries_from_json(data)
+            if entries:
+                return entries, url
         except Exception:
             continue
-    raise RuntimeError("Failed to fetch official catalog from all available sources.")
+    raise RuntimeError("Validated Omarchy registry catalog is unavailable.")
+
+
+def fetch_gallery_catalog():
+    """Read the current omarchy.org community gallery and its Git repository links."""
+    entry_re = re.compile(
+        r'<figcaption>\s*<a href="(https://github[.]com/[^"]+)">([^<]+)</a>\s*</figcaption>',
+        re.IGNORECASE | re.DOTALL,
+    )
+    for url in GALLERY_URLS:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Omarchy-Theme-Importer/2.0"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                text = resp.read().decode("utf-8", errors="replace")
+            entries = []
+            seen = set()
+            for repo, display_name in entry_re.findall(text):
+                clean_repo, _, _, slug = normalize_git_url(repo)
+                repo_key = clean_repo.lower()
+                if repo_key in seen:
+                    continue
+                seen.add(repo_key)
+                entries.append({
+                    "slug": slug,
+                    "name": html_module.unescape(display_name).strip(),
+                    "repo": clean_repo,
+                    "source": "omarchy.org/themes",
+                })
+            if entries:
+                return entries, url
+        except Exception:
+            continue
+    raise RuntimeError("Failed to fetch the current Omarchy community gallery.")
+
+
+def fetch_official_catalog():
+    """Prefer validated registry commits, then the public gallery, then legacy JSON."""
+    try:
+        return fetch_registry_catalog()
+    except Exception:
+        pass
+    try:
+        return fetch_gallery_catalog()
+    except Exception:
+        pass
+    for url in LEGACY_CATALOG_URLS:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Omarchy-Theme-Importer/2.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                entries = _catalog_entries_from_json(json.loads(resp.read().decode("utf-8")))
+            if entries:
+                return entries, url
+        except Exception:
+            continue
+    raise RuntimeError("Failed to fetch Omarchy registry, gallery, or legacy fallbacks.")
+
+
+def _local_import_records():
+    records = []
+    for filename in sorted(os.listdir(IMPORTED_OMARCHY_DIR)):
+        if not filename.endswith(".json"):
+            continue
+        path = os.path.join(IMPORTED_OMARCHY_DIR, filename)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            continue
+        repo = (data.get("source") or {}).get("repository")
+        records.append((path, data.get("name") or filename[:-5], repo))
+    return records
 
 
 def import_catalog(dry_run=False, limit=None):
-    """
-    Catalog import with exact reconciliation:
-      Reports: Official catalog count, Local count, New, Updated, Unchanged, Removed.
-    """
-    print("Fetching official Omarchy catalog...")
+    """Reconcile imports against Omarchy's validated registry or gallery fallback."""
+    print("Fetching current Omarchy theme catalog...")
     themes, source_url = fetch_official_catalog()
-    print(f"Connected to official catalog ({source_url})")
+    print(f"Connected to catalog source ({source_url})")
 
+    full_catalog = list(themes)
     if limit:
         themes = themes[:limit]
 
-    catalog_total = len(themes)
-    local_files = [f for f in os.listdir(IMPORTED_OMARCHY_DIR) if f.endswith(".json")]
-    local_total = len(local_files)
-
-    catalog_by_slug = {t.get("slug"): t for t in themes if t.get("slug")}
-
-    new_count = 0
-    updated_count = 0
-    unchanged_count = 0
-    removed_count = 0
-
-    # Inspect local files against catalog
-    for lf in local_files:
-        l_slug = lf[:-5]
-        if l_slug.startswith("omarchy-"):
-            l_slug = l_slug[8:]
-        if l_slug not in catalog_by_slug:
-            removed_count += 1
-
-    for slug, entry in catalog_by_slug.items():
-        dest_candidate = os.path.join(IMPORTED_OMARCHY_DIR, f"{slug}.json")
-        alt_candidate = os.path.join(IMPORTED_OMARCHY_DIR, f"omarchy-{slug}.json")
-        existing_path = dest_candidate if os.path.exists(dest_candidate) else (alt_candidate if os.path.exists(alt_candidate) else None)
-
-        if not existing_path:
-            new_count += 1
-            if not dry_run:
-                convert_and_save_catalog_entry(entry, dest_candidate)
-        else:
-            # Check commit SHA if available
-            try:
-                with open(existing_path, "r", encoding="utf-8") as ef:
-                    curr_d = json.load(ef)
-                curr_commit = curr_d.get("source", {}).get("commit")
-                cat_commit = entry.get("commit")
-                if cat_commit and curr_commit != cat_commit:
-                    updated_count += 1
-                    if not dry_run:
-                        convert_and_save_catalog_entry(entry, existing_path)
-                else:
-                    unchanged_count += 1
-            except Exception:
-                updated_count += 1
-                if not dry_run:
-                    convert_and_save_catalog_entry(entry, existing_path)
+    local_records = _local_import_records()
+    local_repos = {repo.rstrip("/").lower() for _, _, repo in local_records if repo}
+    catalog_repos = {str(t.get("repo") or "").rstrip("/").lower() for t in full_catalog if t.get("repo")}
+    selected_repos = {str(t.get("repo") or "").rstrip("/").lower() for t in themes if t.get("repo")}
+    new_count = sum(1 for repo in selected_repos if repo not in local_repos)
+    stale = [(path, name, repo) for path, name, repo in local_records if repo and repo.rstrip("/").lower() not in catalog_repos]
 
     print("\nCatalog Reconciliation:")
-    print(f"  Official catalog:  {catalog_total}")
-    print(f"  Local imported:    {local_total}")
-    print(f"  New:               {new_count}")
-    print(f"  Updated:           {updated_count}")
-    print(f"  Unchanged:         {unchanged_count}")
-    print(f"  Removed:           {removed_count}")
+    print(f"  Current catalog:     {len(full_catalog)}")
+    print(f"  Selected this run:   {len(themes)}")
+    print(f"  Local imported:      {len(local_records)}")
+    print(f"  New repositories:    {new_count}")
+    print(f"  No longer listed:    {len(stale)}")
 
     if dry_run:
         print("\n[Dry Run] No files modified on disk.")
         return True
 
-    if new_count > 0 or updated_count > 0:
-        print("\nSyncing cache...")
-        subprocess.run([os.path.expanduser("~/.local/bin/theme-sync")], check=True)
-        print("Done.")
+    # Every selected repository is refreshed from its own palette source. The
+    # worker path disables per-theme cache/source syncing; both happen once at
+    # the end so a full catalog reconciliation remains fast and deterministic.
+    failures = []
+    with ThreadPoolExecutor(max_workers=min(6, max(1, len(themes)))) as pool:
+        future_map = {}
+        for entry in themes:
+            repo = entry.get("repo")
+            if not repo:
+                continue
+            future = pool.submit(
+                import_git_theme,
+                repo,
+                False,
+                False,
+                True,
+                False,
+                False,
+                False,
+                entry.get("commit"),
+            )
+            future_map[future] = entry
+        for future in as_completed(future_map):
+            entry = future_map[future]
+            try:
+                if not future.result():
+                    failures.append((entry.get("name"), entry.get("repo"), "validation/import failed"))
+            except Exception as exc:
+                failures.append((entry.get("name"), entry.get("repo"), str(exc)))
 
-    return True
-
-
-def convert_and_save_catalog_entry(entry, dest_path):
-    """Converts a catalog JSON entry into Schema 1 and saves it."""
-    slug = entry.get("slug")
-    name = entry.get("name") or slug
-    mode = entry.get("mode", "dark")
-    colors = entry.get("colors", {})
-
-    accent = clean_hex(colors.get("accent") or colors.get("blue") or "#58a6ff")
-    b16 = colors_dict_to_base16(colors)
-
-    author_info = entry.get("author")
-    author_name = author_info.get("login") if isinstance(author_info, dict) else str(author_info or "Unknown")
-
-    preview_val = entry.get("preview")
-    preview_url = preview_val.get("src") if isinstance(preview_val, dict) else preview_val
-
-    raw_theme = {
-        "schema": 1,
-        "name": slug,
-        "display_name": name,
-        "type": mode,
-        "source": {
-            "provider": "omarchy",
-            "registry": "https://github.com/omacom/omarchy-theme-registry",
-            "repository": entry.get("repo"),
-            "commit": entry.get("commit"),
-            "author": author_name,
-            "license": entry.get("license"),
-            "registry_listed": True,
-            "imported_at": datetime.now().isoformat(),
-        },
-        "capabilities": {
-            "palette": True,
-            "wallpaper": False,
-            "icons": False,
-            "terminal": True,
-            "browser": False,
-            "cava": True,
-        },
-        "palette": {
-            "accent": accent,
-            "base_16": b16,
-        },
-        "assets": {
-            "preview": preview_url,
-        }
+    # Canonicalize to exactly one local file per catalog repository. Older
+    # importer versions used provider-prefixed or underscore slugs, so repo URL
+    # identity is more reliable than filename identity during reconciliation.
+    catalog_meta = {
+        str(entry.get("repo") or "").rstrip("/").lower(): entry
+        for entry in themes
+        if entry.get("repo")
     }
+    records_by_repo = {}
+    for path, name, repo in _local_import_records():
+        key = str(repo or "").rstrip("/").lower()
+        records_by_repo.setdefault(key, []).append((path, name))
 
-    norm = normalize_theme(raw_theme, default_name=slug, default_provider="omarchy")
-    with open(dest_path, "w", encoding="utf-8") as f:
-        json.dump(norm, f, indent=2)
+    duplicate_files_removed = 0
+    for repo_key, records in records_by_repo.items():
+        entry = catalog_meta.get(repo_key)
+        if not entry:
+            continue
+        canonical_path = os.path.join(IMPORTED_OMARCHY_DIR, f"{entry['slug']}.json")
+        if not os.path.exists(canonical_path) and records:
+            source_path = records[0][0]
+            if source_path != canonical_path:
+                os.replace(source_path, canonical_path)
+        for path, _ in records:
+            if path == canonical_path or not os.path.exists(path):
+                continue
+            remove_from_chezmoi_source(path)
+            os.remove(path)
+            duplicate_files_removed += 1
+
+    # Normalize display names/provenance from the authoritative catalog. README
+    # title heuristics are intentionally secondary to registry/gallery metadata.
+    for path, _, repo in _local_import_records():
+        key = str(repo or "").rstrip("/").lower()
+        entry = catalog_meta.get(key)
+        if not entry:
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            data["display_name"] = entry.get("name") or data.get("display_name")
+            source = data.setdefault("source", {})
+            source["registry"] = "https://omarchy.org/themes/"
+            source["registry_catalog"] = source_url
+            source["registry_listed"] = True
+            source["registry_commit_pinned"] = bool(entry.get("commit"))
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, sort_keys=True)
+                f.write("\n")
+            os.replace(tmp, path)
+        except Exception as exc:
+            print(f"Warning: could not apply catalog metadata to {path}: {exc}", file=sys.stderr)
+
+    removed = 0
+    retained_active = 0
+    if not limit:
+        active_path = os.path.expanduser("~/.local/state/theme/name")
+        try:
+            active = open(active_path, "r", encoding="utf-8").read().strip()
+        except Exception:
+            active = ""
+        for path, name, _ in stale:
+            if not os.path.exists(path):
+                continue
+            # The same path may have been refreshed from a renamed/moved
+            # repository during this reconciliation. Re-check its current
+            # provenance before removing anything based on the pre-refresh list.
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    current_data = json.load(f)
+                current_repo = str((current_data.get("source") or {}).get("repository") or "").rstrip("/").lower()
+                if current_repo in catalog_repos:
+                    continue
+            except Exception:
+                pass
+            if name == active or os.path.splitext(os.path.basename(path))[0] == active:
+                retained_active += 1
+                continue
+            remove_from_chezmoi_source(path)
+            try:
+                os.remove(path)
+                removed += 1
+            except FileNotFoundError:
+                pass
+
+    # Persist the complete reconciled directory with one chezmoi process. Manual
+    # single-theme imports still use the per-file helper immediately.
+    sync_import_directory_to_chezmoi()
+    prune_chezmoi_import_source_to_live()
+
+    print("\nSyncing canonical cache...")
+    subprocess.run([os.path.expanduser("~/.local/bin/theme-sync"), "--force"], check=True)
+
+    print("\nCatalog Result:")
+    print(f"  Imported/refreshed: {len(themes) - len(failures)}")
+    print(f"  Failed:             {len(failures)}")
+    print(f"  Removed stale:      {removed}")
+    print(f"  Removed repo copies:{duplicate_files_removed:>6}")
+    if retained_active:
+        print(f"  Retained active:    {retained_active}")
+    if failures:
+        print("  Unreachable/failed catalog entries:")
+        for name, repo, reason in failures[:20]:
+            print(f"    - {name}: {repo} ({reason})")
+        print("  Note: unreachable upstream catalog links are skipped; no third-party mirror is substituted.")
+    # A stale/deleted repository linked by the catalog must not poison the rest
+    # of a successful reconciliation. Individual import failures remain visible
+    # in the report and `--status` exposes them as missing until upstream fixes
+    # the catalog entry.
+    return True

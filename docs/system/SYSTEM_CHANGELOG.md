@@ -12,7 +12,93 @@ Rules:
 - Do not paste large diffs, logs, or transient diagnostics here.
 - If a change alters current machine assumptions, also update `SYSTEM_CONTEXT.md`.
 
+## 2026-11-01
+
+### Bluetooth connection retry safety
+
+- Removed external `timeout` wrappers from `bt-select` and `bt-refuse-toggle` connection attempts. BlueZ `Connect()` is now allowed to finish its controller page naturally, avoiding pending HCI connection attempts that could make immediate retries fail with `br-connection-busy`.
+- `bt-select` now starts disconnected checked devices in parallel, reducing multi-device wait time to one controller page interval. It sets/moves audio to a Bluetooth sink only when exactly one selected device is connected; with multiple live selected sinks it preserves the current default.
+- Updated the active Bluetooth/audio documentation to match the Foot-based `bluetui` launcher and the current connection semantics.
+
+### Compact launcher and utility-TUI geometry
+
+- Compacted the Rofi network menu and theme picker around Iosevka Nerd Font Mono, with the theme picker now 600px wide and the network menu 420px wide; the bottom command launcher remains full-width with reduced typography/padding.
+- Fuzzel now takes scale-derived font/padding/border values from `ui-sync`, uses a 36-column/10-row launcher layout, and keeps the active theme's generated color include authoritative.
+- Sway utility floats were reduced to 900x600 for `wifui`/`bluetui` and 900x680 for `rogtui`; each uses a 15pt per-client Foot override so the global terminal font remains independent.
+
+### Read-only battery meter and optional cursor-raster tooling
+
+- Fastfetch's battery row now calls the one-shot `battery-meter` helper, which reads BAT0 capacity/status and renders the slider-style display without changing ASUS charging policy.
+- Added `build-cursor-sizes` as an explicit opt-in Xcursor resampling tool. `--check` is read-only; no intermediate sizes have been applied to the live Phinger themes, which currently remain at their native 24/32/48/64/96/128 sizes.
+- Made the new `environment.d/30-cursor.conf` portable by using `${HOME}` in `XCURSOR_PATH` rather than a machine-specific home path.
+
+### Cursor size reduced to 32px and both cursor tools reworked
+
+- Found the cursor stuck at 64px with four disagreeing consumers: Sway seat and live `10-display.conf` at 64, GSettings at 64, GTK 3/4 at 64, while `environment.d/30-cursor.conf` still exported `XCURSOR_SIZE=32`. Set every consumer to 32 and applied it live through Sway IPC.
+- Root cause of "changing the size does nothing": `adjust-cursor-size` clamped at 64 (the Phinger theme ships up to 128), never snapped to a size the theme actually provides (24/32/48/64/96/128), and only repaired the live Sway config, leaving the session environment, GSettings, GTK, and the chezmoi source to drift.
+- Rewrote `adjust-cursor-size` to step along the theme ladder, snap absolute values, update the live seat plus all config consumers and their chezmoi sources, print a status report when run without arguments, and exit 2 at the bounds instead of silently clamping.
+- Rewrote `toggle-cursor-theme` to the same contract: it preserves the current size, validates that the target theme is installed, writes both chezmoi sources, refreshes the session environment and the `~/.icons/default` Xwayland fallback, and exposes `status` and explicit `dark` / `light` arguments.
+- Brought `environment.d/30-cursor.conf` under chezmoi as `dot_config/environment.d/30-cursor.conf` so `XCURSOR_THEME` and `XCURSOR_SIZE` each have one source of truth.
+- Changed the cursor size keybindings from `+4` / `-4` to `+2` / `-2`; the magnitude stays a direction marker because the theme only ships six discrete sizes.
+- Verified: `adjust-cursor-size` reports 32 across Sway, GTK, GSettings, Xresources, and session env; `+`/`-` step 32 to 48 and back; a dark then light round trip left the theme identical in all ten consumer rows and kept the 32px size; `sway -C` loads with no errors.
+
+### Smaller Ctrl+Space scratchpad font
+
+- Split the Ctrl+Space `scratch-term` font from the other scratchpads in `~/.local/bin/scratch-toggle`: it uses `SCRATCH_TERM_FONT_SIZE`, tuned through 15 pt and 16 pt before settling at 16.5 pt, while `scratch-notes` and `dc-term` keep `SCRATCH_FONT_SIZE` (17 pt). The current global `foot.ini` font is 16.6 pt.
+- Verified by respawning the live client: the new `footclient --app-id=scratch-term` command line carries `-o font=Iosevka Nerd Font Mono:size=16.5:style=Regular`, and the scratchpad toggles visible at 1328x830 after the 90% output cap. `sh -n` and `chezmoi apply` were clean.
+
+### Palette-faithful theme catalog, deduplication, and Omarchy font set
+
+- Retired the dedicated `ds3-wallpaper` helper and removed all active callers. `Win + Shift + W` and `Alt + Shift + W` now advance the active theme's Omarchy wallpaper set through `theme-wallpaper`; the compatibility `random-wallpaper` and unbound `wallpaper-menu` also delegate only to `theme-wallpaper`. Existing DS3 image files were left untouched as ordinary user data.
+- Reworked Schema 1 normalization so authored syntax hues are preserved instead of being replaced with generic spectrum targets; current Omarchy semantic values are retained separately from generated compatibility aliases, preventing repeated `theme-sync` runs from drifting palettes. Lightness-only contrast correction now guarantees body text `>=4.5:1`, syntax/focused borders `>=3.0:1`, and inactive borders `>=1.7:1`; background luminance corrects clearly wrong upstream dark/light labels.
+- Updated `theme-set` and the Sway theme template to derive visibility-safe focused/inactive borders from each theme's own accent/background. A fresh 327-theme runtime audit passed with minima 4.513/3.002/3.001/1.700. The runtime normalization also reapplies the 3.0:1 syntax/non-text contrast floor after selecting authored `base_30` aliases, preventing those aliases from undoing Schema 1 correction; Synthwave '84 retains its purple identity (`#ff00ff` accent and purple `BASE0B=#8f00ff`).
+- Reworked Omarchy catalog reconciliation to prefer the official validated registry catalog and registry-pinned commits, with `omarchy.org/themes` as the first fallback and legacy endpoints last. During 2026-11-01 live verification the registry hostname did not resolve from this machine, so the gallery fallback was used: 232 of 233 listed repositories were reachable and mirrored into chezmoi; the sole missing entry, `ankur311sudo/gruvu`, returned repository-not-found and was not replaced from an unofficial mirror. Old unlisted imports and duplicate repo filenames were removed. Imported preview metadata is persisted as portable `~/.cache/theme/previews/...` paths rather than embedding the local username/home directory.
+- Added conservative generated-catalog deduplication with an auditable `~/.cache/theme/dedup.json`: 351 source files are present; provider/name reconciliation compiles 350 canonical inputs into 347 pre-dedupe cache names, then suppresses 20 exact or same-family near copies to expose 327 themes. Source definitions remain intact for reproducible recompilation.
+- Added the full Omarchy-compatible Nerd Font package set to `packages/sway.txt` and installed the six previously missing alternatives alongside JetBrainsMono: Cascadia/CaskaydiaCove, MesloLG, FiraCode, VictorMono, BitstromWera Mono, and Iosevka. All seven packages are verified at `3.5.1-2`; the configured default font was not changed.
+- Added bounded Omarchy wallpaper sets: all 232 reachable community imports now keep at most five primary repository backgrounds, with old/alternate/vertical candidates deprioritized; 21/22 locally maintained official Omarchy built-ins also map to their exact current `omacom/omarchy` background directories, while legacy `omarchy-osaka-jade` remains intentionally unmapped because current upstream has no exact matching directory. Added daemonless `theme-wallpaper` to fetch only the active/requested theme's pinned GitHub images on demand, cache them under `~/.cache/theme/wallpapers/`, cycle with `Win + Ctrl + W` / reverse with `Win + Ctrl + Shift + W`, and let `theme-set` restore cached per-theme selections without network access. First-use downloads were later optimized to libcurl parallel transfers under a per-theme `flock`, with Python validation fallback; import/theme application remain network-free. Measured serial Aetheria at 35.1s before the optimization and the real helper fetching five Ayaka images (~32 MiB) in 2.33s afterward, subject to network/CDN variance.
+
+### Foot terminal font sizing and `foot-font` Sway fix
+
+- After additional tuning, the current global Foot font is `Iosevka Nerd Font Mono:size=16.6` Regular via `foot-font`, with `font-size-adjustment=0.5`; notes/dc scratchpads stay at 17 pt through `SCRATCH_FONT_SIZE`, and the Ctrl+Space scratch terminal uses 16.5 pt.
+- Documented that the long-lived `foot-server.service` parses `foot.ini` only at startup and `footclient` forwards just `-o` overrides, so file-based font changes need `restart-terminals`; verified by a 24 pt `foot.ini` leaving a new window at the same 147x35 grid while `-o font=...:size=17.5` changed it to 137x32.
+- Fixed a `foot-font` regression that corrupted `~/.config/sway/config.d/00-variables.conf`: the `$term` insertion regex used `\s+`, matched the line's own newline, and wrote `-o font="..."` onto the next comment line, which made `sway -C` report an invalid `-o` command. The tool now only rewrites an override that already exists, never injects one, and restores the variables file if the Sway check fails.
+- Verified: `foot --check-config` clean, `sway -C` exit 0 with no load errors, `swaymsg reload` clean, live `foot.ini` identical to the chezmoi source, and repeated `+0.5`/`-0.5` runs left the Sway variables file untouched.
+
+### Theme hot-reload reliability and cache discipline
+
+- Reproduced the intermittent `theme-set` failure as a real concurrency race: simultaneous switches shared `~/.local/state/theme/.next/`, producing missing staged files, validation failures, and occasional `FileNotFoundError` promotion errors.
+- Added an `fcntl.flock()` single-writer lock across theme selection, compilation, promotion, and live dispatch; converted short reload IPC/hooks to bounded ordered execution; and made Neovim RPC/Base46 refresh complete before the lock is released instead of relying on daemon threads/background processes that could finish out of order.
+- Fixed the remaining NvChad stale-theme path: `theme-set` no longer hides Base46 errors inside `pcall` or marks `~/.local/share/nvim/base46/current_theme` before compilation succeeds. Live sockets now invalidate the selected theme module and return an explicit success/error result; a successful live reload supplies the disk cache, while the no-editor fallback uses normal headless NvChad startup. Verified Pathos by forcing a temporary NvChad instance to Gruvchad/dark and switching through `theme-set`: it returned to `pathos|light`; the no-live-socket path also rebuilt and marked Pathos successfully.
+- Preserved the existing Foot OSC/per-client include fix, and also repaired `theme-set --info` so Cava-capable themes no longer reference an undefined accent variable.
+- Made `theme-sync` deterministic and write-if-changed, pruned stale generated JSON/preview/NvChad outputs, and fixed byte-identical preview handling. A no-change forced sync of 290 themes now measures about 0.165s after canonicalization; a five-round concurrent switch stress test completed with zero failures.
+- Corrected `theme-check` so `gradient_count=0` is valid when Cava gradients are disabled; validation noise dropped from 290 warnings to the two real low-contrast themes. `theme-doctor` now reports executable hook count rather than counting `.keep`.
+
+### Conservative stale-system cleanup
+
+- Removed `simde` and `uthash` after verifying both were true `pacman -Qdt` dependency orphans, required by no installed package, and absent from the declarative package manifests. Snapper protection was present and package hooks also created the normal pre/post snapshots.
+- Pruned Pacman package cache while retaining two installed-package versions and removed cached packages for no-longer-installed packages, reclaiming about 1.96 GiB total. No failed system/user units or zombie processes were present.
+- Did not clear NVIDIA shader, Go build, browser, or other performance-sensitive caches. `uv cache prune` was intentionally not forced because active MCP `uvx` processes held the cache lock.
+
+### Global media play/pause shortcut
+
+- Restored the old Hyprland-style global MPRIS play/pause action in Sway on `Win + Alt + P` using a one-shot `media-play-pause` helper backed by `playerctl`.
+- Added a short Mako OSD showing the resulting `Playing` / `Paused` state after each toggle; no resident media helper or polling loop was added.
+- Moved ROG Aura preset cycling off that chord to `Win + Alt + [` (previous) and `Win + Alt + ]` (next), preserving the hardware controls without a binding collision.
+
+### Desktop Commander startup persistence
+
+- Enabled the existing chezmoi-managed `desktop-commander.service` under the user `default.target`, so the remote bridge starts automatically with the user systemd session instead of depending on a manual `dc` invocation.
+- Added `desktop-commander.service` to `run_onchange_linux-20-reconcile-services.sh.tmpl` so future `chezmoi apply` / rebuilds restore the enabled state without adding a duplicate Sway autostart process.
+- Verified the unit is both `enabled` and `active`, and that `default.target` now lists `desktop-commander.service` as a dependency.
+
 ## 2026-10-31
+
+### Foot theme hot-reload correctness
+
+- Fixed `theme-set` so Foot no longer receives SIGUSR1/SIGUSR2 after palette regeneration; Foot 1.28 uses those signals only to select the long-lived server's already-cached dark/light sections, which could restore stale Gruvbox colors.
+- Existing Foot windows now receive only targeted OSC palette updates through their own PTYs, with no broad `/dev/pts/*` broadcast.
+- Added a zero-resident `~/.local/bin/footclient` exec wrapper that injects the current generated `foot-colors.ini` into every new server client, so future windows match the active theme without restarting `foot --server`.
+- Verified the stale-server condition directly: an unmodified Foot server client reported background `#282828`, while a client using the generated include reported the active Solarized Osaka background `#011219`.
 
 ### Unified Codex / AGY / OpenCode automation
 

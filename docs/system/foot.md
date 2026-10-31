@@ -81,7 +81,7 @@ Based on an OCR scan of the screenshot directory (`screenshot-2026-10-17_19-55-4
 
 1. **Memory Discipline:** Foot saves ~108 MB RAM per window. A standard workflow of 5 to 6 terminals saves ~540 MB to ~650 MB of memory.
 2. **GPU Overhead Elimination:** Kitty's ~132 MB footprint is largely driven by OpenGL context creation, GLSL shader compilation, and GPU surface buffers. Foot uses CPU SIMD buffers via Pixman, drawing virtually zero power and preventing dGPU wakeups.
-3. **Dynamic Theming Integration:** Integrated with `theme-set`. Switching themes automatically recompiles `~/.config/foot/foot-colors.ini` and broadcasts runtime XTerm OSC escape sequences directly to active PTS devices (`/dev/pts/*`) for instant hot-reload.
+3. **Dynamic Theming Integration:** Integrated with `theme-set`. Switching themes recompiles `~/.config/foot/foot-colors.ini` atomically and broadcasts XTerm OSC color updates directly to PTYs owned by live Foot windows for instant hot-reload. Foot `SIGUSR1`/`SIGUSR2` are not reload signals: in Foot 1.28 they only switch to the `[colors-dark]` / `[colors-light]` values already cached by the long-lived server, so `theme-set` must not use those signals after regenerating the palette. A zero-resident `~/.local/bin/footclient` exec wrapper injects `-o include=~/.config/foot/foot-colors.ini` into new clients so they receive the current palette even though the server itself remains running.
 
 ---
 
@@ -93,3 +93,21 @@ To execute:
 ```bash
 bench-terminals
 ```
+
+---
+
+## 5. Font Configuration and Sizing
+
+Font state is owned by `~/.config/foot/foot.ini` (chezmoi source: `dot_config/foot/foot.ini`). Nothing else defines a Foot font size.
+
+- **Current:** `Iosevka Nerd Font Mono:size=16.6:style=Regular`, `pad=0x0`, `font-size-adjustment=0.5`.
+- **DPI:** no `dpi` / `pixels-per-inch` key is set, so Foot uses its default 96 DPI multiplied by the Wayland output scale. `eDP-1` currently runs at scale `1.30` (logical 1476x923), so the configured 16.6 pt size is still enlarged by compositor scaling.
+- **The running server owns the font size.** `foot-server.service` parses `foot.ini` once at startup; `footclient` only forwards `-o` overrides. Editing `foot.ini` therefore does not change new windows by itself. Verified on 2026-11-01: with the server up since before the edit, a new client reported 147x35 cells at both 16 and 24 pt in `foot.ini`, while `-o font=...:size=17.5` produced 137x32 in the same window. Any file-based size change requires `restart-terminals` or `foot-font -r`; restarting the server closes every open Foot window.
+- **Zoom keys:** `Alt+Shift+U` / `Alt+Shift+=` / `Ctrl+plus` / `Ctrl+=` / `Ctrl+KP_Add` grow by 0.5; `Alt+Shift+Y` / `Alt+Shift+-` / `Ctrl+minus` / `Ctrl+KP_Subtract` shrink by 0.5; `Ctrl+0` resets. Mouse-wheel zoom is bound to `none` so wheel chords stay pure scrollback.
+- **Scratchpads differ:** `scratch-term`, `scratch-notes`, and `dc-term` spawn through `~/.local/bin/scratch-toggle`, passing a per-client `-o font=` override. `scratch-notes` and `dc-term` use `SCRATCH_FONT_SIZE` (17 pt); the Ctrl+Space `scratch-term` uses `SCRATCH_TERM_FONT_SIZE` (16.5 pt). Both can be overridden in the environment without editing the script. Because the override is per client, the foot server does not need a restart, but an existing scratchpad client must be respawned (killing its `footclient`); hiding and re-showing keeps the old font.
+
+### Font changes must go through `foot-font`
+
+Use `~/.local/bin/foot-font` (`foot-font` alone prints the current value, `foot-font +0.5`, `foot-font 17`, `foot-font -r` after restarting the server). It writes `foot.ini`, the chezmoi copy, and then validates with `foot --check-config`.
+
+Invariant: `dot_config/sway/config.d/00-variables.conf` must keep a plain `set $term footclient` with no `-o font=` override. Behavior belongs to `foot.ini` so there is one source of truth. `foot-font` therefore only rewrites a `-o font=` override if one already exists on that line, and never injects a new one. Earlier versions spliced the generated override into the following comment line because the insertion regex used `\s+` (which consumed the newline), which produced an invalid `-o` Sway command; the rewrite now anchors on `[^\n]` and restores the variables file if `sway -C` reports a load error.

@@ -5,18 +5,18 @@
 export PATH="$HOME/.local/bin:$PATH"
 
 HINTS=$(cat <<'HINT_EOF'
-!yt  YouTube
-!aw  ArchWiki
-!gh  GitHub
-!w   Wikipedia
-!rd  Reddit
-!so  StackOverflow
-!a   Amazon
+!yt YouTube
+!aw ArchWiki
+!gh GitHub
+!w Wikipedia
+!rd Reddit
+!so StackOverflow
+!a Amazon
 !pdb ProtonDB
 !ddg DuckDuckGo
 !sdb SteamDB
-!fg  FitGirl Repacks
-!sr  SteamRIP
+!fg FitGirl Repacks
+!sr SteamRIP
 Google (Default)
 HINT_EOF
 )

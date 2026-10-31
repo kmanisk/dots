@@ -1,0 +1,26 @@
+#!/bin/sh
+# Ensure every Foot server client loads the currently generated theme palette.
+# The long-lived Foot server does not reload included color files at runtime.
+set -eu
+
+has_include=0
+prev=
+for arg in "$@"; do
+    case "$arg" in
+        --override=include=*|-o=include=*)
+            has_include=1
+            ;;
+        include=*)
+            if [ "$prev" = "-o" ] || [ "$prev" = "--override" ]; then
+                has_include=1
+            fi
+            ;;
+    esac
+    prev=$arg
+done
+
+if [ "$has_include" -eq 1 ]; then
+    exec /usr/bin/footclient "$@"
+fi
+
+exec /usr/bin/footclient -o "include=$HOME/.config/foot/foot-colors.ini" "$@"

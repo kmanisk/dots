@@ -1,20 +1,13 @@
 #!/usr/bin/env bash
-# Wallpaper genre menu (unbound; Win+Shift+W is the single wallpaper keybind)
+# Current-theme wallpaper menu. Unbound; keyboard wallpaper controls live in Sway.
 export PATH="$HOME/.local/bin:$PATH"
 
-options="🎲 Random\n🎮 Gaming\n💀 Creepy & Dark\n⬜ Minimal\n👾 Pixel Art\n🐧 Linux / Logos"
-chosen=$(echo -e "$options" | rofi -dmenu -i \
-    -sort \
-    -sorting-method "fzf" \
-    -matching "fuzzy" \
-    -p "Wallpaper genre" \
-    -theme "$HOME/.config/rofi/system-floating.rasi")
+options="Next\nPrevious\nRandom\nRefresh cache"
+chosen=$(echo -e "$options" | rofi -dmenu -i     -p "Theme wallpaper"     -theme "$HOME/.config/rofi/system-floating.rasi")
 
 case "$chosen" in
-    *"Random"*)  ~/.local/bin/random-wallpaper random ;;
-    *"Gaming"*)  ~/.local/bin/random-wallpaper gaming ;;
-    *"Creepy"*)  ~/.local/bin/random-wallpaper creepy ;;
-    *"Minimal"*) ~/.local/bin/random-wallpaper minimal ;;
-    *"Pixel"*)   ~/.local/bin/random-wallpaper pixel ;;
-    *"Linux"*)   ~/.local/bin/random-wallpaper linux ;;
+    "Next")          theme-wallpaper next ;;
+    "Previous")      theme-wallpaper prev ;;
+    "Random")        theme-wallpaper random ;;
+    "Refresh cache") theme-wallpaper refresh ;;
 esac

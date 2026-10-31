@@ -1,6 +1,8 @@
 # Omarchy-Style Theme System for Vanilla Sway — Design Doc
 
-> Goal: one-command, whole-desktop theme switching (`theme-switch <name>`)
+> **Status:** Historical design/specification. The implemented runtime is `theme-sync` + `theme-set`; current locking, hot-reload, and cache behavior is documented in `docs/theme/README.md` and `docs/theme/theme-implementation.md`. References below to `theme-switch` or future work are not current machine state.
+>
+> Original goal: one-command, whole-desktop theme switching (`theme-switch <name>`)
 > on vanilla Sway. No daemon, no desktop shell, no wallpaper-driven colors.
 
 ## Architecture (ported from Omarchy)

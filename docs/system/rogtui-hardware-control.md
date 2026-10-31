@@ -172,6 +172,12 @@ rogtui verifies hardware-supported modes prior to presenting options, preventing
 
 ---
 
+## Sway Integration and Read-Only Battery Display
+
+The Sway launcher keeps `rogtui` isolated from global terminal sizing: `Super + Alt + 4` starts `footclient --app-id=rogtui -o font="Iosevka Nerd Font Mono:size=15:style=Regular" $HOME/.local/bin/rogtui`, and `30-window-rules.conf` floats the window centered at 900x680. This is presentation-only and does not change rogtui's hardware-control behavior.
+
+Fastfetch's battery row now calls the one-shot `~/.local/bin/battery-meter` helper. It only reads `/sys/class/power_supply/BAT0/{capacity,status}` and renders a compact slider-style state-of-charge meter; it does not write the ASUS charge limit or invoke rogtui. Battery charging policy remains owned by the hardware-control paths documented above.
+
 ## Verification & Build Details
 
 ```bash

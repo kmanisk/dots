@@ -1,7 +1,7 @@
 # Unified Theme Engine Architecture & System Documentation
 
 > **Target Machine:** CachyOS rolling (BORE/EEVDF, x86-64-v3) · Sway / Wayland (with i3/X11 compatibility) · Fish / Zsh · Alacritty / Kitty · Zed  
-> **Philosophy:** Zero resident daemons, zero background polling watchers, sub-100ms atomic compilation, instantaneous IPC/POSIX signal hot-reloading, ephemeral sandboxing, and strict disk/memory minimalism.
+> **Philosophy:** Zero resident theming daemons, transactional compilation, palette-faithful normalization, ordered live reload, conservative deduplication, ephemeral import sandboxes, and strict disk/memory discipline.
 
 ---
 
@@ -13,12 +13,13 @@ The theme engine bridges Omarchy community themes, Base46/NvChad palettes, and d
 1. **Zero Resident Daemons:**
    - No background watchers, no cron polling loops, no memory-resident theming services.
    - Execution is purely on-demand: CLI invocation (`theme-set`, `omarchy-import`) or launcher (`rofi-theme`).
-2. **Sub-100ms Wall-Clock Switching:**
+2. **Fast, Ordered Wall-Clock Switching:**
    - Pre-rendered Schema 1 canonical JSON cache (`~/.cache/theme/themes/`).
    - Single-pass `/proc` process scan across all running applications.
-   - Total switch latency is typically **30ms – 80ms**.
-3. **Transactional Staged Compilation (`.next/`):**
-   - All templates are rendered into an isolated staging directory (`~/.local/state/theme/.next/`).
+   - Reload IPC is short-lived and bounded, but it is deliberately ordered instead of detached. On the live F16 workload measured 2026-11-01, same-theme runs averaged about **169ms with `--no-nvim`** and **247ms with the Base46 refresh enabled**.
+3. **Transactional Staged Compilation (`.next/`) with Single-Writer Locking:**
+   - `~/.local/state/theme/.lock` serializes every mutation with `fcntl.flock()`, including `--next` / `--prev` resolution.
+   - All templates are rendered into `~/.local/state/theme/.next/` while that lock is held.
    - Atomic promotion via `os.replace`. If any render fails or is zero-sized, zero live files are modified.
 4. **Disk Space Discipline & Ephemeral Sandboxing:**
    - Git repository imports clone shallowly (`--depth 1 --quiet`) into a temporary PID-isolated sandbox (`~/.cache/theme/import-tmp/{owner}_{repo}_{pid}`).
@@ -51,11 +52,13 @@ The theme engine bridges Omarchy community themes, Base46/NvChad palettes, and d
       ~/.cache/theme/themes/*.json  (Schema 1 Canonical Cache)
                 │
                 ▼
-      theme-set <name>  (<100ms execution)
+      theme-set <name>
+                │
+       fcntl mutation lock
                 │
   ┌─────────────┴────────────────────────┐
   ▼                                      ▼
-STAGE COMPILATION (.next/)             RUNTIME DISPATCH (IPC / Signals)
+STAGE COMPILATION (.next/)             ORDERED RUNTIME DISPATCH
 - Zed (nvchad-system.json)             - Zed: inotify touch (os.utime)
 - Alacritty (alacritty.toml)           - Sway: swaymsg client.* / bar
 - Sway (sway.conf)                     - Neovim: RPC domain socket eval
@@ -68,6 +71,8 @@ STAGE COMPILATION (.next/)             RUNTIME DISPATCH (IPC / Signals)
 ATOMIC PROMOTION (os.replace)
 ~/.local/state/theme/*
 ```
+
+`theme-sync` uses deterministic JSON ordering plus atomic write-if-changed semantics. It prunes generated cache/preview/NvChad artifacts whose source themes disappeared, preserves hand-written Neovim themes, and runs the conservative duplicate policy before exposing the picker catalog. `~/.cache/theme/dedup.json` records every suppressed entry and its canonical survivor.
 
 ---
 
@@ -149,8 +154,10 @@ All themes are compiled into a normalized, type-safe Schema 1 JSON format:
 }
 ```
 
-### Contrast Evaluation:
-Every theme undergoes WCAG 2.1 AA relative luminance testing (`contrast_ratio(bg, fg)`). If the ratio is below `4.5:1`, the engine issues a non-destructive audit warning without mutating the author's authentic colors.
+### Palette Fidelity and Contrast Enforcement:
+The canonical palette is author-first: syntax hues are never replaced with generic red/green/blue targets. For imported Omarchy themes, explicit semantic values from `colors.toml` are preserved under `authored.semantic` / `authored.base_30`, while generated compatibility aliases are never re-consumed as author input on later syncs.
+
+Readability adjustments are lightness-only, so hue and saturation remain theme-specific. The current invariants are: body foreground `>= 4.5:1`, syntax roles `>= 3.0:1`, focused Sway borders `>= 3.0:1`, and inactive/floating-window borders `>= 1.7:1` against the active background. Background luminance is authoritative for light/dark polarity when upstream metadata is wrong.
 
 ---
 
@@ -165,7 +172,7 @@ The engine does not require theme repositories to provide application-specific f
 | **Alacritty** | `~/.local/state/theme/alacritty.toml` | Inotify file watch on symlink target | Instant |
 | **Cava** | `~/.config/cava/config` (`[color]` section) | `SIGUSR2` POSIX signal to running PIDs | ~2ms |
 | **btop** | `~/.config/btop/themes/nvchad.theme` | `SIGUSR2` POSIX signal to running PIDs | ~2ms |
-| **Neovim** | Highlights via NvChad Base46 | Unix Domain Socket RPC (`nvim --server ...`) | ~12ms |
+| **Neovim** | Highlights via NvChad Base46 | Verified Unix Domain Socket RPC (`nvim --server ...`), with normal-startup headless cache repair when no live socket succeeds | Bounded |
 | **Yazi** | `~/.config/yazi/theme.toml` | Data Distribution Service (`ya emit-to 0 app:theme`) | ~4ms |
 | **Mako / Dunst** | `~/.config/mako/config` | `makoctl reload` / `dunstctl reload` | ~5ms |
 | **GTK 3 / 4** | `~/.config/gtk-3.0/gtk.css` | GSettings D-Bus broadcast | ~10ms |
@@ -204,14 +211,21 @@ The importer dynamically parses community repositories without imposing rigid di
 6. **Ghostty:** `ghostty.conf` / `ghostty-theme`.
 7. **Btop:** `btop.theme` (main_bg, title accent, selected_bg).
 
-### Cross-Source Semantic Enrichment:
-When an author distributes a theme without a master `colors.toml` (e.g. `ShehabShaef/omarchy-drac-theme`), the engine:
-- Extracts the primary palette from `alacritty.toml`.
-- Cross-enriches missing semantic tokens (like selection background `#033259` and foreground) from `kitty.conf` and `ghostty.conf`.
-- Extracts the signature accent (`#1e90ff` Drac Blue) from cursor and Btop title definitions.
-- Discovers wallpapers in `backgrounds/`, `wallpapers/`, or `wallpaper/`.
-- Extracts screenshot previews (`preview.png`, `theme-preview.*`) into `~/.cache/theme/previews/`.
-- **Wipes the temporary clone directory immediately upon completion.**
+### Cross-Source Semantic Enrichment and Gallery Reconciliation:
+When an author distributes a theme without a master `colors.toml`, the engine extracts the strongest available terminal/TUI palette and cross-enriches missing cursor, selection, foreground, accent, wallpaper, and preview data. When `colors.toml` exists, its semantic background/foreground levels, accent, selection, muted color, and `active_border_color` take precedence. Temporary clones are wiped immediately after passive parsing.
+
+`omarchy-import --catalog` prefers Omarchy's published validated registry catalog and checks out each registry-pinned commit when that endpoint is reachable. If the registry CDN is unavailable, it falls back to the current `omarchy.org/themes` gallery and repository HEAD, then to legacy endpoints only as a last resort. The importer canonicalizes one local JSON file per repository, removes imports no longer listed, and mirrors the resulting imported directory back into chezmoi. A dead catalog link is reported as unreachable and is not silently replaced by a third-party mirror. During the 2026-11-01 live reconciliation the registry hostname did not resolve from this machine, so the gallery fallback was used: 233 entries were listed, 232 were reachable/imported, and `ankur311sudo/gruvu` returned repository-not-found.
+
+### Theme Wallpaper Sets
+
+Community wallpaper discovery is metadata-only during catalog import: each theme records at most **5** deterministic image paths from its own repository, preferring the canonical `backgrounds/` directory and deprioritizing old, alternate, portrait, or vertical archives. This keeps the catalog small and prevents eager download of hundreds of large images. The 2026-11-01 live catalog has wallpaper candidates for all 232 reachable community themes. The same metadata is attached to 21 of the 22 locally maintained official Omarchy built-ins from `omacom/omarchy/themes/<name>/backgrounds/`; the legacy local `omarchy-osaka-jade` has no exact current upstream directory and is intentionally left without unrelated wallpaper metadata.
+
+`theme-wallpaper` fetches image bytes only when requested. Importing or applying a theme never starts a wallpaper download. On first explicit use it fetches up to five pinned GitHub assets through libcurl's bounded parallel transfer path, validates PNG/JPEG/WebP payloads and the 50 MiB/file cap, and falls back to the Python downloader only for failed files. A per-theme `flock` prevents duplicate first-use fetches from rapid hotkeys. Files are cached under `~/.cache/theme/wallpapers/<theme>/`, and the selected filename is remembered under `~/.local/state/theme/wallpaper/<theme>`. Ordinary `theme-set` remains network-free; when a cached selection exists it restores that wallpaper and updates `~/.config/current_wallpaper` for session restart persistence.
+
+Sway controls mirror the Omarchy background workflow without a resident service:
+- `Win + Shift + W`, `Alt + Shift + W`, or `Win + Ctrl + W`: next wallpaper for the active theme; first use fetches its <=5-image set.
+- `Win + Ctrl + Shift + W`: previous wallpaper.
+- The retired `ds3-wallpaper` helper is not used by the theme system; the old static DS3 image pack may remain on disk as ordinary images.
 
 ---
 
@@ -244,6 +258,24 @@ thset <theme>                       # alias for theme-set (supports tab-completi
 thls                                # alias for theme-ls
 thmenu                              # alias for rofi-theme
 thsync                              # alias for theme-sync
+```
+
+### Theme Wallpapers:
+```bash
+# Current theme: first call fetches up to five upstream images, later calls are local
+theme-wallpaper next
+theme-wallpaper prev
+theme-wallpaper random
+
+# Inspect/cache a specific theme without changing the desktop
+theme-wallpaper list japan-night
+theme-wallpaper fetch japan-night
+
+# Select a specific cached slot (1..5)
+theme-wallpaper set 3 japan-night
+
+# Re-fetch the current pinned candidate set after an upstream refresh
+theme-wallpaper refresh japan-night
 ```
 
 ### Importing Omarchy Themes:
@@ -279,78 +311,44 @@ theme-doctor
 
 ---
 
-## 7. Performance & Verification Metrics
+## 7. Current Verification Metrics
+
+Verified on 2026-11-01 after gallery reconciliation and full recompilation:
 
 ```text
-Theme Sources
-  Schema:                 1
-  Omarchy imported:       169 (official catalog)
-  Base46 (NvChad):        97 (core lua)
-  Custom themes:          23
-  ──────────────────────────────
-  Total compiled:         290
+Source files present:         351
+  Omarchy community imports: 232 reachable repositories
+  Base46 source themes:       97
+  Built-in/custom themes:     22
+Canonical inputs compiled:    350
+Pre-dedupe cache names:       347
 
-Switch Wall-Clock Time:   32ms – 74ms
-Background Daemons:       0 (Zero memory / CPU footprint)
-Hardware Display Vibrance: Active on eDP-1 (NVKMS direct ioctl via nvibrant / CTM in Hybrid)
-vkBasalt Latency:         0ms (Disabled, ENABLE_VKBASALT=0)
-Disk Overhead:            0MB lingering (All clone sandboxes auto-wiped)
+Exposed unique themes:        327
+Suppressed exact/near copies: 20
+Schema/contrast validation:   327 passed, 0 warnings, 0 failures
+Resident theming daemons:     0
+```
+
+A full mathematical audit over every exposed theme measured these worst-case ratios:
+
+```text
+Body foreground:       4.513:1  (required >= 4.5)
+Syntax roles:           3.002:1  (required >= 3.0)
+Semantic/focused border:3.001:1  (required >= 3.0)
+Inactive border:        1.700:1  (required >= 1.7)
+```
+
+Synthwave '84 is a regression reference for palette identity: accent `#ff00ff`, its nominal Base16 green role remains purple (`#8f00ff`), and its purple role remains `#ff00ff`; the engine does not inject a generic green hue.
 
 ---
 
-## 8. Palette Similarity / Duplicate Audit (2026-10-18)
+## 8. Duplicate Policy
 
-Method: 16-color `base_16` palettes from `~/.cache/theme/themes/*.json`, compared only
-dark-to-dark / light-to-light, mean Euclidean RGB distance per pair.
-Scale: 0 = identical palettes; typical unrelated-theme gap = 60-110; < 30 = variant of
-the same palette. Auditor: `theme-dup-audit` (installed ~/.local/bin, schema-1 aware,
-union-find clustering at distance < 30). Pre-removal fleet: 292 full-palette themes.
+The picker/cache exposes only unique or materially distinct themes; source definitions remain available for provenance and reproducible recompilation. `theme-sync` writes the suppression manifest to `~/.cache/theme/dedup.json`, and `theme-dup-audit` reports both suppressed entries and the closest surviving same-family pairs.
 
-### Removals Performed
-- `omarchy-flat-dracula` — REMOVED 2026-10-18 (engine `theme-rm`, cache rebuilt; chezmoi
-  81ca2c5). Palette is byte-identical to `omarchy-dracula` (distance 0.0). Canonical
-  survivor: `omarchy-dracula`. Fleet after removal: 291 entries. Remaining draculas
-  (`chadracula`, `chadracula-evondev`) are distinct palettes, not duplicates.
+A theme is suppressed when either condition holds:
 
-### Void / cthulhu Example (Refuted)
-`void` vs `omarchy-cthulhu-colour-out-of-space` = 76.0 — clearly distinct; `void` has no
-same-type neighbor within 45 distance anywhere in the fleet. Keep it. The cthulhu
-variants are near-duplicates of each other instead (25.5 - 29.7). Note: the picker sorts
-the active theme to the top, which can make unrelated entries look related.
+1. **Exact duplicate:** same full Base16 palette and same light/dark type.
+2. **Near duplicate:** same normalized theme family and light/dark type with mean per-color RGB distance `<= 70`. Cosmetic family suffixes such as `-pro`, `-moon`, and `-oled` are normalized; meaningful identities such as `gruvbox-material` and `kanagawa-dragon` are not collapsed into their base families.
 
-### Retained Variant Clusters (documented, intentionally not removed)
-Clusters closer than 30.0 (members shown with provider):
-
-| Size | Cluster | Distances |
-| :--- | :--- | :--- |
-| 5 | catppuccin(base46) \| omarchy-catppuccin(custom) \| omarchy-catppuccin-dark(omarchy) \| omarchy-rainynight(omarchy) \| pastelDark(base46) | 19-32 |
-| 4 | everforest(base46) \| omarchy-everforest(custom) \| omarchy-gruvbox(custom) \| omarchy-gruvbox-material(omarchy) | 25-28 |
-| 3 | omarchy-blood-and-bone \| omarchy-kanagawa-dragon \| omarchy-terminus (all omarchy) | 27-30 |
-| 3 | omarchy-cthulhu-colour-out-of-space [ACTIVE 2026-10-18] \| omarchy-cthulhu-deep-one \| omarchy-cthulhu-rlyeh (all omarchy) | 25-30 |
-| 2 | doomchad \| onedark (base46) | 22.3 |
-| 2 | omarchy-dune-messiah \| omarchy-quattrocento-light (omarchy) | 26.4 |
-| 2 | omarchy-futurist \| omarchy-oligarchy (omarchy) | 28.0 |
-| 2 | omarchy-gand \| omarchy-theme-year-linux-desktop (omarchy) | 27.2 |
-| 2 | omarchy-ghost-pastel \| omarchy-hermarchy (omarchy) | 28.4 |
-| 2 | omarchy-nord(custom) \| onenord(base46) | 26.7 |
-| 2 | omarchy-one-dark \| omarchy-one-dark-pro (omarchy) | 19.7 |
-| 2 | omarchy-periphery \| omarchy-starsend (omarchy) | 20.7 |
-| 2 | omarchy-rose-pine-dark \| omarchy-rose-pine-moon (omarchy) | 27.9 |
-| 2 | omarchy-tokyo-night(custom) \| omarchy-tokyoled(omarchy) | 20.2 |
-| 2 | rxyhn \| yoru (base46) | 16.5 |
-| 2 | sweetpastel \| tundra (base46) | 27.0 |
-
-Borderline pairs (30-32, review later): decay/jabuti (31.0), catppuccin/sweetpastel
-(31.8), everblush/vscode_dark (31.4), catppuccin(base46)/omarchy-catppuccin (31.5).
-
-Pairs like one-dark/one-dark-pro and rose-pine-dark/moon are intentional upstream
-variants; most ecosystems keep both. Judgment call per cluster: exact-duplicate palette-level redundancy is safe to prune;
-family variants usually earn their spot.
-
-### Pruning Workflows
-- Single: `theme-rm <name> --force`
-- Interactive multi-select: `theme-ls | fzf -m | theme-rm`
-- Inside picker: `rofi-theme`, select, Ctrl+D (active theme is immune)
-- After manual deletion of source JSON, run the engine remover so manifest + cache stay
-  synchronized; raw rm is never sufficient (compiled cache lives in ~/.cache/theme).
-```
+The 2026-11-01 fleet suppresses 20 exact/near copies. Remaining same-family pairs that exceed the threshold stay visible as real variants. The source files are not destructively deleted merely because the generated picker hides a duplicate; this prevents upstream Base46 or community sources from being damaged and makes the decision fully reversible from the manifest.

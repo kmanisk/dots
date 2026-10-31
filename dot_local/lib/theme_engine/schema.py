@@ -44,10 +44,6 @@ def hls_to_hex(h, l, s):
     r, g, b = colorsys.hls_to_rgb(h % 1.0, max(0.0, min(1.0, l)), max(0.0, min(1.0, s)))
     return rgb_to_hex(r * 255, g * 255, b * 255)
 
-def hue_distance(h1, h2):
-    diff = abs(h1 - h2) % 360.0
-    return min(diff, 360.0 - diff)
-
 def srgb_channel_to_linear(c):
     c_norm = c / 255.0
     if c_norm <= 0.04045:
@@ -70,71 +66,24 @@ def contrast_ratio(h1, h2):
     return (lighter + 0.05) / (darker + 0.05)
 
 
-def disambiguate_syntax(b16, is_dark=True):
-    """
-    Intelligently disambiguates collapsed or monochromatic syntax colors.
-    Preserves the author's authentic saturation and luminance profile, ensuring
-    roles (keywords, functions, strings, classes, constants) are distinct and readable
-    without picking garish or clashing opposites.
-    """
-    syntax_roles = {
-        "BASE08": ("red", 0),
-        "BASE09": ("orange", 28),
-        "BASE0A": ("yellow", 48),
-        "BASE0B": ("green", 145),
-        "BASE0C": ("cyan", 192),
-        "BASE0D": ("blue", 222),
-        "BASE0E": ("purple", 265),
-        "BASE0F": ("pink", 320),
-    }
+def ensure_contrast(color, background, min_ratio=3.0):
+    """Raise contrast by changing lightness only; preserve the authored hue."""
+    color = clean_hex(color)
+    background = clean_hex(background)
+    if contrast_ratio(color, background) >= min_ratio:
+        return color
 
-    hues = {}
-    lums = []
-    sats = []
-    for k in syntax_roles:
-        val = b16.get(k)
-        if val:
-            h, l, s = hex_to_hls(val)
-            hues[k] = h * 360.0
-            if s > 0.12:
-                lums.append(l)
-                sats.append(s)
-
-    avg_l = sum(lums) / len(lums) if lums else (0.75 if is_dark else 0.40)
-    avg_s = sum(sats) / len(sats) if sats else 0.70
-
-    target_l = max(0.65, min(0.85, avg_l)) if is_dark else max(0.30, min(0.50, avg_l))
-    target_s = max(0.50, min(0.85, avg_s))
-
-    new_b16 = dict(b16)
-
-    # 1. Orange (BASE09) vs Red (BASE08):
-    if hue_distance(hues.get("BASE08", 0), hues.get("BASE09", 28)) < 18:
-        new_b16["BASE09"] = hls_to_hex(28 / 360.0, target_l, target_s)
-
-    # 2. Yellow/Classes (BASE0A):
-    h_0a = hues.get("BASE0A", 48)
-    if (180 <= h_0a <= 300) or hue_distance(h_0a, hues.get("BASE08", 0)) < 18:
-        new_b16["BASE0A"] = hls_to_hex(48 / 360.0, target_l, target_s)
-
-    # 3. Green/Strings (BASE0B):
-    h_0b = hues.get("BASE0B", 145)
-    if (200 <= h_0b <= 300) or hue_distance(h_0b, hues.get("BASE0A", 48)) < 18:
-        new_b16["BASE0B"] = hls_to_hex(145 / 360.0, target_l, target_s * 0.85)
-
-    # 4. Cyan/Regex (BASE0C) vs Blue (BASE0D):
-    if hue_distance(hues.get("BASE0C", 192), hues.get("BASE0D", 222)) < 18:
-        new_b16["BASE0C"] = hls_to_hex(192 / 360.0, target_l, target_s)
-
-    # 5. Blue/Functions (BASE0D) vs Purple/Keywords (BASE0E):
-    if hue_distance(hues.get("BASE0D", 222), hues.get("BASE0E", 265)) < 18:
-        new_b16["BASE0D"] = hls_to_hex(222 / 360.0, target_l, target_s)
-
-    # 6. Pink/Brown (BASE0F) vs Purple (BASE0E):
-    if hue_distance(hues.get("BASE0F", 320), hues.get("BASE0E", 265)) < 18:
-        new_b16["BASE0F"] = hls_to_hex(320 / 360.0, target_l, target_s * 0.85)
-
-    return new_b16
+    h, l, s = hex_to_hls(color)
+    bg_lum = relative_luminance(background)
+    direction = 1.0 if bg_lum < 0.35 else -1.0
+    best = color
+    for step in range(1, 51):
+        candidate_l = max(0.0, min(1.0, l + direction * step * 0.02))
+        candidate = hls_to_hex(h, candidate_l, s)
+        best = candidate
+        if contrast_ratio(candidate, background) >= min_ratio:
+            return candidate
+    return best
 
 
 def sanitize_surface_palette(b16, accent, is_dark=True):
@@ -278,13 +227,16 @@ def synthesize_derived(palette, theme_type="dark"):
     }
 
     # Synthesize first-class semantic tokens
+    # Borders are structural affordances, so they need visible separation from
+    # the window background while retaining the theme's own accent hue.
+    border = ensure_contrast(accent, bg, min_ratio=3.0)
     semantic = {
         "background": bg,
         "surface": darker_bg,
         "surface_alt": selection,
         "foreground": fg,
         "muted": muted,
-        "border": line_val,
+        "border": border,
         "accent": accent,
         "selection": selection,
         "error": c_red,
@@ -336,6 +288,12 @@ def normalize_theme(raw, default_name=None, default_provider="custom"):
     Maintains top-level aliases for zero-breakage backward compatibility.
     """
     schema_version = raw.get("schema", 1)
+    canonical_input = (
+        schema_version == 1
+        and isinstance(raw.get("palette"), dict)
+        and isinstance(raw.get("derived"), dict)
+    )
+    authored = raw.get("authored") if isinstance(raw.get("authored"), dict) else {}
     name = raw.get("name") or default_name or "unnamed-theme"
     display_name = raw.get("display_name") or raw.get("id") or name
     theme_type = raw.get("type", "dark")
@@ -364,6 +322,10 @@ def normalize_theme(raw, default_name=None, default_provider="custom"):
         is_dark = True
     elif relative_luminance(bg_candidate) >= 0.45:
         is_dark = False
+    # The palette is authoritative when upstream metadata is absent or wrong.
+    # Several community themes label light palettes as dark; persisting that
+    # stale label makes runtime contrast correction move in the wrong direction.
+    theme_type = "dark" if is_dark else "light"
 
     # Fill any missing Base16 slots with polarity-aware sensible defaults
     if len(b16) < 16:
@@ -383,9 +345,15 @@ def normalize_theme(raw, default_name=None, default_provider="custom"):
             if k not in b16:
                 b16[k] = v
 
-    raw_b30 = raw.get("base_30", {}) if isinstance(raw.get("base_30"), dict) else {}
-    if not raw_b30 and "derived" in raw and isinstance(raw["derived"], dict):
-        raw_b30 = raw["derived"].get("base_30", {})
+    # Canonical Schema 1 files contain compatibility aliases (`base_30`,
+    # `semantic`) generated by us. Re-consuming those aliases as authored input
+    # makes normalization non-idempotent and gradually distorts a palette. Only
+    # raw source inputs (Base46 or freshly parsed theme repos) may seed Base30.
+    raw_b30 = {}
+    if canonical_input and isinstance(authored.get("base_30"), dict):
+        raw_b30 = authored.get("base_30", {})
+    elif not canonical_input and isinstance(raw.get("base_30"), dict):
+        raw_b30 = raw.get("base_30", {})
 
     # Priority for signature UI accent:
     # 1. folder_bg (brand UI color explicitly chosen by theme author)
@@ -413,9 +381,16 @@ def normalize_theme(raw, default_name=None, default_provider="custom"):
         elif raw_b30.get("baby_pink"): b16["BASE0F"] = clean_hex(raw_b30["baby_pink"])
         if raw_b30.get("white"): b16["BASE07"] = clean_hex(raw_b30["white"])
 
-    # Disambiguate collapsed monochromatic syntax and guard surfaces against polarity inversion
-    b16 = disambiguate_syntax(b16, is_dark=is_dark)
+    # Preserve the author's syntax hues exactly. Structural surface slots are
+    # polarity-guarded, then readability is improved by changing lightness only.
+    # No generic replacement hues are injected into the palette.
     b16 = sanitize_surface_palette(b16, accent, is_dark=is_dark)
+    b16["BASE04"] = ensure_contrast(b16["BASE04"], b16["BASE00"], min_ratio=3.0)
+    b16["BASE05"] = ensure_contrast(b16["BASE05"], b16["BASE00"], min_ratio=4.5)
+    b16["BASE06"] = ensure_contrast(b16["BASE06"], b16["BASE00"], min_ratio=4.5)
+    b16["BASE07"] = ensure_contrast(b16["BASE07"], b16["BASE00"], min_ratio=4.5)
+    for syntax_key in ("BASE08", "BASE09", "BASE0A", "BASE0B", "BASE0C", "BASE0D", "BASE0E", "BASE0F"):
+        b16[syntax_key] = ensure_contrast(b16[syntax_key], b16["BASE00"], min_ratio=3.0)
 
     palette = {
         "accent": accent,
@@ -425,23 +400,35 @@ def normalize_theme(raw, default_name=None, default_provider="custom"):
     # 2. Derive synthesized Base30 and Semantic tokens
     derived = synthesize_derived(palette, theme_type=theme_type)
 
-    # If the author provided custom semantic overrides (e.g. from rich colors.toml), merge them with polarity protection
-    if default_provider != "base46" and "semantic" in raw and isinstance(raw["semantic"], dict):
-        for k, v in raw["semantic"].items():
+    # Fresh importer inputs can carry explicit semantic values from colors.toml.
+    # Once normalized, those values live under `authored.semantic`; generated
+    # compatibility aliases are never treated as authored input on the next sync.
+    semantic_input = authored.get("semantic") if canonical_input else raw.get("semantic")
+    if default_provider != "base46" and isinstance(semantic_input, dict):
+        for k, v in semantic_input.items():
             if HEX_RE.match(str(v)):
                 val = clean_hex(str(v))
                 if k in ("surface", "surface_alt", "selection"):
                     l_val = relative_luminance(val)
                     if is_dark and l_val > 0.25:
-                        continue  # Skip inverted surface override
-                    elif not is_dark and l_val < 0.35:
-                        continue  # Skip inverted surface override
+                        continue
+                    if not is_dark and l_val < 0.35:
+                        continue
                 derived["semantic"][k] = val
 
-    # If the author provided custom base_30 overrides, merge them without erasing fallbacks, with polarity protection
-    if "base_30" in raw and isinstance(raw["base_30"], dict):
+    # Structural borders must remain discoverable even when an upstream theme
+    # publishes a border color that is too close to its background.
+    derived["semantic"]["border"] = ensure_contrast(
+        derived["semantic"].get("border", accent),
+        b16["BASE00"],
+        min_ratio=3.0,
+    )
+
+    # Raw source Base30 values and explicitly preserved authored Base30 values
+    # may override the synthesized view; generated compatibility aliases may not.
+    if raw_b30:
         surface_keys = {"black2", "one_bg", "one_bg2", "one_bg3", "line", "lightbg", "pmenu_bg", "statusline_bg", "darker_black"}
-        for k, v in raw["base_30"].items():
+        for k, v in raw_b30.items():
             if HEX_RE.match(str(v)):
                 val = clean_hex(str(v))
                 if k in surface_keys:
@@ -503,6 +490,10 @@ def normalize_theme(raw, default_name=None, default_provider="custom"):
         "type": theme_type,
         "accent": accent,
         "source": source_meta,
+        "authored": {
+            **({"semantic": dict(semantic_input)} if isinstance(semantic_input, dict) and semantic_input else {}),
+            **({"base_30": dict(raw_b30)} if raw_b30 else {}),
+        },
         "capabilities": caps,
         "palette": palette,
         "derived": derived,

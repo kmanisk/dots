@@ -3,7 +3,7 @@
 theme-set: Minimal, robust Base46 system theme compiler.
 Staged atomic file replacement, live IPC/RPC/signals where supported,
 zero resident processes / daemons / watchers.
-Optimized for <150ms execution.
+Optimized for low-latency verified reloads without detached background work.
 """
 import os
 import sys
@@ -15,6 +15,8 @@ import tempfile
 import math
 import colorsys
 import signal
+import fcntl
+from contextlib import contextmanager
 
 
 STATE_DIR = os.path.expanduser("~/.local/state/theme")
@@ -23,8 +25,113 @@ TEMPLATES_DIR = os.path.expanduser("~/.config/theme/templates")
 HOOKS_DIR = os.path.expanduser("~/.config/theme/hooks.d")
 QT5_COLOR_FILE = os.path.expanduser("~/.config/qt5ct/colors/nvchad.conf")
 QT6_COLOR_FILE = os.path.expanduser("~/.config/qt6ct/colors/nvchad.conf")
+LOCK_FILE = os.path.join(STATE_DIR, ".lock")
+WALLPAPER_CACHE_DIR = os.path.expanduser("~/.cache/theme/wallpapers")
+WALLPAPER_STATE_DIR = os.path.join(STATE_DIR, "wallpaper")
+CURRENT_WALLPAPER_FILE = os.path.expanduser("~/.config/current_wallpaper")
+WALLPAPER_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 
 os.makedirs(STATE_DIR, exist_ok=True)
+
+@contextmanager
+def theme_mutation_lock():
+    """Serialize theme mutations so rapid switches cannot share staging state."""
+    with open(LOCK_FILE, "a+", encoding="utf-8") as lock_file:
+        os.chmod(LOCK_FILE, 0o600)
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+def run_ipc(cmd, label, timeout=1.0):
+    """Run a short-lived reload command synchronously so switches stay ordered."""
+    try:
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=timeout,
+            check=False,
+        )
+        if result.returncode != 0:
+            print(f"[WARN] {label} exited with status {result.returncode}", file=sys.stderr)
+            return False
+        return True
+    except Exception as exc:
+        print(f"[WARN] {label} failed: {exc}", file=sys.stderr)
+        return False
+
+def reload_nvim_socket(sock, name, timeout=1.5):
+    """Apply a Base46 theme to one live NvChad socket and surface Lua failures."""
+    lua_code = (
+        'luaeval("(function() '
+        'vim.g.system_theme_sync = true; '
+        'local ok, err = xpcall(function() '
+        f"require(\'nvconfig\').base46.theme = \'{name}\'; "
+        f"package.loaded[\'themes.{name}\'] = nil; "
+        f"package.loaded[\'base46.themes.{name}\'] = nil; "
+        "require('base46').load_all_highlights(); "
+        "end, debug.traceback); "
+        "vim.g.system_theme_sync = false; "
+        "return ok and 'OK' or ('ERR:' .. tostring(err)) "
+        'end)()")'
+    )
+    try:
+        result = subprocess.run(
+            ["nvim", "--server", sock, "--remote-expr", lua_code],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except Exception as exc:
+        print(f"[WARN] Neovim RPC {os.path.basename(sock)} failed: {exc}", file=sys.stderr)
+        return False
+
+    output = result.stdout.strip()
+    if result.returncode == 0 and output == "OK":
+        return True
+
+    detail = output or result.stderr.strip() or f"exit status {result.returncode}"
+    print(f"[WARN] Neovim RPC {os.path.basename(sock)}: {detail}", file=sys.stderr)
+    return False
+
+
+def refresh_nvim_disk_cache(name, timeout=2.5):
+    """Compile Base46 cache through normal NvChad startup when no live socket can."""
+    # `nvim --headless -l -` skips normal init loading, so nvconfig/base46 are not
+    # available there. Use a normal headless startup and turn Lua failure into
+    # `cquit 1` because Neovim otherwise exits 0 even after a command-line error.
+    lua_cmd = (
+        "lua local ok,err=xpcall(function() "
+        f"require('nvconfig').base46.theme='{name}'; "
+        f"package.loaded['themes.{name}']=nil; "
+        f"package.loaded['base46.themes.{name}']=nil; "
+        "require('base46').load_all_highlights() "
+        "end,debug.traceback); "
+        "if not ok then io.stderr:write(tostring(err)..'\\n'); vim.cmd('cquit 1') end"
+    )
+    try:
+        result = subprocess.run(
+            ["nvim", "--headless", "-c", lua_cmd, "-c", "qa!"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except Exception as exc:
+        print(f"[WARN] Neovim Base46 cache refresh failed: {exc}", file=sys.stderr)
+        return False
+
+    if result.returncode == 0:
+        return True
+    detail = result.stderr.strip() or result.stdout.strip() or f"exit status {result.returncode}"
+    print(f"[WARN] Neovim Base46 cache refresh: {detail}", file=sys.stderr)
+    return False
+
 
 def write_atomic(filepath, content):
     """Safely write content to filepath atomically via os.replace."""
@@ -34,6 +141,33 @@ def write_atomic(filepath, content):
         tf.write(content)
         temp_name = tf.name
     os.replace(temp_name, filepath)
+
+
+def cached_theme_wallpaper(name):
+    """Return the remembered cached wallpaper for a theme, without networking."""
+    directory = os.path.join(WALLPAPER_CACHE_DIR, name)
+    if not os.path.isdir(directory):
+        return None
+    images = sorted(
+        os.path.join(directory, entry)
+        for entry in os.listdir(directory)
+        if os.path.splitext(entry)[1].lower() in WALLPAPER_EXTENSIONS
+        and os.path.isfile(os.path.join(directory, entry))
+    )[:5]
+    if not images:
+        return None
+
+    state_path = os.path.join(WALLPAPER_STATE_DIR, name)
+    try:
+        selected = open(state_path, "r", encoding="utf-8").read().strip()
+    except OSError:
+        selected = ""
+    if selected:
+        candidate = os.path.join(directory, selected)
+        if candidate in images and os.path.isfile(candidate):
+            return candidate
+    return images[0]
+
 
 def get_available_themes():
     files = glob.glob(os.path.join(CACHE_DIR, "*.json"))
@@ -240,10 +374,21 @@ def normalize_palette(theme_data, name):
         if relative_luminance(bg2) < 0.40:
             bg2 = blend_colors(bg, "#000000", 0.04)
 
-    # Smart contrast adjustment: WCAG AA is 4.5:1 for body text
-    # Non-destructive: if authentic fg already meets 4.5:1, it is kept 100% authentic
+    # Smart contrast adjustment: WCAG AA is 4.5:1 for body text.
+    # Syntax/UI colors use the 3.0:1 non-text floor. Keep the authored hue and
+    # change lightness only when a base_30 alias would otherwise undo the
+    # Schema 1 contrast correction (for example white syntax on a white theme).
     smart_fg = ensure_contrast(raw_fg, bg, min_ratio=4.5, is_dark=is_dark)
     bright_fg = ensure_contrast(b30.get("white", smart_fg), bg, min_ratio=7.0, is_dark=is_dark)
+    true_red = ensure_contrast(true_red, bg, min_ratio=3.0, is_dark=is_dark)
+    true_orange = ensure_contrast(true_orange, bg, min_ratio=3.0, is_dark=is_dark)
+    true_yellow = ensure_contrast(true_yellow, bg, min_ratio=3.0, is_dark=is_dark)
+    true_green = ensure_contrast(true_green, bg, min_ratio=3.0, is_dark=is_dark)
+    true_cyan = ensure_contrast(true_cyan, bg, min_ratio=3.0, is_dark=is_dark)
+    true_blue = ensure_contrast(true_blue, bg, min_ratio=3.0, is_dark=is_dark)
+    true_purple = ensure_contrast(true_purple, bg, min_ratio=3.0, is_dark=is_dark)
+    true_pink = ensure_contrast(true_pink, bg, min_ratio=3.0, is_dark=is_dark)
+    true_teal = ensure_contrast(true_teal, bg, min_ratio=3.0, is_dark=is_dark)
 
     # Smart selection foreground against accent:
     accent_lum = relative_luminance(accent)
@@ -316,13 +461,20 @@ def normalize_palette(theme_data, name):
     if "white" not in r:
         r["white"] = smart_fg
 
-    # Add semantic tokens
+    # Add semantic tokens. Window borders get dedicated visibility-safe roles:
+    # focused >= 3:1 against the window background; inactive >= 1.7:1 while
+    # retaining the same theme hue instead of falling back to generic grey.
     semantic = theme_data.get("derived", {}).get("semantic", {}) or theme_data.get("semantic", {})
     for k, v in semantic.items():
         r[f"semantic_{k}"] = v
+    border_seed = semantic.get("border") or accent
+    border_focus = ensure_contrast(border_seed, bg, min_ratio=3.0, is_dark=is_dark)
+    border_muted = ensure_contrast(blend_colors(bg, accent, 0.32), bg, min_ratio=1.7, is_dark=is_dark)
+    r["border_focus"] = border_focus
+    r["border_muted"] = border_muted
     r["semantic_background"] = bg
     r["semantic_foreground"] = smart_fg
-    r["semantic_border"] = accent
+    r["semantic_border"] = border_focus
     r["semantic_accent"] = accent
     r["semantic_error"] = true_red
     r["semantic_warning"] = true_yellow
@@ -622,67 +774,55 @@ def apply_theme(name, no_nvim=False):
     # Single-pass /proc scan to discover all relevant processes at once
     procs = scan_running_processes({"sway", "btop", "dunst", "mako", "yazi", "cava", "kitty", "legendary-tui", "foot", "footclient"})
 
-    # Neovim RPC (system -> all live NvChad instances via their sockets)
-    # NvChad spawns an --embed child that owns the socket; that child responds to RPC.
-    # We must NOT filter out --embed sockets — they are the correct targets.
-    # Only skip sockets whose PID is gone from /proc (stale/dead socket files).
+    # Neovim RPC (system -> all live NvChad instances via their sockets).
+    # A successful live reload also compiles Base46's disk cache, so avoid a
+    # redundant headless compile. If no live socket succeeds, compile once
+    # headlessly. Mark the cache current only after a verified compile.
     if not no_nvim:
-        import threading
         runtime_dir = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
-        nvim_sockets = glob.glob(os.path.join(runtime_dir, "nvim.*"))
-        lua_code = (
-            f"luaeval(\"(_G.theme_sync or function() "
-            f"vim.g.system_theme_sync = true; "
-            f"pcall(function() require('nvconfig').base46.theme = '{name}' end); "
-            f"pcall(function() require('base46').load_all_highlights() end); "
-            f"vim.g.system_theme_sync = false; "
-            f"return 1 end)()\")"
-        )
-
-        def _rpc_one(sock):
-            try:
-                subprocess.run(
-                    ["nvim", "--server", sock, "--remote-expr", lua_code],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=2.0
-                )
-            except Exception:
-                pass
-
-        for sock in nvim_sockets:
-            # Skip sockets whose PID no longer exists (stale socket file)
+        nvim_sockets = []
+        for sock in glob.glob(os.path.join(runtime_dir, "nvim.*")):
             base = os.path.basename(sock)
             parts = base.split(".")
-            if len(parts) >= 2 and parts[1].isdigit():
-                pid = parts[1]
-                if not os.path.exists(f"/proc/{pid}"):
-                    continue  # dead socket, skip
-            # Fire RPC in background thread — don't block theme-set execution
-            t = threading.Thread(target=_rpc_one, args=(sock,), daemon=True)
-            t.start()
+            if len(parts) >= 2 and parts[1].isdigit() and not os.path.exists(f"/proc/{parts[1]}"):
+                continue
+            nvim_sockets.append(sock)
 
-        # Pre-compile base46 disk cache in background so future Neovim launches load the active theme immediately
-        try:
-            cache_theme_file = os.path.expanduser("~/.local/share/nvim/base46/current_theme")
-            os.makedirs(os.path.dirname(cache_theme_file), exist_ok=True)
-            with open(cache_theme_file, "w") as f:
-                f.write(f"{name}\n")
-            subprocess.Popen(
-                ["nvim", "--headless", "-c", f"lua pcall(function() require('nvconfig').base46.theme = '{name}'; require('base46').load_all_highlights() end)", "-c", "q"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True
+        live_success = False
+        failed_sockets = []
+        for sock in nvim_sockets:
+            if reload_nvim_socket(sock, name):
+                live_success = True
+            else:
+                failed_sockets.append(sock)
+
+        cache_ready = live_success or refresh_nvim_disk_cache(name)
+
+        # A successful socket has already produced a valid shared disk cache.
+        # Retry any lagging socket once now that the cache is known-good.
+        if cache_ready and failed_sockets:
+            for sock in failed_sockets:
+                reload_nvim_socket(sock, name, timeout=2.0)
+
+        cache_theme_file = os.path.expanduser("~/.local/share/nvim/base46/current_theme")
+        if cache_ready:
+            try:
+                os.makedirs(os.path.dirname(cache_theme_file), exist_ok=True)
+                write_atomic(cache_theme_file, f"{name}\n")
+            except Exception as exc:
+                print(f"[WARN] Neovim cache marker update failed: {exc}", file=sys.stderr)
+        else:
+            print(
+                "[WARN] Neovim theme cache was not refreshed; leaving its marker stale so startup will retry",
+                file=sys.stderr,
             )
-        except Exception:
-            pass
 
     # Sway IPC: live client borders and swaybar colors (single batched command)
     if procs["sway"]:
         sway_cmd = (
-            f"client.focused {r['accent']} {r['bg2']} {r['fg']} {r['accent']} {r['accent']}; "
-            f"client.focused_inactive {r['bg2']} {r['bg']} {r['muted']} {r['bg2']} {r['bg2']}; "
-            f"client.unfocused {r['bg2']} {r['bg']} {r['muted']} {r['bg2']} {r['bg2']}; "
+            f"client.focused {r['border_focus']} {r['bg2']} {r['fg']} {r['border_focus']} {r['border_focus']}; "
+            f"client.focused_inactive {r['border_muted']} {r['bg']} {r['muted']} {r['border_muted']} {r['border_muted']}; "
+            f"client.unfocused {r['border_muted']} {r['bg']} {r['muted']} {r['border_muted']} {r['border_muted']}; "
             f"client.urgent {r['red']} {r['bg']} {r['red']} {r['red']} {r['red']}; "
             f"bar bar-0 colors background {r['bg']}; "
             f"bar bar-0 colors statusline {r['fg']}; "
@@ -694,10 +834,7 @@ def apply_theme(name, no_nvim=False):
         )
         # Cursor is strictly decoupled and managed independently via toggle-cursor-theme (Gruvbox only)
 
-        try:
-            subprocess.Popen(["swaymsg", sway_cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception:
-            pass
+        run_ipc(["swaymsg", sway_cmd], "Sway theme IPC", timeout=0.75)
 
         # Persist client border colors so a fresh sway start keeps the theme
         # (picked up by the config.d glob include); regenerated on every theme-set.
@@ -705,10 +842,10 @@ def apply_theme(name, no_nvim=False):
             colors_conf = os.path.expanduser("~/.config/sway/config.d/80-theme-colors.conf")
             with open(colors_conf, "w") as fh:
                 fh.write("# GENERATED by theme-set — do not edit manually.\n")
-                fh.write("# Focused border = accent; unfocused/inactive border = bg2 (dim but visible).\n")
-                fh.write(f"client.focused {r['accent']} {r['bg2']} {r['fg']} {r['accent']} {r['accent']}\n")
-                fh.write(f"client.focused_inactive {r['bg2']} {r['bg']} {r['muted']} {r['bg2']} {r['bg2']}\n")
-                fh.write(f"client.unfocused {r['bg2']} {r['bg']} {r['muted']} {r['bg2']} {r['bg2']}\n")
+                fh.write("# Visibility-safe borders derived from the theme accent/background.\n")
+                fh.write(f"client.focused {r['border_focus']} {r['bg2']} {r['fg']} {r['border_focus']} {r['border_focus']}\n")
+                fh.write(f"client.focused_inactive {r['border_muted']} {r['bg']} {r['muted']} {r['border_muted']} {r['border_muted']}\n")
+                fh.write(f"client.unfocused {r['border_muted']} {r['bg']} {r['muted']} {r['border_muted']} {r['border_muted']}\n")
                 fh.write(f"client.urgent {r['red']} {r['bg']} {r['red']} {r['red']} {r['red']}\n")
         except Exception:
             pass
@@ -736,16 +873,14 @@ def apply_theme(name, no_nvim=False):
         except Exception:
             pass
 
-    # Foot terminal: broadcast OSC color sequences and send theme signal
+    # Foot terminal: update live windows with OSC only.
+    # SIGUSR1/SIGUSR2 do NOT reload foot-colors.ini; they switch to the
+    # [colors-dark]/[colors-light] palette cached by the long-lived Foot server.
+    # Sending those signals after a theme change can therefore restore a stale
+    # palette. New clients load the current generated palette via the footclient
+    # wrapper; existing clients are updated directly through their PTYs here.
     foot_pids = procs.get("foot", []) + procs.get("footclient", [])
     if foot_pids:
-        sig = signal.SIGUSR2 if theme_type == "light" else signal.SIGUSR1
-        for pid in foot_pids:
-            try:
-                os.kill(pid, sig)
-            except Exception:
-                pass
-
         foot_pts = set()
         for foot_pid in foot_pids:
             try:
@@ -765,16 +900,6 @@ def apply_theme(name, no_nvim=False):
                                     pass
             except Exception:
                 pass
-
-        # Always scan all user-writable pts devices to update all active terminal windows
-        try:
-            for pts_entry in os.listdir("/dev/pts"):
-                if pts_entry.isdigit():
-                    pts_path = f"/dev/pts/{pts_entry}"
-                    if os.access(pts_path, os.W_OK):
-                        foot_pts.add(pts_path)
-        except Exception:
-            pass
 
         if foot_pts:
             osc_seq = (
@@ -822,43 +947,31 @@ def apply_theme(name, no_nvim=False):
         except Exception:
             pass
 
-    # Dunst: reload only if running
+    # Short-lived reload commands are synchronous so a newer theme can never
+    # be overtaken by an older asynchronous IPC request.
     if procs["dunst"]:
-        try:
-            subprocess.Popen(["dunstctl", "reload"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception:
-            pass
+        run_ipc(["dunstctl", "reload"], "Dunst reload", timeout=0.75)
 
-    # Mako: reload live notifications & OSD colors if running
     if procs["mako"]:
-        try:
-            subprocess.Popen(["makoctl", "reload"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception:
-            pass
+        run_ipc(["makoctl", "reload"], "Mako reload", timeout=0.75)
 
-    # Yazi file manager: hot reload active instances via DDS
     if procs["yazi"]:
-        try:
-            subprocess.Popen(["ya", "emit-to", "0", "app:theme"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception:
-            pass
+        run_ipc(["ya", "emit-to", "0", "app:theme"], "Yazi theme DDS", timeout=0.75)
 
-
-    # GTK dark preference & theme sync for GTK3 (Thunar) and GTK4
+    # GTK dark preference & theme sync for GTK3 (Thunar) and GTK4.
     if theme_type != current_type:
         pref = "prefer-dark" if theme_type == "dark" else "prefer-light"
         gtk_theme = "adw-gtk3-dark" if theme_type == "dark" else "adw-gtk3"
-        try:
-            subprocess.Popen(
-                ["gsettings", "set", "org.gnome.desktop.interface", "color-scheme", pref],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-            subprocess.Popen(
-                ["gsettings", "set", "org.gnome.desktop.interface", "gtk-theme", gtk_theme],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-        except Exception:
-            pass
+        run_ipc(
+            ["gsettings", "set", "org.gnome.desktop.interface", "color-scheme", pref],
+            "GTK color-scheme update",
+            timeout=0.75,
+        )
+        run_ipc(
+            ["gsettings", "set", "org.gnome.desktop.interface", "gtk-theme", gtk_theme],
+            "GTK theme update",
+            timeout=0.75,
+        )
 
 
     # Cava: reload colors only via SIGUSR2 (instantaneous, 0 audio drop)
@@ -868,35 +981,30 @@ def apply_theme(name, no_nvim=False):
         except Exception:
             pass
 
-    # 8. Asynchronous non-critical wallpaper application
+    # 8. Wallpaper application is ordered with the rest of the switch so rapid
+    # theme changes cannot leave the previous wallpaper behind. Theme switching
+    # never performs network I/O: upstream wallpapers are fetched on demand by
+    # theme-wallpaper and only an already-cached selection is restored here.
     wallpaper = theme_data.get("assets", {}).get("wallpaper") or theme_data.get("wallpaper")
+    if not wallpaper:
+        wallpaper = cached_theme_wallpaper(name)
     if wallpaper:
         wp_path = os.path.expanduser(wallpaper)
-        if os.path.isfile(wp_path):
-            try:
-                subprocess.Popen(
-                    ["swaymsg", f"output * bg '{wp_path}' fill"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    start_new_session=True
-                )
-            except Exception as e:
-                print(f"[WARN] Non-critical wallpaper error: {e}", file=sys.stderr)
+        if os.path.isfile(wp_path) and run_ipc(
+            ["swaymsg", f"output * bg '{wp_path}' fill"],
+            "Sway wallpaper update",
+            timeout=0.75,
+        ):
+            # Keep session restore synchronized with the theme-selected image.
+            write_atomic(CURRENT_WALLPAPER_FILE, os.path.realpath(wp_path) + "\n")
 
-    # 9. Execute custom hooks in ~/.config/theme/hooks.d/ (Failure-Isolated & Non-blocking)
+    # 9. Hooks are failure-isolated but ordered. They are intentionally short
+    # lived and cached; waiting prevents an older hook from winning a later switch.
     if os.path.exists(HOOKS_DIR):
         for h in sorted(os.listdir(HOOKS_DIR)):
             hp = os.path.join(HOOKS_DIR, h)
             if os.path.isfile(hp) and os.access(hp, os.X_OK):
-                try:
-                    subprocess.Popen(
-                        [hp, name, theme_type],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        start_new_session=True
-                    )
-                except Exception as e:
-                    print(f"[WARN] Hook '{h}' execution error: {e}", file=sys.stderr)
+                run_ipc([hp, name, theme_type], f"theme hook {h}", timeout=1.5)
 
     return 0
 
@@ -946,6 +1054,7 @@ def main():
             print(f"Commit:       {src.get('commit')}")
         cap_list = [k for k, v in caps.items() if v]
         print(f"Capabilities: {', '.join(cap_list) if cap_list else 'palette'}")
+        accent = data.get("accent", "N/A")
         cava_label = f"yes (accent {accent})" if caps.get("cava") else "no"
         print(f"Cava:         {cava_label}")
 
@@ -965,18 +1074,23 @@ def main():
         return 0
 
     if cmd in ("--next", "--prev"):
-        curr = get_current_theme()
-        if not all_themes:
-            return 1
-        idx = all_themes.index(curr) if curr in all_themes else 0
-        new_idx = (idx + 1) % len(all_themes) if cmd == "--next" else (idx - 1) % len(all_themes)
-        target = all_themes[new_idx]
-        ret = apply_theme(target, no_nvim=no_nvim)
+        with theme_mutation_lock():
+            # Resolve relative navigation while holding the same lock as the
+            # mutation; two rapid --next calls therefore advance twice rather
+            # than both selecting the same stale current theme.
+            curr = get_current_theme()
+            if not all_themes:
+                return 1
+            idx = all_themes.index(curr) if curr in all_themes else 0
+            new_idx = (idx + 1) % len(all_themes) if cmd == "--next" else (idx - 1) % len(all_themes)
+            target = all_themes[new_idx]
+            ret = apply_theme(target, no_nvim=no_nvim)
         if ret == 0:
             print(f"Switched theme to {target}")
         return ret
 
-    ret = apply_theme(cmd, no_nvim=no_nvim)
+    with theme_mutation_lock():
+        ret = apply_theme(cmd, no_nvim=no_nvim)
     if ret == 0:
         print(f"Applied theme: {cmd}")
     return ret

@@ -152,25 +152,29 @@ def update_foot_config(path: Path, new_spec: str):
     path.write_text(new_content, encoding="utf-8")
 
 
-def update_sway_variables(path: Path, new_spec: str):
-    """Update footclient -o font=... in Sway variables configuration."""
-    if not path.exists():
-        return
-    content = path.read_text(encoding="utf-8")
-    font_arg = f'-o font="{new_spec}"'
+def update_sway_variables(path: Path, new_spec: str) -> bool:
+    """Rewrite an existing footclient -o font= override in the Sway variables file.
 
-    # Check if -o font= is already present in set $term
-    pattern = r'(?m)^(set\s+\$term\s+footclient(?:\s+-[o\w\-]+(?:\s*(?:=\S+|="[^"]*"))?)*\s+)-o\s+font="[^"]*"'
-    if re.search(pattern, content):
-        new_content = re.sub(pattern, rf'\1{font_arg}', content)
-    else:
-        # Insert after footclient
-        new_content = re.sub(
-            r'(?m)^(set\s+\$term\s+footclient\s+)',
-            rf'\1{font_arg} ',
-            content
-        )
+    Foot font state is owned by foot.ini. The Sway `$term` line is expected to
+    stay a plain `set $term footclient`, so this never injects a new override --
+    it only keeps one in sync if somebody deliberately added it. Returns True
+    when the file was rewritten.
+
+    The patterns stay on the `$term` line by using [^\\n] instead of \\s: a \\s
+    match consumes the newline and splices the generated override into the
+    following comment line, which corrupts the Sway config.
+    """
+    if not path.exists():
+        return False
+    content = path.read_text(encoding="utf-8")
+    pattern = r'(?m)^(set[ \t]+\$term[ \t]+footclient[^\n]*?)-o[ \t]+font="[^"]*"'
+    if not re.search(pattern, content):
+        return False
+    new_content = re.sub(pattern, rf'\1-o font="{new_spec}"', content)
+    if new_content == content:
+        return False
     path.write_text(new_content, encoding="utf-8")
+    return True
 
 
 def list_nerd_fonts():
@@ -305,15 +309,26 @@ def main():
         update_foot_config(CHEZMOI_FOOT, current_spec)
         sys.exit(1)
 
-    # 2. Update Sway variables and chezmoi copy
-    update_sway_variables(SWAY_VARS, new_spec)
-    update_sway_variables(CHEZMOI_SWAY_VARS, new_spec)
+    # 2. Update existing Sway $term override, if any (foot.ini stays authoritative)
+    sway_targets = [p for p in (SWAY_VARS, CHEZMOI_SWAY_VARS) if p.exists()]
+    sway_original = {p: p.read_text(encoding="utf-8") for p in sway_targets}
+    sway_updated = False
+    for path in sway_targets:
+        sway_updated = update_sway_variables(path, new_spec) or sway_updated
 
-    # Verify sway config
+    # Verify sway config; restore the variables file if this edit broke it.
+    # sway -C logs config failures but does not reliably fail the exit code, so
+    # the load-error marker is checked explicitly.
     res_sway = subprocess.run(["sway", "-C"], capture_output=True, text=True)
-    if res_sway.returncode != 0:
-        sys.stderr.write(f"Sway configuration check failed:\n{res_sway.stderr}\n")
-    else:
+    sway_output = f"{res_sway.stdout}\n{res_sway.stderr}"
+    sway_ok = res_sway.returncode == 0 and "Error(s) loading config" not in sway_output
+    if not sway_ok:
+        for path, original in sway_original.items():
+            path.write_text(original, encoding="utf-8")
+        sys.stderr.write(
+            f"Sway configuration check failed; restored {SWAY_VARS}:\n{sway_output.strip()}\n"
+        )
+    elif sway_updated:
         # Reload sway live if running
         try:
             subprocess.run(["swaymsg", "reload"], capture_output=True, check=True)
@@ -321,7 +336,10 @@ def main():
             pass
 
     print(f"Updated Foot Font to: {new_spec}")
-    print("Applied to: foot.ini, chezmoi source, and Sway $term override (swaymsg reload)")
+    if sway_updated:
+        print("Applied to: foot.ini, chezmoi source, and existing Sway $term font override (swaymsg reload)")
+    else:
+        print("Applied to: foot.ini and chezmoi source (no Sway $term override; foot.ini is authoritative)")
 
     # 3. Handle foot-server restart if requested
     if args.restart:

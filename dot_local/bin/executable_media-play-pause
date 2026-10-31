@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Toggle the active MPRIS player and show a short playback-state OSD.
+set -euo pipefail
+
+TIMEOUT=700
+REPLACE_ID=991049
+
+if ! command -v playerctl >/dev/null 2>&1; then
+    notify-send -r "$REPLACE_ID" -a "Media" -t "$TIMEOUT" -u low \
+        "Media: playerctl unavailable" 2>/dev/null || true
+    exit 1
+fi
+
+before="$(playerctl status 2>/dev/null || true)"
+if ! playerctl play-pause >/dev/null 2>&1; then
+    notify-send -r "$REPLACE_ID" -a "Media" -t "$TIMEOUT" -u low \
+        "Media: No active player" 2>/dev/null || true
+    exit 0
+fi
+
+# Some browser MPRIS implementations update state asynchronously. Poll briefly
+# so the OSD reports the post-toggle state instead of the previous one.
+status="$before"
+for _ in 1 2 3 4 5; do
+    sleep 0.02
+    status="$(playerctl status 2>/dev/null || true)"
+    [[ -n "$status" && "$status" != "$before" ]] && break
+done
+
+case "$status" in
+    Playing)
+        icon="media-playback-start"
+        message="Playing"
+        ;;
+    Paused)
+        icon="media-playback-pause"
+        message="Paused"
+        ;;
+    Stopped)
+        icon="media-playback-stop"
+        message="Stopped"
+        ;;
+    *)
+        icon="multimedia-player"
+        message="${status:-Media toggled}"
+        ;;
+esac
+
+notify-send -r "$REPLACE_ID" -a "Media" -t "$TIMEOUT" -u low -i "$icon" \
+    "$message" 2>/dev/null || true

@@ -1,0 +1,217 @@
+#!/usr/bin/env python3
+"""build-cursor-sizes: add intermediate raster sizes to an Xcursor theme.
+
+Why: Xcursor does not scale cursor images. It loads the image whose nominal
+size is closest to the requested one, so a theme that ships only
+24/32/48/64/96/128 can never render 26px, 34px or 40px -- the compositor just
+jumps between the six baked sizes. This tool resamples the nearest existing
+image and appends real image chunks for every missing size, which turns the
+theme into a smooth ladder without changing its name or appearance at the
+original sizes.
+
+Usage:
+    build-cursor-sizes                 # add 16..128 step 2 to the Phinger themes
+    build-cursor-sizes --check         # report sizes present, change nothing
+    build-cursor-sizes --sizes 16:96:2 # custom range:start:step
+
+Idempotent: sizes already present are left untouched. The original 24/32/48/
+64/96/128 rasters are never resampled over, so the native sizes stay pixel
+perfect. Resampled sizes are approximations by definition.
+
+Safety: only regular cursor files under the theme's cursors/ directory are
+rewritten; symlinked aliases are skipped. The pristine copy under ~/.icons is
+left alone, so it can serve as a restore point.
+"""
+
+from __future__ import annotations
+
+import argparse
+import io
+import struct
+import sys
+from pathlib import Path
+
+from PIL import Image
+
+THEMES = (
+    Path.home() / ".local/share/icons/phinger-cursors-gruvbox-material",
+    Path.home() / ".local/share/icons/phinger-cursors-gruvbox-material-light",
+)
+
+IMAGE_CHUNK = 0xFFFD0002
+COMMENT_CHUNK = 0xFFFE0001
+MAGIC = b"Xcur"
+
+
+def parse_cursor(path: Path):
+    """Return (header_version, comments, images) for an Xcursor file.
+
+    comments: list of raw chunk payloads (everything after the 16 byte chunk header)
+    images:   list of dicts with nominal size, hotspot, delay and PNG bytes
+    """
+    data = path.read_bytes()
+    if data[:4] != MAGIC:
+        raise ValueError(f"{path}: not an Xcursor file")
+    _, header_size, version, ntoc = struct.unpack("<4sIII", data[:16])
+    comments = []
+    images = []
+    for i in range(ntoc):
+        ctype, subtype, pos = struct.unpack("<III", data[16 + i * 12 : 16 + i * 12 + 12])
+        chunk_size, chunk_type, chunk_subtype, chunk_version = struct.unpack(
+            "<IIII", data[pos : pos + 16]
+        )
+        if chunk_type == IMAGE_CHUNK:
+            width, height, xhot, yhot, delay = struct.unpack(
+                "<IIIII", data[pos + 16 : pos + 36]
+            )
+            png = data[pos + 36 : pos + chunk_size]
+            images.append(
+                {
+                    "size": chunk_subtype,
+                    "width": width,
+                    "height": height,
+                    "xhot": xhot,
+                    "yhot": yhot,
+                    "delay": delay,
+                    "png": png,
+                }
+            )
+        elif chunk_type == COMMENT_CHUNK:
+            comments.append((chunk_subtype, data[pos + 16 : pos + chunk_size]))
+    return version, comments, images
+
+
+def build_cursor(path: Path, targets: list[int], dry_run: bool) -> list[int]:
+    version, comments, images = parse_cursor(path)
+
+    # Animated cursors hold several frames per nominal size; group them so a new
+    # size gets the same frame count instead of a single static frame.
+    by_size: dict[int, list[dict]] = {}
+    for img in images:
+        by_size.setdefault(img["size"], []).append(img)
+    have = set(by_size)
+    missing = [t for t in targets if t not in have]
+    if not missing:
+        return []
+
+    new_images = list(images)
+    for target in missing:
+        src_size = min(have, key=lambda size: abs(size - target))
+        for src in by_size[src_size]:
+            with Image.open(io.BytesIO(src["png"])) as im:
+                im = im.convert("RGBA")
+                scale = target / im.width
+                im = im.resize((target, target), Image.LANCZOS)
+                buf = io.BytesIO()
+                im.save(buf, format="PNG", optimize=True)
+            new_images.append(
+                {
+                    "size": target,
+                    "width": target,
+                    "height": target,
+                    "xhot": min(target - 1, round(src["xhot"] * scale)),
+                    "yhot": min(target - 1, round(src["yhot"] * scale)),
+                    "delay": src["delay"],
+                    "png": buf.getvalue(),
+                }
+            )
+
+    if dry_run:
+        return missing
+
+    # Assemble a fresh file: header, TOC, comment chunks, then images by size.
+    new_images.sort(key=lambda img: img["size"])
+    chunks: list[tuple[int, int, bytes]] = []
+    for subtype, payload in comments:
+        chunk = struct.pack("<IIII", 16 + len(payload), COMMENT_CHUNK, subtype, 1) + payload
+        chunks.append((COMMENT_CHUNK, subtype, chunk))
+    for img in new_images:
+        chunk = (
+            struct.pack(
+                "<IIIIIIIII",
+                36 + len(img["png"]),
+                IMAGE_CHUNK,
+                img["size"],
+                1,
+                img["width"],
+                img["height"],
+                img["xhot"],
+                img["yhot"],
+                img["delay"],
+            )
+            + img["png"]
+        )
+        chunks.append((IMAGE_CHUNK, img["size"], chunk))
+
+    header = struct.pack("<4sIII", MAGIC, 16, version, len(chunks))
+    toc_size = 12 * len(chunks)
+    offset = 16 + toc_size
+    toc = b""
+    body = b""
+    for ctype, subtype, chunk in chunks:
+        toc += struct.pack("<III", ctype, subtype, offset)
+        body += chunk
+        offset += len(chunk)
+
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_bytes(header + toc + body)
+    # Verify before replacing: the new file must parse and keep every size.
+    _, _, check = parse_cursor(tmp)
+    if {img["size"] for img in check} != {img["size"] for img in new_images}:
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(f"{path}: verification failed, file left untouched")
+    tmp.replace(path)
+    return missing
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Add intermediate sizes to Xcursor themes.")
+    parser.add_argument(
+        "--sizes",
+        default="16:128:2",
+        help="start:stop:step ladder to generate (default 16:128:2)",
+    )
+    parser.add_argument("--check", action="store_true", help="report only, change nothing")
+    parser.add_argument("--themes", nargs="*", default=None, help="theme directories")
+    args = parser.parse_args()
+
+    try:
+        start, stop, step = (int(part) for part in args.sizes.split(":"))
+    except ValueError:
+        parser.error("--sizes must look like 16:128:2")
+    if step <= 0 or stop < start:
+        parser.error("--sizes needs start <= stop and a positive step")
+    targets = list(range(start, stop + 1, step))
+
+    themes = [Path(t).expanduser() for t in args.themes] if args.themes else list(THEMES)
+    rc = 0
+    for theme in themes:
+        curdir = theme / "cursors"
+        if not curdir.is_dir():
+            print(f"skip: {theme} has no cursors directory", file=sys.stderr)
+            rc = 1
+            continue
+        files = sorted(p for p in curdir.iterdir() if p.is_file() and not p.is_symlink())
+        if args.check:
+            versions = {}
+            for path in files:
+                _, _, images = parse_cursor(path)
+                versions.setdefault(tuple(sorted({img["size"] for img in images})), []).append(path.name)
+            for sizes, names in versions.items():
+                print(f"{theme.name}: {len(sizes)} sizes {list(sizes)} ({len(names)} cursors)")
+            continue
+        added_total = 0
+        for path in files:
+            try:
+                added = build_cursor(path, targets, dry_run=False)
+            except Exception as exc:  # noqa: BLE001 - report and keep going
+                print(f"error: {path}: {exc}", file=sys.stderr)
+                rc = 1
+                continue
+            added_total += len(added)
+        print(f"{theme.name}: {len(files)} cursors, {added_total} image sizes added")
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main())

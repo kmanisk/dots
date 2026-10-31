@@ -4,7 +4,7 @@
 # Usage: wset <image> [fill|fit|stretch|tile|centered]  (mode defaults to fit)
 # Persists to ~/.config/current_wallpaper so it survives reboots (restored by
 # sway config line with exec_always swaymsg output "*" bg ...).
-# Win+Shift+W (random-wallpaper) is untouched and keeps working as before.
+# Wallpaper hotkeys are owned by theme-wallpaper in Sway.
 # ==============================================================================
 set -u
 

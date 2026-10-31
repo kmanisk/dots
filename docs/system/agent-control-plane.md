@@ -25,6 +25,7 @@ The goal is to let different agents work on the same workstation without relying
 - `agent-check <project>` — runs registered validation for a project.
 - `~/.local/share/agent/environment.json` — generated runtime evidence; never treat it as permanent configuration or commit it.
 - `~/.local/share/agent/projects.json` — project registry used by the helper scripts.
+- Desktop Commander Remote runs as the user unit `desktop-commander.service`. It is enabled under `default.target`, so the remote bridge starts automatically with the user systemd session. The unit is chezmoi-managed at `dot_config/systemd/user/desktop-commander.service`, and `run_onchange_linux-20-reconcile-services.sh.tmpl` restores the enabled state on future applies/rebuilds.
 
 ### Task-local continuity
 

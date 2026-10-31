@@ -323,31 +323,34 @@ fi
 # ------------------------------------------------------------------------------
 query_interfaces
 
-ROUTE_BANNER="Primary: ${DEF_DEV:-None} (${DEF_GW:-None}) • Metric: ${DEF_METRIC:-None}"
+ROUTE_BANNER="Route: ${DEF_DEV:-none} • metric ${DEF_METRIC:-none}"
 if [[ -n "$ETH_DEV" && -n "$WIFI_DEV" ]]; then
     if [[ "$DEF_DEV" == "$ETH_DEV" ]]; then
-        ROUTE_BANNER="Primary: Ethernet ($ETH_DEV) • Fallback: Wi-Fi ($WIFI_NAME, ${WIFI_SIGNAL:-0}% - metric $WIFI_METRIC)"
+        ROUTE_BANNER="Ethernet $ETH_DEV m$ETH_METRIC • Wi-Fi $WIFI_NAME m$WIFI_METRIC"
     else
-        ROUTE_BANNER="Primary: Wi-Fi ($WIFI_NAME) • Standby: Ethernet ($ETH_DEV, metric $ETH_METRIC)"
+        ROUTE_BANNER="Wi-Fi $WIFI_NAME m$WIFI_METRIC • Ethernet $ETH_DEV m$ETH_METRIC"
     fi
 elif [[ -n "$ETH_DEV" ]]; then
-    ROUTE_BANNER="Active: Ethernet ($ETH_DEV) • Wi-Fi is disconnected"
+    ROUTE_BANNER="Ethernet $ETH_DEV m$ETH_METRIC • Wi-Fi disconnected"
 elif [[ -n "$WIFI_DEV" ]]; then
-    ROUTE_BANNER="Active: Wi-Fi ($WIFI_NAME) • Ethernet is disconnected"
+    ROUTE_BANNER="Wi-Fi $WIFI_NAME m$WIFI_METRIC • Ethernet disconnected"
 fi
 
 # Construct Menu Options (state marker carries role; no decorative glyphs)
-mark_eth="○"
-mark_wifi="○"
-if [[ "$DEF_DEV" == "$ETH_DEV" && -n "$ETH_DEV" ]]; then mark_eth="●"; fi
-if [[ "$DEF_DEV" == "$WIFI_DEV" && -n "$WIFI_DEV" ]]; then mark_wifi="●"; fi
+# Marker carries its own trailing gap: Iosevka's ○/● sit tight inside the advance
+# width, so a single space reads as no gap at all.
+mark_idle="○  "
+mark_eth="$mark_idle"
+mark_wifi="$mark_idle"
+if [[ "$DEF_DEV" == "$ETH_DEV" && -n "$ETH_DEV" ]]; then mark_eth="●  "; fi
+if [[ "$DEF_DEV" == "$WIFI_DEV" && -n "$WIFI_DEV" ]]; then mark_wifi="●  "; fi
 
-opt_eth="${mark_eth} Switch Route to Ethernet (${ETH_NAME:-Disconnected})"
-opt_wifi="${mark_wifi} Switch Route to Wi-Fi (${WIFI_NAME:-Disconnected})"
-opt_auto="○ Reset Auto Priority (Ethernet 50 > Wi-Fi 600)"
-opt_toggle_wifi="○ Toggle Wi-Fi Connection ($([[ -n "$WIFI_DEV" ]] && echo "Connected" || echo "Disconnected"))"
-opt_dns="○ Optimize Ethernet & Public DNS"
-opt_diag="○ Network Diagnostics & Latency Test"
+opt_eth="${mark_eth}Switch Route to Ethernet (${ETH_NAME:-Disconnected})"
+opt_wifi="${mark_wifi}Switch Route to Wi-Fi (${WIFI_NAME:-Disconnected})"
+opt_auto="${mark_idle}Reset Auto Priority (Ethernet 50 > Wi-Fi 600)"
+opt_toggle_wifi="${mark_idle}Toggle Wi-Fi Connection ($([[ -n "$WIFI_DEV" ]] && echo "Connected" || echo "Disconnected"))"
+opt_dns="${mark_idle}Optimize Ethernet & Public DNS"
+opt_diag="${mark_idle}Network Diagnostics & Latency Test"
 
 options="${opt_eth}
 ${opt_wifi}

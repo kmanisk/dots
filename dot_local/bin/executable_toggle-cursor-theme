@@ -1,25 +1,88 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# toggle-cursor-theme: Toggle between Gruvbox Material Dark & Light cursor
-# Compatible with Sway (Wayland) and i3 (X11)
+# toggle-cursor-theme: Switch the cursor between Gruvbox Material Dark and Light.
+#
+# Usage:
+#   toggle-cursor-theme          # toggle polarity
+#   toggle-cursor-theme dark     # force dark
+#   toggle-cursor-theme light    # force light
+#   toggle-cursor-theme status   # report theme, size, and every consumer
+#
+# The size is preserved; only the theme polarity changes. This mirrors
+# adjust-cursor-size: the same six consumers are written, including the
+# chezmoi sources, so the live session and the repository cannot drift apart.
+#
+# Sources kept in sync:
+#   1. Sway live seat        seat * xcursor_theme <theme> <size>
+#   2. Sway config           ~/.config/sway/config.d/10-display.conf (+ chezmoi)
+#   3. GTK 2 / 3 / 4         gtk-cursor-theme-name
+#   4. GSettings             org.gnome.desktop.interface cursor-theme
+#   5. Xresources            Xcursor.theme (feeds the ~/.icons/default fallback)
+#   6. Session environment   environment.d/30-cursor.conf (+ chezmoi),
+#                            systemd user env, dbus activation env
 # ==============================================================================
 set -euo pipefail
 
 DARK_THEME="phinger-cursors-gruvbox-material"
 LIGHT_THEME="phinger-cursors-gruvbox-material-light"
 
-# 1. Determine current cursor theme
-CURRENT=$(gsettings get org.gnome.desktop.interface cursor-theme 2>/dev/null | tr -d "'\"" || true)
-if [[ -z "$CURRENT" ]]; then
-    CURRENT=$(grep -oE 'seat (\*|seat0) xcursor_theme [^ ]+' "$HOME/.config/sway/config.d/10-display.conf" "$HOME/.config/sway/config" 2>/dev/null | awk '{print $4}' | head -n1 || true)
-fi
-if [[ -z "$CURRENT" ]]; then
-    CURRENT=$(grep -E '^Xcursor\.theme:' "$HOME/.Xresources" 2>/dev/null | awk '{print $2}' || true)
-fi
+SWAY_CONF="$HOME/.config/sway/config.d/10-display.conf"
+SWAY_SRC="$HOME/.local/share/chezmoi/dot_config/sway/config.d/10-display.conf"
+ENV_CONF="$HOME/.config/environment.d/30-cursor.conf"
+ENV_SRC="$HOME/.local/share/chezmoi/dot_config/environment.d/30-cursor.conf"
 
-TARGET_MODE="${1:-toggle}"
+die() {
+    printf 'toggle-cursor-theme: %s\n' "$*" >&2
+    exit 1
+}
 
-case "$TARGET_MODE" in
+theme_installed() {
+    local t=$1 d
+    for d in "$HOME/.local/share/icons/$t" "$HOME/.icons/$t" "/usr/share/icons/$t"; do
+        [ -d "$d/cursors" ] && return 0
+    done
+    return 1
+}
+
+# Sway config is authoritative; the other stores are fallbacks only.
+detect_theme() {
+    local t
+    t=$(grep -oE 'seat (\*|seat0) xcursor_theme [^ ]+' "$SWAY_CONF" 2>/dev/null \
+        | awk '{print $4}' | head -n1)
+    [ -n "$t" ] || t=$(gsettings get org.gnome.desktop.interface cursor-theme 2>/dev/null | tr -d "'\"")
+    [ -n "$t" ] || t=$(grep -E '^Xcursor\.theme:' "$HOME/.Xresources" 2>/dev/null | awk '{print $2}')
+    printf '%s' "$t"
+}
+
+detect_size() {
+    local s
+    s=$(grep -oE 'seat (\*|seat0) xcursor_theme [^ ]+ [0-9]+' "$SWAY_CONF" 2>/dev/null \
+        | awk '{print $5}' | head -n1)
+    [ -n "$s" ] || s=$(gsettings get org.gnome.desktop.interface cursor-size 2>/dev/null | tr -d "'\"")
+    [ -n "$s" ] || s=$(grep -E '^Xcursor\.size:' "$HOME/.Xresources" 2>/dev/null | awk '{print $2}')
+    printf '%s' "$s"
+}
+
+CURRENT_THEME=$(detect_theme)
+CURRENT_THEME="${CURRENT_THEME:-$LIGHT_THEME}"
+SIZE=$(detect_size)
+[ -n "$SIZE" ] || die "cannot determine the current cursor size"
+
+case "${1:-toggle}" in
+    status)
+        printf 'Cursor theme : %s\n' "$CURRENT_THEME"
+        printf 'Cursor size  : %spx\n' "$SIZE"
+        printf 'sway config  : %s\n' "$(grep -oE 'xcursor_theme [^ ]+ [0-9]+' "$SWAY_CONF" 2>/dev/null || echo missing)"
+        printf 'chezmoi      : %s\n' "$(grep -oE 'xcursor_theme [^ ]+ [0-9]+' "$SWAY_SRC" 2>/dev/null || echo missing)"
+        printf 'gsettings    : %s\n' "$(gsettings get org.gnome.desktop.interface cursor-theme 2>/dev/null | tr -d "'\"" || echo unavailable)"
+        printf 'gtk-3.0/4.0  : %s / %s\n' \
+            "$(grep -hoE 'gtk-cursor-theme-name=.*' "$HOME/.config/gtk-3.0/settings.ini" 2>/dev/null | cut -d= -f2)" \
+            "$(grep -hoE 'gtk-cursor-theme-name=.*' "$HOME/.config/gtk-4.0/settings.ini" 2>/dev/null | cut -d= -f2)"
+        printf 'Xresources   : %s\n' "$(grep -E '^Xcursor\.theme:' "$HOME/.Xresources" 2>/dev/null | awk '{print $2}')"
+        printf 'session env  : %s\n' "$(grep -E '^XCURSOR_THEME=' "$ENV_CONF" 2>/dev/null | cut -d= -f2)"
+        printf 'icons default: %s\n' "$(grep -E '^Inherits=' "$HOME/.local/share/icons/default/index.theme" 2>/dev/null | cut -d= -f2)"
+        exit 0
+        ;;
     dark|Dark)
         NEW_THEME="$DARK_THEME"
         MODE="Dark"
@@ -28,12 +91,8 @@ case "$TARGET_MODE" in
         NEW_THEME="$LIGHT_THEME"
         MODE="Light"
         ;;
-    status)
-        echo "Current cursor: $CURRENT"
-        exit 0
-        ;;
-    toggle|*)
-        if [ "$CURRENT" = "$DARK_THEME" ]; then
+    toggle|"")
+        if [ "$CURRENT_THEME" = "$DARK_THEME" ]; then
             NEW_THEME="$LIGHT_THEME"
             MODE="Light"
         else
@@ -41,58 +100,52 @@ case "$TARGET_MODE" in
             MODE="Dark"
         fi
         ;;
+    *)
+        die "invalid argument '$1' (use dark, light, status, or no argument to toggle)"
+        ;;
 esac
 
-# 2. Determine current cursor size (preserve user's size setting)
-SIZE=$(gsettings get org.gnome.desktop.interface cursor-size 2>/dev/null | tr -d "'\"" || true)
-if [[ -z "$SIZE" || "$SIZE" -le 0 ]]; then
-    SIZE=$(grep -oE 'seat (\*|seat0) xcursor_theme [^ ]+ [0-9]+' "$HOME/.config/sway/config.d/10-display.conf" "$HOME/.config/sway/config" 2>/dev/null | awk '{print $5}' | head -n1 || true)
-fi
-if [[ -z "$SIZE" || "$SIZE" -le 0 ]]; then
-    SIZE=$(grep -E '^Xcursor\.size:' "$HOME/.Xresources" 2>/dev/null | awk '{print $2}' || true)
-fi
-SIZE="${SIZE:-32}"
+theme_installed "$NEW_THEME" || die "theme '$NEW_THEME' is not installed"
 
-# 3. Apply to GNOME / GTK settings (GSettings)
+if [ "$NEW_THEME" = "$CURRENT_THEME" ]; then
+    printf 'Cursor theme already %s (%spx); nothing to do.\n' "$NEW_THEME" "$SIZE"
+    exit 0
+fi
+
+# --- 1. GSettings -------------------------------------------------------------
 gsettings set org.gnome.desktop.interface cursor-theme "$NEW_THEME" 2>/dev/null || true
 gsettings set org.gnome.desktop.interface cursor-size "$SIZE" 2>/dev/null || true
 
-# 4. Update .Xresources and xrdb merge
+# --- 2. GTK 2 / 3 / 4 ---------------------------------------------------------
+if [ -f "$HOME/.gtkrc-2.0" ]; then
+    sed -i -E "s/gtk-cursor-theme-name=.*/gtk-cursor-theme-name=\"$NEW_THEME\"/" "$HOME/.gtkrc-2.0"
+fi
+for cfg in "$HOME/.config/gtk-3.0/settings.ini" "$HOME/.config/gtk-4.0/settings.ini"; do
+    [ -f "$cfg" ] || continue
+    sed -i -E "s/gtk-cursor-theme-name=.*/gtk-cursor-theme-name=$NEW_THEME/" "$cfg"
+done
+
+# --- 3. Xresources (must happen before the fallback refresh) ------------------
 if [ -f "$HOME/.Xresources" ]; then
-    sed -i -E "s/Xcursor\.theme:.*/Xcursor.theme: $NEW_THEME/" "$HOME/.Xresources"
-    sed -i -E "s/Xcursor\.size:.*/Xcursor.size: $SIZE/" "$HOME/.Xresources"
+    sed -i -E "s/^Xcursor\.theme:.*/Xcursor.theme: $NEW_THEME/" "$HOME/.Xresources"
     command -v xrdb >/dev/null 2>&1 && xrdb -merge "$HOME/.Xresources" 2>/dev/null || true
 fi
 
-# 5. Update GTK 2
-if [ -f "$HOME/.gtkrc-2.0" ]; then
-    sed -i -E "s/gtk-cursor-theme-name=.*/gtk-cursor-theme-name=\"$NEW_THEME\"/" "$HOME/.gtkrc-2.0"
-    sed -i -E "s/gtk-cursor-theme-size=.*/gtk-cursor-theme-size=$SIZE/" "$HOME/.gtkrc-2.0"
-fi
-
-# 6. Update GTK 3 & 4
-for cfg in "$HOME/.config/gtk-3.0/settings.ini" "$HOME/.config/gtk-4.0/settings.ini"; do
-    if [ -f "$cfg" ]; then
-        sed -i -E "s/gtk-cursor-theme-name=.*/gtk-cursor-theme-name=$NEW_THEME/" "$cfg"
-        sed -i -E "s/gtk-cursor-theme-size=.*/gtk-cursor-theme-size=$SIZE/" "$cfg"
-    fi
+# --- 4. Sway config, live and chezmoi source ----------------------------------
+saw_sway_src=0
+for scfg in "$SWAY_CONF" "$SWAY_SRC"; do
+    [ -f "$scfg" ] || continue
+    sed -i -E "s/^(seat (\*|seat0) xcursor_theme )[^ ]+( [0-9]+)?/\1$NEW_THEME $SIZE/" "$scfg"
+    [ "$scfg" = "$SWAY_SRC" ] && saw_sway_src=1
 done
 
-# 7. Update fallback index.theme and cursor aliases
-"$HOME/.local/bin/ensure-xcursor-fallbacks" 2>/dev/null || true
-
-# 8. Sync i3 config and X11 root window
-if [ -f "$HOME/.config/i3/config" ]; then
-    sed -i -E "s/cursor-theme '[^']+'/cursor-theme '$NEW_THEME'/" "$HOME/.config/i3/config" 2>/dev/null || true
-fi
-if [ -n "${DISPLAY:-}" ] && command -v xsetroot >/dev/null 2>&1; then
-    xsetroot -cursor_name left_ptr 2>/dev/null || true
-fi
-
-# 9. Sync Sway (Wayland) compositor & session
-for scfg in "$HOME/.config/sway/config.d/10-display.conf" "$HOME/.config/sway/config"; do
-    if [ -f "$scfg" ]; then
-        sed -i -E "s/^(seat (\*|seat0) xcursor_theme )[^ ]+( [0-9]+)?/\1$NEW_THEME $SIZE/" "$scfg" 2>/dev/null || true
+# --- 5. Session environment ---------------------------------------------------
+for ecfg in "$ENV_CONF" "$ENV_SRC"; do
+    [ -f "$ecfg" ] || continue
+    if grep -qE '^XCURSOR_THEME=' "$ecfg"; then
+        sed -i -E "s/^XCURSOR_THEME=.*/XCURSOR_THEME=$NEW_THEME/" "$ecfg"
+    else
+        printf 'XCURSOR_THEME=%s\n' "$NEW_THEME" >> "$ecfg"
     fi
 done
 
@@ -102,13 +155,30 @@ systemctl --user import-environment XCURSOR_THEME XCURSOR_SIZE 2>/dev/null || tr
 command -v dbus-update-activation-environment >/dev/null 2>&1 && \
     dbus-update-activation-environment --systemd XCURSOR_THEME XCURSOR_SIZE 2>/dev/null || true
 
-if [ -n "${SWAYSOCK:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
-    swaymsg "seat * xcursor_theme $NEW_THEME $SIZE" >/dev/null 2>&1 || true
+# --- 6. X11 / Xwayland / CEF fallbacks ----------------------------------------
+"$HOME/.local/bin/ensure-xcursor-fallbacks" >/dev/null 2>&1 || true
+if [ -n "${DISPLAY:-}" ] && command -v xsetroot >/dev/null 2>&1; then
+    xsetroot -cursor_name left_ptr 2>/dev/null || true
 fi
 
-# 10. Notification (works on Mako, Dunst, SwayNC)
+# --- 7. Live compositor -------------------------------------------------------
+live_ok=0
+if [ -n "${SWAYSOCK:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
+    if swaymsg "seat * xcursor_theme $NEW_THEME $SIZE" >/dev/null 2>&1; then
+        live_ok=1
+    fi
+fi
+
+# --- 8. Report ----------------------------------------------------------------
+printf 'Cursor theme: %s -> %s (%s, %spx)\n' "$CURRENT_THEME" "$NEW_THEME" "$MODE" "$SIZE"
+[ "$live_ok" -eq 1 ] && printf 'Applied live to the Sway seat.\n'
+[ "$saw_sway_src" -eq 0 ] && printf 'Warning: chezmoi sway source not found, only live config updated.\n'
+if [ "$live_ok" -eq 0 ]; then
+    printf 'Note: Sway IPC unavailable; theme applies after the next reload or login.\n'
+fi
+printf 'Running GTK/Qt apps may keep the old cursor until restarted.\n'
+
 if command -v notify-send >/dev/null 2>&1; then
-    notify-send -a "Theme" -u low -i preferences-desktop-theme -r 9945 "Cursor Theme" "Switched to Gruvbox $MODE (${SIZE}px)"
-elif command -v dunstify >/dev/null 2>&1; then
-    dunstify -a "Theme" -u low -i preferences-desktop-theme -r 9945 "Cursor Theme" "Switched to Gruvbox $MODE (${SIZE}px)"
+    notify-send -a "Theme" -u low -i preferences-desktop-theme -r 9945 \
+        "Cursor Theme" "Gruvbox $MODE (${SIZE}px)"
 fi

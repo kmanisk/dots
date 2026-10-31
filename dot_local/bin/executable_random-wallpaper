@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# random-wallpaper: retired random-cache picker. Both wallpaper keys now step
-# sequentially through the DS3 pack via ds3-wallpaper (no repeats per cycle).
-# Kept as a passthrough so old callers (wallpaper-menu) keep working.
-exec ~/.local/bin/ds3-wallpaper "$@"
+# Compatibility wrapper: random wallpaper from the active theme's Omarchy set.
+# Legacy genre arguments are intentionally ignored; theme-wallpaper is authoritative.
+exec ~/.local/bin/theme-wallpaper random

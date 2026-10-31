@@ -1,89 +1,214 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# adjust-cursor-size: Adjust cursor size up or down (+4 / -4)
-# Range: 16px to 64px
-# Compatible with Sway (Wayland) and i3 (X11)
+# adjust-cursor-size: Change the mouse cursor size everywhere it is defined.
+#
+# Usage:
+#   adjust-cursor-size          # print current state, change nothing
+#   adjust-cursor-size +        # next larger size (default step)
+#   adjust-cursor-size -        # next smaller size
+#   adjust-cursor-size +2       # next larger size on the ladder
+#   adjust-cursor-size 32       # absolute size, snapped to the theme ladder
+#
+# The I3 style numerical suffix is accepted only as a direction marker because
+# the Sway keybindings pass "+2" / "-2". The magnitude is ignored: the theme
+# ships six discrete sizes (24 32 48 64 96 128) and Xcursor substitutes the
+# closest available image, so a true 2px step cannot exist with this theme.
+#
+# Why this exists: cursor size is consumed from four independent places and
+# they drift apart silently. Previously the tool clamped at 64 (the theme
+# ships 24/32/48/64/96/128), never snapped to a real theme size, and only
+# repaired the live Sway config, so "changing the size" often changed nothing
+# visible.
+#
+# Sources kept in sync:
+#   1. Sway live seat        seat * xcursor_theme <theme> <size>
+#   2. Sway config           ~/.config/sway/config.d/10-display.conf (+ chezmoi)
+#   3. GTK 2 / 3 / 4         gtk-cursor-theme-size
+#   4. GSettings             org.gnome.desktop.interface cursor-size
+#   5. Xresources            Xcursor.size (X11 / Xwayland apps)
+#   6. Session environment   environment.d/30-cursor.conf (+ chezmoi),
+#                            systemd user env, dbus activation env
 # ==============================================================================
 set -euo pipefail
 
-DELTA="${1:-4}"
+# Sizes actually shipped by phinger-cursors. A requested size that is absent
+# from the theme is silently substituted at load time, which is why arbitrary
+# integers appear to do nothing. Keep this ladder aligned with the theme.
+SIZES=(24 32 48 64 96 128)
 
-# 1. Get current size from gsettings or fallback to sway config / Xresources
-CURRENT_SIZE=$(gsettings get org.gnome.desktop.interface cursor-size 2>/dev/null | tr -d "'\"" || true)
-if [[ -z "$CURRENT_SIZE" || "$CURRENT_SIZE" -le 0 ]]; then
-    CURRENT_SIZE=$(grep -oE 'seat (\*|seat0) xcursor_theme [^ ]+ [0-9]+' "$HOME/.config/sway/config.d/10-display.conf" "$HOME/.config/sway/config" 2>/dev/null | awk '{print $5}' | head -n1 || true)
-fi
-if [[ -z "$CURRENT_SIZE" || "$CURRENT_SIZE" -le 0 ]]; then
-    CURRENT_SIZE=$(grep -E '^Xcursor\.size:' "$HOME/.Xresources" 2>/dev/null | awk '{print $2}' || true)
-fi
-CURRENT_SIZE="${CURRENT_SIZE:-32}"
+SWAY_CONF="$HOME/.config/sway/config.d/10-display.conf"
+SWAY_SRC="$HOME/.local/share/chezmoi/dot_config/sway/config.d/10-display.conf"
+ENV_CONF="$HOME/.config/environment.d/30-cursor.conf"
+ENV_SRC="$HOME/.local/share/chezmoi/dot_config/environment.d/30-cursor.conf"
 
-NEW_SIZE=$(( CURRENT_SIZE + DELTA ))
+die() {
+    printf 'adjust-cursor-size: %s\n' "$*" >&2
+    exit 1
+}
 
-# Clamp between 16 and 64
-if (( NEW_SIZE > 64 )); then
-    NEW_SIZE=64
-fi
-if (( NEW_SIZE < 16 )); then
-    NEW_SIZE=16
+# --- current state ------------------------------------------------------------
+current_from_sway_config() {
+    grep -oE 'seat (\*|seat0) xcursor_theme [^ ]+ [0-9]+' "$SWAY_CONF" 2>/dev/null \
+        | awk '{print $5}' | head -n1
+}
+
+current_from_gsettings() {
+    gsettings get org.gnome.desktop.interface cursor-size 2>/dev/null | tr -d "'\""
+}
+
+current_theme() {
+    local t
+    t=$(grep -oE 'seat (\*|seat0) xcursor_theme [^ ]+' "$SWAY_CONF" 2>/dev/null \
+        | awk '{print $4}' | head -n1)
+    [ -n "$t" ] || t=$(gsettings get org.gnome.desktop.interface cursor-theme 2>/dev/null | tr -d "'\"")
+    [ -n "$t" ] || t=$(grep -E '^Xcursor\.theme:' "$HOME/.Xresources" 2>/dev/null | awk '{print $2}')
+    printf '%s' "${t:-phinger-cursors-gruvbox-material-light}"
+}
+
+theme_display_name() {
+    local d="$HOME/.local/share/icons/$1/index.theme"
+    if [ -f "$d" ]; then
+        sed -n 's/^Name=//p' "$d" | head -n1
+    fi
+}
+
+nearest_size() {
+    local want=$1 best=${SIZES[0]} s d
+    for s in "${SIZES[@]}"; do
+        d=$(( s > want ? s - want : want - s ))
+        local bd=$(( best > want ? best - want : want - best ))
+        (( d < bd )) && best=$s
+    done
+    printf '%s' "$best"
+}
+
+index_of() {
+    local want=$1 i
+    for i in "${!SIZES[@]}"; do
+        if [ "${SIZES[$i]}" -eq "$want" ]; then
+            printf '%s' "$i"
+            return 0
+        fi
+    done
+    return 1
+}
+
+CURRENT_RAW="${1:-}"
+if [ -z "$CURRENT_RAW" ]; then
+    CURRENT_RAW=$(current_from_sway_config)
+    [ -n "$CURRENT_RAW" ] || CURRENT_RAW=$(current_from_gsettings)
+    CURRENT_SIZE=$(nearest_size "${CURRENT_RAW:-32}")
+    THEME=$(current_theme)
+    NAME=$(theme_display_name "$THEME")
+    printf 'Cursor theme : %s%s\n' "$THEME" "${NAME:+ ($NAME)}"
+    printf 'Cursor size  : %spx\n' "$CURRENT_SIZE"
+    printf 'Available    : %s\n' "$(printf '%s ' "${SIZES[@]}" | sed 's/ $//')"
+    printf 'GTK / GSettings / Xresources: %s / %s / %s\n' \
+        "$(grep -hoE 'gtk-cursor-theme-size=[0-9]+' "$HOME/.config/gtk-3.0/settings.ini" "$HOME/.config/gtk-4.0/settings.ini" 2>/dev/null | cut -d= -f2 | paste -sd/ -)" \
+        "$(current_from_gsettings)" \
+        "$(grep -E '^Xcursor\.size:' "$HOME/.Xresources" 2>/dev/null | awk '{print $2}')"
+    printf 'Session env  : XCURSOR_SIZE=%s\n' "$(grep -E '^XCURSOR_SIZE=' "$ENV_CONF" 2>/dev/null | cut -d= -f2)"
+    exit 0
 fi
 
-# 2. Get current cursor theme
-CURRENT_THEME=$(gsettings get org.gnome.desktop.interface cursor-theme 2>/dev/null | tr -d "'\"" || true)
-if [[ -z "$CURRENT_THEME" ]]; then
-    CURRENT_THEME=$(grep -oE 'seat (\*|seat0) xcursor_theme [^ ]+' "$HOME/.config/sway/config.d/10-display.conf" "$HOME/.config/sway/config" 2>/dev/null | awk '{print $4}' | head -n1 || true)
-fi
-CURRENT_THEME="${CURRENT_THEME:-phinger-cursors-gruvbox-material}"
+# --- resolve target -----------------------------------------------------------
+THEME=$(current_theme)
+BASE=$(current_from_sway_config)
+[ -n "$BASE" ] || BASE=$(current_from_gsettings)
+BASE=$(nearest_size "${BASE:-32}")
 
-# 3. Update GSettings (GNOME / GTK live)
+case "$CURRENT_RAW" in
+    +*|-*)
+        if ! idx=$(index_of "$BASE"); then
+            die "current size ${BASE}px is not in the theme ladder"
+        fi
+        if [ "${CURRENT_RAW:0:1}" = "+" ]; then
+            if (( idx + 1 >= ${#SIZES[@]} )); then
+                printf 'Already at the largest available size (%spx).\n' "${SIZES[$idx]}"
+                exit 2
+            fi
+            NEW_SIZE=${SIZES[$((idx + 1))]}
+        else
+            if (( idx - 1 < 0 )); then
+                printf 'Already at the smallest available size (%spx).\n' "${SIZES[$idx]}"
+                exit 2
+            fi
+            NEW_SIZE=${SIZES[$((idx - 1))]}
+        fi
+        ;;
+    [0-9]*)
+        NEW_SIZE=$(nearest_size "$CURRENT_RAW")
+        if [ "$NEW_SIZE" != "$CURRENT_RAW" ]; then
+            printf 'Snapped %spx to %spx (theme only ships: %s).\n' \
+                "$CURRENT_RAW" "$NEW_SIZE" "$(printf '%s ' "${SIZES[@]}" | sed 's/ $//')"
+        fi
+        ;;
+    *)
+        die "invalid argument '$CURRENT_RAW' (use +, -, +4, -4, or an absolute size)"
+        ;;
+esac
+
+if [ "$NEW_SIZE" = "$BASE" ]; then
+    printf 'Cursor size already %spx; nothing to do.\n' "$NEW_SIZE"
+    exit 0
+fi
+
+# --- 1. GTK 2 / 3 / 4 ---------------------------------------------------------
+for cfg in "$HOME/.gtkrc-2.0" "$HOME/.config/gtk-3.0/settings.ini" "$HOME/.config/gtk-4.0/settings.ini"; do
+    [ -f "$cfg" ] || continue
+    sed -i -E "s/gtk-cursor-theme-size=.*/gtk-cursor-theme-size=$NEW_SIZE/" "$cfg"
+done
+
+# --- 2. GSettings -------------------------------------------------------------
 gsettings set org.gnome.desktop.interface cursor-size "$NEW_SIZE" 2>/dev/null || true
 
-# 4. Update .Xresources & merge
+# --- 3. Xresources ------------------------------------------------------------
 if [ -f "$HOME/.Xresources" ]; then
-    sed -i -E "s/Xcursor\.size:.*/Xcursor.size: $NEW_SIZE/" "$HOME/.Xresources"
-    command -v xrdb >/dev/null 2>&1 && xrdb -merge "$HOME/.Xresources" 2>/dev/null || true
+    sed -i -E "s/^Xcursor\.size:.*/Xcursor.size: $NEW_SIZE/" "$HOME/.Xresources"
 fi
 
-# 5. Update GTK 2
-if [ -f "$HOME/.gtkrc-2.0" ]; then
-    sed -i -E "s/gtk-cursor-theme-size=.*/gtk-cursor-theme-size=$NEW_SIZE/" "$HOME/.gtkrc-2.0"
-fi
+# --- 4. Sway config, live and chezmoi source ----------------------------------
+saw_sway_src=0
+for scfg in "$SWAY_CONF" "$SWAY_SRC"; do
+    [ -f "$scfg" ] || continue
+    sed -i -E "s/^(seat (\*|seat0) xcursor_theme [^ ]+ )[0-9]+/\1$NEW_SIZE/" "$scfg"
+    [ "$scfg" = "$SWAY_SRC" ] && saw_sway_src=1
+done
 
-# 6. Update GTK 3 & 4
-for cfg in "$HOME/.config/gtk-3.0/settings.ini" "$HOME/.config/gtk-4.0/settings.ini"; do
-    if [ -f "$cfg" ]; then
-        sed -i -E "s/gtk-cursor-theme-size=.*/gtk-cursor-theme-size=$NEW_SIZE/" "$cfg"
+# --- 5. Session environment ---------------------------------------------------
+for ecfg in "$ENV_CONF" "$ENV_SRC"; do
+    [ -f "$ecfg" ] || continue
+    if grep -qE '^XCURSOR_SIZE=' "$ecfg"; then
+        sed -i -E "s/^XCURSOR_SIZE=.*/XCURSOR_SIZE=$NEW_SIZE/" "$ecfg"
+    else
+        printf 'XCURSOR_SIZE=%s\n' "$NEW_SIZE" >> "$ecfg"
     fi
 done
 
-# 7. Update i3 config & root window
-if [ -f "$HOME/.config/i3/config" ]; then
-    sed -i -E "s/cursor-size [0-9]+/cursor-size $NEW_SIZE/" "$HOME/.config/i3/config" 2>/dev/null || true
-fi
-if [ -n "${DISPLAY:-}" ] && command -v xsetroot >/dev/null 2>&1; then
-    xsetroot -cursor_name left_ptr 2>/dev/null || true
-fi
-
-# 8. Update Sway config & live compositor
-for scfg in "$HOME/.config/sway/config.d/10-display.conf" "$HOME/.config/sway/config"; do
-    if [ -f "$scfg" ]; then
-        sed -i -E "s/^(seat (\*|seat0) xcursor_theme [^ ]+ )[0-9]+/\1$NEW_SIZE/" "$scfg" 2>/dev/null || true
-    fi
-done
-
-export XCURSOR_THEME="$CURRENT_THEME"
+export XCURSOR_THEME="$THEME"
 export XCURSOR_SIZE="$NEW_SIZE"
 systemctl --user import-environment XCURSOR_THEME XCURSOR_SIZE 2>/dev/null || true
 command -v dbus-update-activation-environment >/dev/null 2>&1 && \
     dbus-update-activation-environment --systemd XCURSOR_THEME XCURSOR_SIZE 2>/dev/null || true
 
+# --- 6. Live compositor -------------------------------------------------------
+live_ok=0
 if [ -n "${SWAYSOCK:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
-    swaymsg "seat * xcursor_theme $CURRENT_THEME $NEW_SIZE" >/dev/null 2>&1 || true
+    if swaymsg "seat * xcursor_theme $THEME $NEW_SIZE" >/dev/null 2>&1; then
+        live_ok=1
+    fi
 fi
 
-# 9. Notify user
+# --- 7. Report ----------------------------------------------------------------
+printf 'Cursor size: %spx -> %spx (theme %s)\n' "$BASE" "$NEW_SIZE" "$THEME"
+[ "$live_ok" -eq 1 ] && printf 'Applied live to the Sway seat.\n'
+[ "$saw_sway_src" -eq 0 ] && printf 'Warning: chezmoi sway source not found, only live config updated.\n'
+if [ "$live_ok" -eq 0 ]; then
+    printf 'Note: Sway IPC unavailable; size applies after the next reload or login.\n'
+fi
+printf 'Running GTK/Qt apps may keep the old cursor until restarted.\n'
+
 if command -v notify-send >/dev/null 2>&1; then
-    notify-send -a "Cursor" -u low -i preferences-desktop-theme -r 9944 "Cursor Size" "Set to ${NEW_SIZE}px"
-elif command -v dunstify >/dev/null 2>&1; then
-    dunstify -a "Cursor" -u low -i preferences-desktop-theme -r 9944 "Cursor Size" "Set to ${NEW_SIZE}px"
+    notify-send -a "Cursor" -u low -i preferences-desktop-theme -r 9944 \
+        "Cursor Size" "${NEW_SIZE}px"
 fi

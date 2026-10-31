@@ -77,9 +77,10 @@ def check_theme_file(filepath, strict=False):
             if g_count is not None:
                 try:
                     gc_int = int(g_count)
-                    if gc_int < 1 or gc_int > 32:
+                    gradient_enabled = str(g) == "1"
+                    if gc_int < 0 or gc_int > 32 or (gradient_enabled and gc_int < 1):
                         warnings.append(f"Unusual Cava gradient_count: {gc_int}")
-                except ValueError:
+                except (TypeError, ValueError):
                     errors.append(f"Invalid non-integer Cava gradient_count: {g_count}")
 
     return errors, warnings

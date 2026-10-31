@@ -46,7 +46,21 @@ esac
 
 # Launch minimal selector (fuzzel on Wayland/Sway, clean rofi on X11)
 if command -v fuzzel >/dev/null 2>&1 && [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
-    chosen=$(printf '%s\n' "${options[@]}" | fuzzel --dmenu --prompt "❯ " --width 32 --lines "${#options[@]}" --select "$selected_label")
+    menu_lines=()
+    for opt in "${options[@]}"; do
+        if [[ "$opt" == "$selected_label" ]]; then
+            menu_lines+=("● $opt")
+        else
+            menu_lines+=("  $opt")
+        fi
+    done
+    chosen=$(printf '%s\n' "${menu_lines[@]}" | fuzzel --dmenu \
+        --prompt "Speakers  " \
+        --placeholder "Filter voicings" \
+        --font "Iosevka Nerd Font:size=15" \
+        --width 32 \
+        --lines "${#options[@]}" \
+        --select-index "$selected_index")
 else
     chosen=$(printf '%s\n' "${options[@]}" | rofi -dmenu -i -p "❯" -selected-row "$selected_index" -theme-str '
         window { width: 380px; padding: 12px; border: 2px; border-radius: 0px; }

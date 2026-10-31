@@ -1,0 +1,562 @@
+#!/usr/bin/env python3
+"""Fetch and cycle up to five wallpapers shipped by the active Omarchy theme.
+
+No daemon and no eager gallery-wide downloads. Wallpaper metadata comes from the
+canonical theme JSON; image bytes are cached only when the user asks for them.
+"""
+from __future__ import annotations
+
+import fcntl
+import json
+import os
+import random
+import re
+import subprocess
+import sys
+import tempfile
+import urllib.parse
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
+from pathlib import Path
+
+MAX_WALLPAPERS = 5
+FETCH_WORKERS = 5
+MAX_IMAGE_BYTES = 50 * 1024 * 1024
+THEME_CACHE = Path(os.path.expanduser("~/.cache/theme/themes"))
+WALLPAPER_CACHE = Path(os.path.expanduser("~/.cache/theme/wallpapers"))
+STATE_DIR = Path(os.path.expanduser("~/.local/state/theme/wallpaper"))
+ACTIVE_THEME = Path(os.path.expanduser("~/.local/state/theme/name"))
+CURRENT_WALLPAPER = Path(os.path.expanduser("~/.config/current_wallpaper"))
+WSET = Path(os.path.expanduser("~/.local/bin/wset"))
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
+
+
+def die(message: str, code: int = 1) -> None:
+    print(f"theme-wallpaper: {message}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def which(command: str) -> str | None:
+    for directory in os.environ.get("PATH", "").split(os.pathsep):
+        path = Path(directory) / command
+        if path.is_file() and os.access(path, os.X_OK):
+            return str(path)
+    return None
+
+
+def notify(title: str, body: str) -> None:
+    if not which("notify-send"):
+        return
+    subprocess.run(
+        ["notify-send", "-i", "preferences-desktop-wallpaper", "-t", "1800", title, body],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+
+
+def normalized_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+
+
+def active_theme_name() -> str:
+    try:
+        value = ACTIVE_THEME.read_text(encoding="utf-8").strip()
+    except OSError:
+        value = ""
+    if not value:
+        die("no active theme; run theme-set first")
+    return value
+
+
+def load_theme(requested: str | None = None) -> tuple[str, dict]:
+    requested = requested or active_theme_name()
+    exact = THEME_CACHE / f"{requested}.json"
+    if exact.is_file():
+        return requested, json.loads(exact.read_text(encoding="utf-8"))
+
+    needle = normalized_name(requested)
+    matches: list[tuple[str, dict]] = []
+    for path in sorted(THEME_CACHE.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        aliases = {
+            normalized_name(path.stem),
+            normalized_name(str(data.get("name") or "")),
+            normalized_name(str(data.get("display_name") or "")),
+        }
+        if needle in aliases:
+            matches.append((path.stem, data))
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        die(f"theme name is ambiguous: {requested}")
+    die(f"theme not found: {requested}")
+
+
+def theme_candidates(theme: dict) -> list[str]:
+    assets = theme.get("assets") or {}
+    values = assets.get("wallpapers") or []
+    if isinstance(values, str):
+        values = [values]
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        path = str(value).replace("\\", "/").lstrip("./")
+        if not path or Path(path).suffix.lower() not in IMAGE_SUFFIXES:
+            continue
+        key = path.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(path)
+        if len(result) >= MAX_WALLPAPERS:
+            break
+    return result
+
+
+def github_raw_base(theme: dict) -> tuple[str, str, str]:
+    source = theme.get("source") or {}
+    repo = str(source.get("repository") or "").rstrip("/")
+    parsed = urllib.parse.urlparse(repo)
+    if parsed.scheme != "https" or parsed.hostname not in {"github.com", "www.github.com"}:
+        die("wallpaper fetch is supported only for HTTPS GitHub theme repositories")
+    parts = [part for part in parsed.path.strip("/").split("/") if part]
+    if len(parts) < 2:
+        die(f"invalid GitHub repository URL: {repo}")
+    owner, repository = parts[0], parts[1]
+    if repository.endswith(".git"):
+        repository = repository[:-4]
+    ref = str(source.get("commit") or source.get("branch") or "main")
+    return owner, repository, ref
+
+
+def cache_dir(theme_name: str) -> Path:
+    return WALLPAPER_CACHE / theme_name
+
+
+def state_file(theme_name: str) -> Path:
+    return STATE_DIR / theme_name
+
+
+@contextmanager
+def fetch_lock(theme_name: str):
+    """Serialize first-use downloads so repeated hotkeys do not duplicate work."""
+    directory = cache_dir(theme_name)
+    directory.mkdir(parents=True, exist_ok=True)
+    lock_path = directory / ".fetch.lock"
+    with open(lock_path, "a+", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def valid_image_header(header: bytes) -> bool:
+    return (
+        header.startswith(b"\x89PNG\r\n\x1a\n")
+        or header.startswith(b"\xff\xd8\xff")
+        or (len(header) >= 12 and header[:4] == b"RIFF" and header[8:12] == b"WEBP")
+    )
+
+
+def safe_filename(index: int, source_path: str) -> str:
+    base = Path(source_path).name
+    base = re.sub(r"[^A-Za-z0-9._@+-]+", "-", base).strip("-") or f"wallpaper-{index}"
+    return f"{index:02d}-{base}"
+
+
+def download_one(url: str, destination: Path) -> None:
+    request = urllib.request.Request(url, headers={"User-Agent": "theme-wallpaper/1.0"})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        content_length = response.headers.get("Content-Length")
+        if content_length and int(content_length) > MAX_IMAGE_BYTES:
+            raise RuntimeError(f"image exceeds {MAX_IMAGE_BYTES // (1024 * 1024)} MiB safety limit")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(prefix=".download-", dir=destination.parent)
+        total = 0
+        header = b""
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    if not header:
+                        header = chunk[:16]
+                    total += len(chunk)
+                    if total > MAX_IMAGE_BYTES:
+                        raise RuntimeError(f"image exceeds {MAX_IMAGE_BYTES // (1024 * 1024)} MiB safety limit")
+                    handle.write(chunk)
+                handle.flush()
+                os.fsync(handle.fileno())
+            if not valid_image_header(header):
+                raise RuntimeError("download is not a supported PNG/JPEG/WebP image")
+            os.replace(tmp_name, destination)
+        finally:
+            try:
+                os.unlink(tmp_name)
+            except FileNotFoundError:
+                pass
+
+
+def curl_parallel_download(work: list[tuple[int, str, Path, str]]) -> dict[int, tuple[bool, str | None]]:
+    """Download independent wallpapers with libcurl parallel transfers when available."""
+    curl = which("curl")
+    if not curl or len(work) < 2:
+        return {}
+
+    temp_paths: dict[int, Path] = {}
+    args = [
+        curl,
+        "--parallel",
+        "--parallel-immediate",
+        "--parallel-max",
+        str(min(FETCH_WORKERS, len(work))),
+    ]
+
+    try:
+        for position, (index, _relative, destination, url) in enumerate(work):
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp_name = tempfile.mkstemp(prefix=".curl-", dir=destination.parent)
+            os.close(fd)
+            temp_paths[index] = Path(tmp_name)
+            if position:
+                args.append("--next")
+            args.extend(
+                [
+                    "--fail",
+                    "--location",
+                    "--silent",
+                    "--show-error",
+                    "--connect-timeout",
+                    "5",
+                    "--max-time",
+                    "30",
+                    "--max-filesize",
+                    str(MAX_IMAGE_BYTES),
+                    "--output",
+                    tmp_name,
+                    url,
+                ]
+            )
+
+        result = subprocess.run(
+            args,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=35,
+            check=False,
+        )
+        common_error = result.stderr.strip() or (f"curl exited with status {result.returncode}" if result.returncode else "")
+        results: dict[int, tuple[bool, str | None]] = {}
+
+        for index, _relative, destination, _url in work:
+            tmp = temp_paths[index]
+            try:
+                size = tmp.stat().st_size
+                with tmp.open("rb") as handle:
+                    header = handle.read(16)
+                if size <= 0:
+                    raise RuntimeError(common_error or "empty curl response")
+                if size > MAX_IMAGE_BYTES:
+                    raise RuntimeError(f"image exceeds {MAX_IMAGE_BYTES // (1024 * 1024)} MiB safety limit")
+                if not valid_image_header(header):
+                    raise RuntimeError(common_error or "curl response is not a supported PNG/JPEG/WebP image")
+                os.replace(tmp, destination)
+                results[index] = (True, None)
+            except Exception as exc:
+                results[index] = (False, str(exc))
+        return results
+    except Exception:
+        return {}
+    finally:
+        for tmp in temp_paths.values():
+            try:
+                tmp.unlink()
+            except FileNotFoundError:
+                pass
+
+
+def manifest_path(theme_name: str) -> Path:
+    return cache_dir(theme_name) / "manifest.json"
+
+
+def load_manifest(theme_name: str) -> dict:
+    try:
+        return json.loads(manifest_path(theme_name).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def cached_images(theme_name: str) -> list[Path]:
+    manifest = load_manifest(theme_name)
+    files: list[Path] = []
+    for item in manifest.get("files", []):
+        filename = item.get("file") if isinstance(item, dict) else None
+        if not filename:
+            continue
+        path = cache_dir(theme_name) / filename
+        if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES:
+            files.append(path)
+    if files:
+        return files[:MAX_WALLPAPERS]
+    return sorted(
+        path
+        for path in cache_dir(theme_name).glob("*")
+        if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
+    )[:MAX_WALLPAPERS]
+
+
+def fetch(theme_name: str, theme: dict, force: bool = False) -> list[Path]:
+    candidates = theme_candidates(theme)
+    if not candidates:
+        die(f"{theme.get('display_name') or theme_name} has no upstream wallpaper candidates")
+    owner, repository, ref = github_raw_base(theme)
+    directory = cache_dir(theme_name)
+    directory.mkdir(parents=True, exist_ok=True)
+
+    expected_signature = {
+        "repository": str((theme.get("source") or {}).get("repository") or ""),
+        "ref": ref,
+        "candidates": candidates,
+    }
+
+    # Only the explicit wallpaper action enters this path. Theme import/theme-set
+    # remain metadata-only and network-free. Serialize concurrent keypresses here,
+    # then fetch the <=5 independent assets in parallel inside the single owner.
+    with fetch_lock(theme_name):
+        current = load_manifest(theme_name)
+        signature_matches = all(current.get(key) == value for key, value in expected_signature.items())
+        if not force and signature_matches:
+            existing = cached_images(theme_name)
+            if len(existing) == len(current.get("files", [])) and existing:
+                return existing
+
+        print(f"Fetching up to {len(candidates)} wallpaper(s) for {theme.get('display_name') or theme_name}...")
+        keep_names: set[str] = set()
+        work: list[tuple[int, str, Path, str]] = []
+        results: dict[int, tuple[bool, str | None]] = {}
+
+        for index, relative in enumerate(candidates, 1):
+            filename = safe_filename(index, relative)
+            destination = directory / filename
+            keep_names.add(filename)
+            quoted_path = urllib.parse.quote(relative, safe="/@+-._~")
+            quoted_ref = urllib.parse.quote(ref, safe="")
+            url = (
+                f"https://raw.githubusercontent.com/{urllib.parse.quote(owner, safe='')}/"
+                f"{urllib.parse.quote(repository, safe='')}/{quoted_ref}/{quoted_path}"
+            )
+            # A changed commit/candidate signature must refresh an existing file;
+            # otherwise an old image with the same filename could survive forever.
+            if force or not signature_matches or not destination.is_file():
+                work.append((index, relative, destination, url))
+            else:
+                results[index] = (True, None)
+
+        if work:
+            # libcurl's parallel transfer path avoids the long cold-start stalls
+            # observed with urllib on raw.githubusercontent.com. Any missing or
+            # invalid transfer falls back to the validated Python downloader.
+            results.update(curl_parallel_download(work))
+            remaining = [job for job in work if not results.get(job[0], (False, None))[0]]
+            if remaining:
+                worker_count = min(FETCH_WORKERS, len(remaining))
+                with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="theme-wallpaper") as pool:
+                    futures = {
+                        pool.submit(download_one, url, destination): (index, relative)
+                        for index, relative, destination, url in remaining
+                    }
+                    for future in as_completed(futures):
+                        index, relative = futures[future]
+                        try:
+                            future.result()
+                            results[index] = (True, None)
+                        except Exception as exc:
+                            results[index] = (False, str(exc))
+
+        files: list[dict] = []
+        for index, relative in enumerate(candidates, 1):
+            filename = safe_filename(index, relative)
+            destination = directory / filename
+            ok, error = results.get(index, (False, "download did not complete"))
+            if ok and destination.is_file():
+                files.append({"source": relative, "file": filename})
+                print(f"  {index}/{len(candidates)} {relative}")
+            else:
+                print(f"  warning: {relative}: {error}", file=sys.stderr)
+
+        for path in directory.iterdir():
+            if path.name in {"manifest.json", ".fetch.lock"}:
+                continue
+            if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES and path.name not in keep_names:
+                path.unlink(missing_ok=True)
+
+        if not files:
+            die("none of the upstream wallpaper candidates could be fetched")
+
+        payload = {"theme": theme_name, **expected_signature, "files": files[:MAX_WALLPAPERS]}
+        temp = manifest_path(theme_name).with_suffix(".json.tmp")
+        temp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        os.replace(temp, manifest_path(theme_name))
+        return cached_images(theme_name)
+
+
+def selected_image(theme_name: str, images: list[Path]) -> Path | None:
+    if not images:
+        return None
+    try:
+        selected = state_file(theme_name).read_text(encoding="utf-8").strip()
+    except OSError:
+        selected = ""
+    for path in images:
+        if path.name == selected:
+            return path
+    try:
+        global_current = Path(CURRENT_WALLPAPER.read_text(encoding="utf-8").strip()).resolve()
+    except OSError:
+        global_current = None
+    if global_current:
+        for path in images:
+            try:
+                if path.resolve() == global_current:
+                    return path
+            except OSError:
+                pass
+    return None
+
+
+def remember(theme_name: str, path: Path) -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    target = state_file(theme_name)
+    temp = target.with_suffix(".tmp")
+    temp.write_text(path.name + "\n", encoding="utf-8")
+    os.replace(temp, target)
+
+
+def apply(theme_name: str, path: Path, position: int, total: int) -> None:
+    if not WSET.is_file():
+        die(f"missing wallpaper helper: {WSET}")
+    result = subprocess.run([str(WSET), str(path), "fill"], check=False)
+    if result.returncode != 0:
+        die(f"failed to apply {path}")
+    remember(theme_name, path)
+    print(f"Applied {position}/{total}: {path}")
+
+
+def ensure_images(theme_name: str, theme: dict, force: bool = False) -> list[Path]:
+    images = cached_images(theme_name)
+    if force or not images:
+        notify("Theme wallpaper", f"Fetching backgrounds for {theme.get('display_name') or theme_name}")
+        images = fetch(theme_name, theme, force=force)
+    return images
+
+
+def usage() -> None:
+    print("""Usage: theme-wallpaper [command] [theme]
+
+Commands:
+  next [theme]       Fetch on first use, then apply next wallpaper (default)
+  prev [theme]       Fetch on first use, then apply previous wallpaper
+  random [theme]     Fetch on first use, then apply a random wallpaper
+  set N [theme]      Apply wallpaper N (1..5)
+  fetch [theme]      Cache up to five upstream wallpapers without applying
+  refresh [theme]    Re-download the selected upstream set
+  list [theme]       Show upstream candidates and local cache state
+  current [theme]    Show the remembered wallpaper for a theme
+
+Theme defaults to the currently active theme. Cached images live under
+~/.cache/theme/wallpapers/<theme>/ and are fetched only on demand.
+""")
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    if args and args[0] in {"-h", "--help", "help"}:
+        usage()
+        return 0
+
+    command = args[0] if args else "next"
+    valid = {"next", "prev", "random", "set", "fetch", "refresh", "list", "current"}
+    if command not in valid:
+        die(f"unknown command: {command}; use --help")
+
+    index_arg: int | None = None
+    theme_arg: str | None = None
+    if command == "set":
+        if len(args) < 2:
+            die("set requires an index from 1 to 5")
+        try:
+            index_arg = int(args[1])
+        except ValueError:
+            die("set index must be an integer from 1 to 5")
+        theme_arg = args[2] if len(args) > 2 else None
+    else:
+        theme_arg = args[1] if len(args) > 1 else None
+
+    theme_name, theme = load_theme(theme_arg)
+    candidates = theme_candidates(theme)
+
+    if command == "list":
+        print(f"Theme: {theme.get('display_name') or theme_name} ({theme_name})")
+        print(f"Repository: {(theme.get('source') or {}).get('repository') or 'none'}")
+        print(f"Upstream candidates: {len(candidates)}/{MAX_WALLPAPERS}")
+        for index, item in enumerate(candidates, 1):
+            print(f"  {index}. {item}")
+        images = cached_images(theme_name)
+        print(f"Cached: {len(images)}/{MAX_WALLPAPERS}")
+        selected = selected_image(theme_name, images)
+        for index, path in enumerate(images, 1):
+            marker = " *" if selected == path else ""
+            print(f"  {index}. {path}{marker}")
+        return 0
+
+    if command == "current":
+        images = cached_images(theme_name)
+        print(selected_image(theme_name, images) or "none")
+        return 0
+
+    if command == "fetch":
+        images = ensure_images(theme_name, theme)
+        print(f"Cached {len(images)} wallpaper(s) in {cache_dir(theme_name)}")
+        return 0
+
+    if command == "refresh":
+        images = ensure_images(theme_name, theme, force=True)
+        print(f"Refreshed {len(images)} wallpaper(s) in {cache_dir(theme_name)}")
+        return 0
+
+    images = ensure_images(theme_name, theme)
+    if not images:
+        die("no cached wallpapers available")
+    selected = selected_image(theme_name, images)
+
+    if command == "set":
+        assert index_arg is not None
+        if index_arg < 1 or index_arg > len(images):
+            die(f"wallpaper index must be between 1 and {len(images)}")
+        target_index = index_arg - 1
+    elif command == "random":
+        choices = list(range(len(images)))
+        if selected in images and len(choices) > 1:
+            choices.remove(images.index(selected))
+        target_index = random.choice(choices)
+    elif selected not in images:
+        target_index = 0 if command == "next" else len(images) - 1
+    else:
+        current_index = images.index(selected)
+        delta = 1 if command == "next" else -1
+        target_index = (current_index + delta) % len(images)
+
+    apply(theme_name, images[target_index], target_index + 1, len(images))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

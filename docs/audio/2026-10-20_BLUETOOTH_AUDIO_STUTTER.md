@@ -94,15 +94,17 @@ what keeps unchecked devices from being re-dialed by anything else.
 
 | Checkbox | Applied action |
 | :--- | :--- |
-| Checked (ON) | `bluetoothctl unblock`, then foreground `timeout 12 bluetoothctl connect` if not already connected; if it is the only checked device, set it as default sink and move all current streams to it |
+| Checked (ON) | `bluetoothctl unblock`, then plain `bluetoothctl connect` for each disconnected checked device; dials run concurrently and are allowed to finish naturally |
 | Unchecked (OFF) | `bluetoothctl block` + disconnect if connected |
 
 Details:
 
-- Off is applied before on, so two devices are never intentionally connected at once.
+- Off is applied before on, then all required connect attempts are started in parallel. Total wait is therefore one BlueZ page timeout rather than one timeout per device.
+- There is deliberately no external `timeout` around `bluetoothctl connect`: killing the client while the controller page is active can leave a pending HCI Create Connection and make the next attempt fail with `br-connection-busy` until the controller timeout expires.
 - Checked set is written to `~/.config/bt-autoconnect/selection.txt` (one MAC per line).
+- If exactly one selected device is connected after dialing, it becomes the default sink and current streams move to it; if multiple selected sinks are connected, the existing default is preserved.
 - A `notify-send` summary (ON/OFF device names) is shown after applying.
-- Current selection: `B0:38:E2:78:9B:FE` (soundcore Q20i only).
+- Current selection at the original session baseline was `B0:38:E2:78:9B:FE` (soundcore Q20i only); re-query the selection file before relying on that historical value.
 
 ### 4.3 bt-refuse-toggle (Win+Shift+Enter)
 
@@ -113,10 +115,9 @@ Details:
 bindsym $mod+Shift+Return exec --no-startup-id ~/.local/bin/bt-refuse-toggle
 ```
 
-Behavior (foreground, selection-aware):
+Behavior (selection-aware):
 
-- If every selected device is blocked: unblock all and connect with foreground
-  `timeout 12 bluetoothctl connect` (auto-connect ON).
+- If every selected device is blocked: unblock all and launch background `bluetoothctl connect` attempts without an external timeout (auto-connect ON). The toggle returns immediately; BlueZ is allowed to finish each page attempt naturally.
 - Otherwise: block and disconnect the whole selection (auto-connect OFF).
 - Verifies the resulting `Blocked:` state and reports a failure notification if
   it does not match.
@@ -420,23 +421,15 @@ taken before the change is the backstop.
 | PipeWire policy | quantum 512, min 64, max 2048, rate 48000 |
 | Scripts/skill sync | `bt-select`, `bt-refuse-toggle`, WirePlumber conf in sync with chezmoi; skill `bluetooth-autoconnect` v1.5.0 |
 
-Uncommitted chezmoi git changes from this session include the two deleted
-`bt-*.service` sources, `40-keybindings.conf`, the skill update, and this
-document. Commit when ready.
+The original 2026-10-20 session removed the two `bt-*.service` sources and moved Bluetooth connection control to the manual helpers documented above. A later 2026-11-01 helper update removed external `timeout` wrappers from BlueZ `Connect()` calls and parallelized `bt-select` dials to avoid `br-connection-busy` after prematurely killed page attempts.
 
 ---
 
 ## 14. Known Issues / Notes
 
-1. `bt-refuse-toggle` header comment line 13 still says "background connect";
-   the implementation is foreground `timeout 12 bluetoothctl connect`
-   (line 167). Comment fix pending.
-2. The `1 floor ` WiFi has no WAN while the phone tether is connected; the
-   coexistence test cannot run over wlan0 until that is resolved.
-3. `~/docs/audio` is a symlink to `~/.local/share/chezmoi/docs/audio`; this
-   file therefore lives directly in the chezmoi repo tree (untracked in git).
-4. NetworkManager profile name and WiFi SSID both end with a space; always use
-   the UUID (`2787a05e-c867-4d75-b138-155aa8446e90`) in scripts.
+1. The `1 floor ` WiFi has no WAN while the phone tether is connected; the coexistence test cannot run over wlan0 until that is resolved.
+2. `~/docs/audio` is a symlink to `~/.local/share/chezmoi/docs/audio`; this file therefore lives directly in the chezmoi repo tree.
+3. NetworkManager profile name and WiFi SSID both end with a space; always use the UUID (`2787a05e-c867-4d75-b138-155aa8446e90`) in scripts.
 
 ---
 

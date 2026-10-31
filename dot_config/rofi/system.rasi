@@ -5,7 +5,8 @@
  * - Colors are DYNAMIC via theme-set: ~/.local/state/theme/rofi.rasi
  *   (generated from ~/.config/theme/templates/rofi.rasi). Never hardcode hex here.
  * - Corners are SHARP everywhere: every border-radius in every layout = 0.
- * - Font is VictorMono Nerd Font Mono everywhere.
+ * - Font is VictorMono Nerd Font Mono everywhere, except network-menu.rasi
+ *   which uses Iosevka Nerd Font Mono to match the system UI/mono font.
  * - Geometry baseline matches theme-picker-nvchad (860px wide, 2px accent border).
  * - Selection is uniform: accent fill + dark text (#1d2021).
  */

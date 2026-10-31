@@ -21,3 +21,12 @@ swayimg
 pamixer
 brightnessctl
 pavucontrol
+
+# Omarchy programming-font set (all Nerd Font variants)
+ttf-jetbrains-mono-nerd
+ttf-cascadia-code-nerd
+ttf-meslo-nerd
+ttf-firacode-nerd
+ttf-victor-mono-nerd
+ttf-bitstream-vera-mono-nerd
+ttf-iosevka-nerd

@@ -1,0 +1,67 @@
+#!/bin/sh
+# ==============================================================================
+# battery-meter - slider-style battery meter for the fastfetch battery row
+# ==============================================================================
+# Renders the charge level as a heavy line with a diamond head, in the style of
+# the ghelper Power tab sliders, instead of a plain block bar.
+#
+#   ━━━━━━◆───  60% · AC
+#
+# The filled part and the diamond share the level colour (green / yellow / red),
+# the remaining track is dim, and a charging bolt is appended when charging.
+#
+# Environment:
+#   BATTERY_PATH   sysfs battery directory (default /sys/class/power_supply/BAT0)
+#   BATTERY_CELLS  meter width in cells (default 10)
+# ==============================================================================
+set -u
+
+BAT="${BATTERY_PATH:-/sys/class/power_supply/BAT0}"
+CELLS="${BATTERY_CELLS:-10}"
+
+cap="$(cat "$BAT/capacity" 2>/dev/null || echo 0)"
+status="$(cat "$BAT/status" 2>/dev/null || echo Unknown)"
+
+case "$cap" in
+    ''|*[!0-9]*) cap=0 ;;
+esac
+[ "$cap" -gt 100 ] && cap=100
+[ "$cap" -lt 0 ] && cap=0
+
+# Keep one cell for the diamond so the head is always visible.
+filled=$(( cap * CELLS / 100 ))
+[ "$filled" -ge "$CELLS" ] && filled=$(( CELLS - 1 ))
+
+if [ "$cap" -ge 50 ]; then
+    colour='1;32'
+elif [ "$cap" -ge 20 ]; then
+    colour='1;33'
+else
+    colour='1;31'
+fi
+
+head=""
+i=0
+while [ "$i" -lt "$filled" ]; do
+    head="$head━"
+    i=$(( i + 1 ))
+done
+head="$head◆"
+
+tail=""
+i=$(( filled + 1 ))
+while [ "$i" -lt "$CELLS" ]; do
+    tail="$tail─"
+    i=$(( i + 1 ))
+done
+
+case "$status" in
+    Charging)       tag="CHR ↑" ;;
+    Discharging)    tag="BAT" ;;
+    Full)           tag="FULL" ;;
+    "Not charging") tag="AC" ;;
+    *)              tag="AC" ;;
+esac
+
+printf '\033[%sm%s\033[0;90m%s\033[0m %s%% · %s\n' \
+    "$colour" "$head" "$tail" "$cap" "$tag"

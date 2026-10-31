@@ -105,7 +105,7 @@ Use this document as the single source of truth for all audio routing and latenc
 * **Microphone Authority:** Voice recording always uses the laptop's internal microphone via `ghelper-audio`.
 
 ### 5.2 Bluetooth TUI Manager (`bluetui`)
-* Launched via kitty: `kitty --class bluetui -e bluetui`
+* Launched via Foot client/server mode: `footclient --app-id=bluetui -o font="Iosevka Nerd Font Mono:size=15:style=Regular" bluetui`; Sway floats it centered at 900x600.
 * Bound to `$mod + Alt + 2` (`Super + Alt + 2`).
 * Zero background daemons, zero resident memory when closed.
 

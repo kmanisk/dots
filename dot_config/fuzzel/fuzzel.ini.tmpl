@@ -1,19 +1,22 @@
 include={{ .chezmoi.homeDir }}/.local/state/theme/fuzzel.ini
+# Font, paddings and border width are scale-derived and live in the generated
+# scale.conf that ui-sync writes. include= is only valid at top level, so this
+# line has to stay above [main]. Sizes are omitted below on purpose: a value
+# here would win over the included one.
+include={{ .chezmoi.homeDir }}/.config/fuzzel/scale.conf
 
 [main]
-font=Iosevka Nerd Font:size=13
 prompt="❯ "
 icon-theme=Papirus-Dark
 icons-enabled=yes
 terminal=footclient
-width=38
-lines=12
+width=36
+lines=10
 tabs=4
-horizontal-pad=18
-vertical-pad=10
-inner-pad=6
+# Draw the selected item's icon in the free space below the list, but keep it
+# small enough that it cannot dominate the window (0 disables it entirely).
+image-size-ratio=0.25
 layer=overlay
 
 [border]
-width=2
 radius=0

@@ -134,8 +134,8 @@ if systemctl --user list-unit-files "sway-session-save.service" &>/dev/null; the
     fi
 fi
 
-# 7. User Services: Bluetooth Auto-Connect & Foot Server Daemon
-for user_svc in "bt-autoconnect.service" "foot-server.service"; do
+# 7. User Services: Bluetooth, Foot Server, and Desktop Commander Remote
+for user_svc in "bt-autoconnect.service" "foot-server.service" "desktop-commander.service"; do
     if systemctl --user list-unit-files "$user_svc" &>/dev/null; then
         if ! systemctl --user is-enabled "$user_svc" &>/dev/null; then
             echo "    [User-Service: Enabling] $user_svc..."

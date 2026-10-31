@@ -423,18 +423,19 @@ Every package, shared library, and neural model utilized across the audio subsys
 | **`pavucontrol`** | `1:6.2-1.1` | Native Arch/CachyOS | GTK GUI volume mixer and per-application stream route manager. |
 | **`upower`** | `1.91.5-1.1` | Native Arch/CachyOS | D-Bus system power service querying Bluetooth headphone battery levels. |
 | **`rofi`** | `2.0.0-1.1` | Native Arch/CachyOS | Dynamic menu launcher powering `rofi-speaker-dsp`. |
-| **`kitty`** | `0.49.2-1.1` | Native Arch/CachyOS | GPU-accelerated terminal running `bluetui` and `micstudio` TUI sessions. |
+| **`kitty`** | `0.49.2-1.1` | Native Arch/CachyOS | GPU-accelerated terminal retained for workflows that still require it; `bluetui` now launches through Foot client/server mode. |
 
 ---
 
 ## 11. Bluetooth Management Suite, TUI & Auto-Routing Policies
 
 ### A. Dedicated Bluetooth TUI (`bluetui`)
-Rather than relying on heavy GNOME or KDE Bluetooth daemons, the system uses **`bluetui`**:
-* **Invocation:** Launched via kitty with class `bluetui`:
+Rather than relying on heavy GNOME or KDE Bluetooth control panels, the system uses **`bluetui`**:
+* **Invocation:** Launched through the Foot client/server path with a dedicated app-id and 15pt per-window font override:
   ```bash
-  kitty --class bluetui -e bluetui
+  footclient --app-id=bluetui -o font="Iosevka Nerd Font Mono:size=15:style=Regular" bluetui
   ```
+  Sway floats it at 900x600, centered.
 * **Hotkey:** `$mod + Alt + 2` (`Super + Alt + 2`)
 * **Capabilities:**
   * Real-time device scanning with RSSI signal indicators.
@@ -446,11 +447,11 @@ Rather than relying on heavy GNOME or KDE Bluetooth daemons, the system uses **`
 Since 2026-10-19 there are **no Bluetooth automation services**: `bt-autoconnect.service` and `bt-auto-trust.service` were stopped, disabled, deleted from disk, and removed from chezmoi. No `bt-*` unit files or processes remain; BlueZ block state replaces every background dialer.
 
 * **`bt-select` (`~/.local/bin/bt-select`)** - manual whiptail picker, audio devices only (input devices such as the Katana S K2 keyboard are never listed):
-  * Checked = `bluetoothctl unblock`, then foreground `timeout 12 bluetoothctl connect` if not connected; a single checked device also becomes the default sink and current streams are moved to it.
-  * Unchecked = `bluetoothctl block` + disconnect if connected.
-  * The checked set is written to `~/.config/bt-autoconnect/selection.txt` (one MAC per line). Off is applied before on so two devices are never connected at once on purpose.
-* **`bt-refuse-toggle` (`~/.local/bin/bt-refuse-toggle`)** - foreground toggle, bound to `$mod + Shift + Return` (section 13):
-  * All selected devices blocked -> unblock + foreground connect (auto-connect ON).
+  * Checked devices are unblocked, then any disconnected selections are dialed concurrently with plain `bluetoothctl connect`. The script deliberately does not wrap BlueZ `Connect()` in an external `timeout`: killing `bluetoothctl` while the controller page is still active can leave a pending HCI connection and make the next attempt fail with `br-connection-busy` until the controller timeout expires.
+  * Unchecked devices are blocked and disconnected before new dials begin.
+  * The checked set is written to `~/.config/bt-autoconnect/selection.txt` (one MAC per line). If exactly one selected device is connected after the parallel dial phase, it becomes the default sink and existing streams are moved to it; when multiple selected sinks are live, the current default is left unchanged.
+* **`bt-refuse-toggle` (`~/.local/bin/bt-refuse-toggle`)** - foreground selection toggle, bound to `$mod + Shift + Return` (section 13):
+  * All selected devices blocked -> unblock all and launch non-killed background `bluetoothctl connect` attempts (auto-connect ON).
   * Otherwise -> block + disconnect the whole selection (auto-connect OFF).
   * Helper modes: `--list`, `--selected`, `--dry-run`. Missing selection file = all paired audio devices; present but empty = nothing is toggled.
 * **Retired scripts (kept on disk, not installed as services, no references found in sway, systemd, fish, zsh, udev, or autostart configs)**:
@@ -509,7 +510,7 @@ Configured in [`~/.config/sway/config.d/40-keybindings.conf`](file:///home/onyx/
 
 | Shortcut | Bound Command | Functional Action |
 | :--- | :--- | :--- |
-| **`$mod + Alt + 2`** | `kitty --class bluetui -e bluetui` | Launch Bluetooth TUI in terminal window |
+| **`$mod + Alt + 2`** | `footclient --app-id=bluetui -o font="Iosevka Nerd Font Mono:size=15:style=Regular" bluetui` | Launch centered 900x600 Bluetooth TUI |
 | **`$mod + Alt + 3`** | `pavucontrol` | Launch GTK audio mixer GUI |
 | **`$mod + Alt + 4`** | `~/.local/bin/rofi-speaker-dsp` | Open ASUS DAX3 Dolby Speaker Voicing Menu |
 | **`$mod + Alt + O`** | `~/.local/bin/rofi-speaker-dsp` | Open ASUS DAX3 Dolby Speaker Voicing Menu (mnemonic) |

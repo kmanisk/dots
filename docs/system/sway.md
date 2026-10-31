@@ -15,7 +15,7 @@ To ensure token efficiency for AI agents and maintainability for developers, the
 | `10-display.conf` | `eDP-1` display output mode, 165Hz refresh, cursor theme/size, border styles, theme colors, `apply-vibrance` reload hook. | Display pipeline |
 | `20-input.conf` | Keyboard repeat rates, touchpad natural scroll, pointer accel, 3-finger/4-finger gestures. | Input devices |
 | `30-window-rules.conf` | Floating utilities (`bluetui`, `wifui`, `rofi-network`, `me3-manager`, `ds3-randomizer`, `cycles-installer`), Thunar rules, Brave tabbed view, Steam shell focus management, Workspace 4 gaming rules. | Window assignments |
-| `40-keybindings.conf` | Window navigation, workspace switching, scratchpad toggles, launchers (`rofi-network` on `$mod+Mod1+5`, `bluetui` on `$mod+Mod1+2`), cursor theme/size hotkeys, validated reload on `Win + Shift + R`. Marks system removed 2026-10-18. | Key chords |
+| `40-keybindings.conf` | Window navigation, workspace switching, scratchpad toggles, launchers (`rofi-network` on `$mod+Mod1+5`, `bluetui` on `$mod+Mod1+2`), current-theme wallpaper cycling (`Win + Shift + W` / `Alt + Shift + W`, plus reverse on `Win + Ctrl + Shift + W`), cursor theme/size hotkeys, validated reload on `Win + Shift + R`. Marks system removed 2026-10-18. | Key chords |
 | `45-ui-scale.conf` | Output-scale keybindings backed by `ui-scale`; generated runtime state is written to `99-ui-scale.conf`. | Central UI scale controls |
 | `50-gaming-mode.conf` | Passthrough gaming mode (`mode "gaming"` via `Alt + Shift + F`), muted shortcuts, game hotkeys. | Gaming isolation |
 | `60-autostart.conf` | D-Bus/systemd session imports, daemons (`mako`, `polkit`), night light, wallpaper, game-workspace-daemon. One-shot initialization uses `exec` so ordinary Sway reloads do not restart long-running helpers. | Session bootstrap |
@@ -36,10 +36,10 @@ include ~/.config/sway/config.d/*.conf
 * **Display Output:** ASUS TUF Gaming F16 built-in display (`eDP-1` in the current 2026-10-31 session; connector names are not assumed permanent).
   * Resolution: `1920x1200` (16:10 aspect ratio).
   * Refresh Rate: approximately `165.004Hz`.
-  * Current runtime UI scale: `1.20`.
+  * Current runtime UI scale: `1.30`.
   * `10-display.conf` owns mode/refresh/adaptive-sync/tearing policy; it deliberately does not hardcode scale.
   * `ui-scale` owns compositor scaling and atomically persists it in generated `99-ui-scale.conf`.
-  * `ui-sync` derives scale-aware system chrome and skips writes/reloads when generated content is unchanged.
+  * `ui-sync` derives scale-aware system chrome and skips writes/reloads when generated content is unchanged. Mako notification/OSD sizing is controlled by `MAKO_FONT` and `MAKO_WIDTH` in `~/.config/ui-metrics.conf`; with `CHROME_FOLLOW=0` the values are divided by the output scale, so the base value is effectively the physical point size.
   * Adaptive Sync: `off` (prevents panel backlight flickering/gamma shifts on 165Hz laptop panels).
   * Allow Tearing: `yes` (reduces frame delivery latency in fullscreen gaming).
 * **GPU Strategy:**
@@ -75,6 +75,12 @@ Workspaces are mapped directly under the home/upper row of the right hand to eli
 * **Focus Layer Toggle:** `Shift + Space` (swaps focus between the foreground floating window and the background tiled/tabbed layer underneath, via toggle-floating-focus).
 * **Window Graceful Close:** `Win + q` (polite WM_DELETE close).
 * **Window Force Kill:** `Win + BackSpace` (SIGKILL via `force-kill-window`).
+* **Media Play/Pause:** `Win + Alt + P` calls `~/.local/bin/media-play-pause`, which toggles the active MPRIS player with `playerctl` and shows a short Mako notification for the resulting `Playing` / `Paused` state. The helper is one-shot with no resident process. The former Aura preset bindings moved to `Win + Alt + [` (previous preset) and `Win + Alt + ]` (next preset).
+* **Current-Theme Wallpapers:** `Win + Shift + W`, `Alt + Shift + W`, and `Win + Ctrl + W` advance through the active theme's cached Omarchy backgrounds; `Win + Ctrl + Shift + W` goes backward. The former `ds3-wallpaper` helper is removed and no keybinding uses the static Dark Souls 3 pack. `theme-wallpaper` fetches at most five images from the theme's own GitHub commit on first use; later changes are local and `theme-set` restores the remembered cached image without network access.
+
+### Utility TUI Windows
+
+The compact hardware/network TUIs use dedicated Foot client overrides instead of inheriting the global terminal font: `wifui` and `bluetui` use 15pt Iosevka Mono in centered 900x600 floats; `rogtui` uses the same 15pt override in a centered 900x680 float. This keeps utility panels readable at the current output scale without changing `foot.ini` globally.
 
 ### Scratchpads (`~/.local/bin/scratch-toggle`)
 Canonical dimensions: `1700x1050`, centered on display. Windows are **lazy-loaded on demand** on initial hotkey press to eliminate idle RAM waste:
@@ -85,11 +91,17 @@ Canonical dimensions: `1700x1050`, centered on display. Windows are **lazy-loade
 5. **Desktop Commander Scratchpad:** `Win + Alt + D` (1500x950 floating monitor streaming live ChatGPT tool-call activity).
 
 ### Cursor Controls (`toggle-cursor-theme` & `adjust-cursor-size`)
-* **Theme Polarity Toggle:** `Alt + Shift + c` (Toggles between `phinger-cursors-gruvbox-material` and `phinger-cursors-gruvbox-material-light`).
-* **Size Adjustment (+2 / -2):**
-  * `Alt + Shift + =` (or `Alt + +`): `+2px`
-  * `Alt + Shift + -` (or `Alt + -`): `-2px`
-  * Updates GSettings, GTK 2/3/4, Xresources, and `seat seat0 xcursor_theme` in `10-display.conf`.
+* **Theme Polarity Toggle:** `Alt + Shift + c` switches between `phinger-cursors-gruvbox-material` (dark) and `phinger-cursors-gruvbox-material-light` (light) while preserving the current size.
+* **Size Adjustment (one ladder step):**
+  * `Alt + Shift + =` (or `Alt + Shift + plus`): next larger size
+  * `Alt + Shift + -` (or `Alt + Shift + underscore`): next smaller size
+  * The bindings pass `+2` / `-2`. The number is a direction marker, not a magnitude: `phinger-cursors` only contains `24 32 48 64 96 128` images, so a real 2px step cannot exist. One press always moves to the next size in that set.
+* **Sizes are a ladder, not free integers:** `phinger-cursors` only ships `24 32 48 64 96 128`. A size absent from the theme is silently substituted at load time, so arbitrary values look like the command did nothing. `adjust-cursor-size 60` snaps to `64` and says so.
+* **Both tools are self-reporting.** `adjust-cursor-size` with no arguments prints the size and every consumer; `toggle-cursor-theme status` prints the theme, the size, and the same per-consumer rows. Run either before assuming the setting is broken.
+* **Both tools are mutually consistent and write every consumer:** Sway live seat, `~/.config/sway/config.d/10-display.conf` and its chezmoi source, GTK 2/3/4 (`gtk-cursor-theme-size`, `gtk-cursor-theme-name`), GSettings (`cursor-size`, `cursor-theme`), `~/.Xresources` (`Xcursor.size`, `Xcursor.theme`), and `~/.config/environment.d/30-cursor.conf` plus its chezmoi source (`dot_config/environment.d/30-cursor.conf`, tracked since 2026-11-01). Size and theme never overwrite each other.
+* **Theme switch also refreshes the X11 fallback layer:** `toggle-cursor-theme` calls `ensure-xcursor-fallbacks` after writing `Xcursor.theme`, which rewrites `~/.icons/default` and `~/.local/share/icons/default` so Xwayland and CEF apps follow the new polarity.
+* **Bounds are explicit:** stepping past `24` or `128` prints the bound and exits `2` instead of silently clamping. Running GTK/Qt apps may keep the old cursor until restarted.
+* **Optional intermediate-raster builder:** `~/.local/bin/build-cursor-sizes --check` is read-only and reports the sizes actually present in each Phinger theme. The current live themes still expose the native `24 32 48 64 96 128` ladder. Running `build-cursor-sizes` without `--check` is an explicit opt-in operation that resamples missing even sizes under `~/.local/share/icons/phinger-*`; it skips symlink aliases and leaves the pristine copies under `~/.icons` untouched as a restore source.
 
 ---
 

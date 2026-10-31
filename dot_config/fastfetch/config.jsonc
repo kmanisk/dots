@@ -92,7 +92,8 @@
         {
             "key": "│ {##FF5C57}󰁹 batt    {#keys}│",
             "type": "command",
-            "text": "cap=$(cat /sys/class/power_supply/BAT0/capacity); st=$(cat /sys/class/power_supply/BAT0/status); f=$((cap/10)); e=$((10-f)); bar=\"$(printf '▰%.0s' $(seq 1 $f 2>/dev/null))$(printf '▱%.0s' $(seq 1 $e 2>/dev/null))\"; if [ \"$cap\" -ge 50 ]; then c=32; elif [ \"$cap\" -ge 20 ]; then c=33; else c=31; fi; if [ \"$st\" = Discharging ]; then tag=\"Discharging\"; else tag=\"AC\"; fi; printf '\\033[%sm%s\\033[0m %s%% · %s\\n' \"$c\" \"$bar\" \"$cap\" \"$tag\""
+            // Slider-style meter with a diamond head; see ~/.local/bin/battery-meter
+            "text": "$HOME/.local/bin/battery-meter"
         },
         {
             "key": "├───────────┤",

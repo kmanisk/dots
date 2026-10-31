@@ -1,6 +1,15 @@
 /**
- * Tsoding-like bottom bar menu for Rofi — Alt+Space drun reference look.
- * Sharp corners, VictorMono, dynamic theme colors via system.rasi.
+ * Compact bottom command bar for Rofi.
+ *
+ * Position invariant: full-width, anchored to the bottom edge of the output.
+ * Look: hairline accent top rule, 2px accent tick beside the prompt, flat
+ * accent chip for the selection. Sharp corners everywhere, per the system.rasi
+ * invariant; colors stay dynamic through system.rasi.
+ *
+ * Sizing note: rofi is GTK, so GDK_DPI_SCALE=1.35 and the 1.2 compositor scale
+ * both apply. Nominal 8pt below renders at roughly 17px line height, and all
+ * thirteen bang hints fit on one row at 1920px. Do not raise these sizes
+ * without re-checking that the hint strip still fits.
  */
 @import "~/.config/rofi/system.rasi"
 
@@ -15,46 +24,57 @@ configuration {
     background-color: @background;
     border-color:     @border-col;
     text-color:       @foreground;
-    font:             @modal-font;
+    font:             "VictorMono Nerd Font Mono 10";
 }
 
 window {
     anchor:           south;
     location:         south;
     width:            100%;
-    padding:          8px 14px;
-    border:           2px 0px 0px 0px;
-    border-color:     @border-focus;
+    padding:          3px 10px;
+    border:           1px 0px 0px 0px;
+    border-color:     @accent;
     border-radius:    0px;
     children:         [ horibox ];
 }
 
 horibox {
     orientation: horizontal;
+    spacing:     8px;
     children:    [ prompt, entry, listview ];
 }
 
-listview {
-    layout:      horizontal;
-    spacing:     12px;
-    lines:       100;
-}
-
 prompt {
-    padding:          2px 12px 2px 0px;
+    padding:          0px 8px;
+    border:           0px 0px 0px 2px;
+    border-color:     @accent-bright;
     text-color:       @accent-bright;
-    font:             @modal-font-bold;
+    font:             "VictorMono Nerd Font Mono Bold 11";
 }
 
 entry {
-    expand:           false;
-    width:            18em;
-    text-color:       @foreground;
+    expand:            false;
+    font:              "VictorMono Nerd Font Mono 10";
+    width:             8em;
+    text-color:        @foreground;
+    placeholder:       "type to search...";
+    placeholder-color: @accent;
+}
+
+listview {
+    layout:    horizontal;
+    spacing:   3px;
+    lines:     100;
+    dynamic:   true;
+    scrollbar: false;
+    padding:   0px;
 }
 
 element {
-    padding:          6px 12px;
+    padding:          2px 5px;
+    border:           0px;
     border-radius:    0px;
+    text-color:       @foreground;
 }
 
 element selected {
@@ -68,6 +88,6 @@ element-text {
 }
 
 element-icon {
-    size:             1.0em;
+    size:             0.9em;
     background-color: inherit;
 }

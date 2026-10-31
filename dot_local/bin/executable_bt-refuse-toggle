@@ -170,8 +170,11 @@ if (( refused == total )); then
         if (( DRY_RUN )); then
             printf 'dry-run: bluetoothctl connect %s &\n' "$mac"
         else
-            # Background connect attempt: zero lag for the toggle action
-            ( timeout 6 bluetoothctl connect "$mac" >/dev/null 2>&1 ) &
+            # Background connect attempt: zero lag for the toggle action.
+            # No external timeout: Connect() ends by itself at the page timeout,
+            # whereas killing it mid-page leaves the device stuck in
+            # br-connection-busy for the next attempt.
+            ( bluetoothctl connect "$mac" >/dev/null 2>&1 ) &
         fi
     done
     title="Bluetooth auto-connect ON"

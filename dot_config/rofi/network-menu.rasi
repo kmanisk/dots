@@ -1,10 +1,23 @@
 /**
- * Network Route menu — minimal flat style (2026-10-18).
- * Same visual language as the theme picker: single thin border, flat search
- * row (accent-bright prompt), muted status banner, tight rows.
+ * Network Route menu — compact flat style (2026-10-29).
+ *
+ * Design notes:
+ * - One thin accent border, sharp corners, flat search row, muted caption.
+ * - Iosevka Nerd Font Mono matches the system monospace font (mono keeps the
+ *   o/● state markers and the metric columns optically aligned).
+ * - Compact type scale: 11 body, 11 bold prompt, 9 caption. Row rhythm is
+ *   text(11) + 6px vertical padding, so a row is ~26px instead of ~42px.
+ * - Width is sized so the longest entry ("Reset Auto Priority (Ethernet 50 >
+ *   Wi-Fi 600)") fits without truncation at 11pt Iosevka.
+ *
  * Backend contract: opens after ONE nmcli round-trip + kernel-only probes.
  */
 @import "~/.config/rofi/system.rasi"
+
+/* System-wide default here is Iosevka; element rules below refine the sizes. */
+* {
+    font:                "Iosevka Nerd Font Mono 11";
+}
 
 configuration {
     show-icons:     false;
@@ -18,57 +31,58 @@ window {
     border:              1px;
     border-color:        @border-focus;
     border-radius:       0px;
-    width:               640px;
+    width:               420px;
     location:            center;
     anchor:              center;
-    padding:             12px 14px;
+    padding:             8px 10px;
 }
 
 mainbox {
     background-color:    transparent;
     children:            [ inputbar, message, listview ];
-    spacing:             8px;
+    spacing:             4px;
 }
 
 inputbar {
     background-color:    transparent;
-    border:              0px;
-    padding:             2px 6px 8px;
+    border:              0px 0px 1px 0px;
+    border-color:        @border-col;
+    padding:             0px 4px 6px;
     children:            [ prompt, entry ];
-    spacing:             12px;
+    spacing:             10px;
 }
 
 prompt {
     background-color:    transparent;
     text-color:          @accent-bright;
-    font:                "VictorMono Nerd Font Mono Bold 15";
+    font:                "Iosevka Nerd Font Mono Bold 11";
 }
 
 entry {
     background-color:    transparent;
     text-color:          @foreground;
-    placeholder:         "Filter...";
+    placeholder:         "filter";
     placeholder-color:   @foreground-alt;
-    font:                "VictorMono Nerd Font Mono 14";
+    font:                "Iosevka Nerd Font Mono 11";
 }
 
 message {
     background-color:    transparent;
     border:              0px;
-    padding:             0px 6px 2px;
+    padding:             0px 4px;
 }
 
 textbox {
     background-color:    transparent;
-    text-color:          @foreground-alt;
-    font:                "VictorMono Nerd Font Mono 10";
+    text-color:          @accent;
+    font:                "Iosevka Nerd Font Mono 9";
 }
 
 listview {
     background-color:    transparent;
     columns:             1;
     lines:               6;
-    spacing:             3px;
+    spacing:             2px;
     cycle:               true;
     dynamic:             true;
     layout:              vertical;
@@ -81,7 +95,7 @@ element {
     orientation:         horizontal;
     background-color:    transparent;
     text-color:          @foreground;
-    padding:             9px 10px;
+    padding:             4px 8px;
     border-radius:       0px;
     border:              0px;
     children:            [ element-text ];
@@ -97,7 +111,7 @@ element selected {
 element-text {
     background-color:    transparent;
     text-color:          inherit;
-    font:                "VictorMono Nerd Font Mono 14";
+    font:                "Iosevka Nerd Font Mono 11";
     highlight:           bold;
     vertical-align:      0.5;
 }
