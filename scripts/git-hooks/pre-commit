@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Keep the canonical live Sway snapshot synchronized whenever Sway/UI config is committed.
+# Enforce cross-agent documentation synchronization for durable workstation changes.
 set -euo pipefail
 
 repo="$(git rev-parse --show-toplevel)"
@@ -8,21 +8,51 @@ cd "$repo"
 staged="$(git diff --cached --name-only --diff-filter=ACMR)"
 [ -n "$staged" ] || exit 0
 
-if ! grep -Eq '^(dot_config/sway/|dot_config/ui-metrics\.conf$|dot_local/bin/executable_(ui-scale|ui-sync|sway-check|sway-safe-reload)$)' <<<"$staged"; then
+# Paths that represent durable workstation/configuration implementation rather than docs/history.
+system_change_re='^(\.chezmoidata\.toml$|\.chezmoiignore$|\.chezmoiexternal\.toml\.tmpl$|\.chezmoitemplates/|dot_|private_|encrypted_|packages/|systemd/|install\.sh$|run_(once|onchange)_|scripts/)'
+if ! grep -Eq "$system_change_re" <<<"$staged"; then
     exit 0
 fi
 
-printf 'pre-commit: Sway/UI change detected; validating and syncing canonical system context\n'
+printf 'pre-commit: durable workstation/configuration change detected\n'
 
-if [ -x "$HOME/.local/bin/sway-check" ]; then
-    "$HOME/.local/bin/sway-check"
-elif [ -x "$repo/dot_local/bin/executable_sway-check" ]; then
-    "$repo/dot_local/bin/executable_sway-check"
-else
-    sway -C -c "${XDG_CONFIG_HOME:-$HOME/.config}/sway/config"
+if [ "${SYSTEM_DOCS_EXEMPT:-0}" != "1" ]; then
+    if ! grep -qx 'docs/system/SYSTEM_CHANGELOG.md' <<<"$staged"; then
+        printf '%s\n' \
+            'pre-commit: BLOCKED: system changes require docs/system/SYSTEM_CHANGELOG.md in the same commit.' \
+            'Update the changelog with the verified change and validation result.' \
+            'AI agents must not bypass this rule. Manual emergency override: SYSTEM_DOCS_EXEMPT=1.' >&2
+        exit 1
+    fi
+
+    semantic_docs="$(grep -E '^docs/.*\.md$' <<<"$staged" | grep -Ev '^docs/system/(SYSTEM_CONTEXT|SYSTEM_CHANGELOG)\.md$' || true)"
+    if [ -z "$semantic_docs" ]; then
+        printf '%s\n' \
+            'pre-commit: BLOCKED: system changes require at least one relevant subsystem Markdown document under docs/.' \
+            'SYSTEM_CONTEXT.md is generated context and does not replace semantic subsystem documentation.' \
+            'AI agents must update the owning docs as part of the same task/commit.' \
+            'Manual emergency override: SYSTEM_DOCS_EXEMPT=1.' >&2
+        exit 1
+    fi
 fi
 
-"$repo/scripts/sync-system-context.sh"
+# Never auto-stage unrelated manual edits already present in the canonical context file.
+if ! git diff --quiet -- docs/system/SYSTEM_CONTEXT.md; then
+    printf '%s\n' \
+        'pre-commit: BLOCKED: docs/system/SYSTEM_CONTEXT.md has unstaged edits.' \
+        'Stage/reconcile those edits first so the hook cannot accidentally publish unrelated context changes.' >&2
+    exit 1
+fi
+
+# Sway has a safe read-only validator, so require it when Sway/UI-scale implementation changes.
+sway_change_re='^(dot_config/sway/|dot_config/ui-metrics\.conf$|dot_local/bin/executable_(ui-scale|ui-sync|sway-check|sway-safe-reload)$)'
+sync_args=()
+if grep -Eq "$sway_change_re" <<<"$staged"; then
+    printf 'pre-commit: Sway/UI source changed; running Sway validation\n'
+    sync_args=(--validate-sway)
+fi
+
+"$repo/scripts/sync-system-context.sh" "${sync_args[@]}"
 git add docs/system/SYSTEM_CONTEXT.md
 
-printf 'pre-commit: SYSTEM_CONTEXT.md synchronized and staged\n'
+printf 'pre-commit: verified live SYSTEM_CONTEXT snapshot synchronized and staged\n'

@@ -66,9 +66,19 @@ Runs the standard validation sequence registered for that project and stops at t
 
 ## Event-driven Git/document synchronization
 
-The local chezmoi source repository uses `scripts/git-hooks/pre-commit` rather than a resident watcher or timer. When the staged commit touches Sway/UI source-of-truth paths, the hook validates the live Sway configuration, runs `scripts/sync-system-context.sh`, and stages the auto-managed live snapshot in `docs/system/SYSTEM_CONTEXT.md` into the same commit.
+The local chezmoi source repository uses `scripts/git-hooks/pre-commit` rather than a resident watcher or timer. The hook treats durable workstation/configuration source changes across the chezmoi tree, package/service manifests, provisioning hooks, and system helper scripts as documentation-bearing changes.
 
-The generated block is intentionally narrow: it records verified volatile Sway state such as the active output, refresh, scale, GPU mode, and validation status. It does not replace the semantic subsystem documentation or the material change log.
+For every such commit it:
+
+1. requires `docs/system/SYSTEM_CHANGELOG.md` to be staged,
+2. requires at least one relevant agent-authored Markdown document under `docs/` beyond the generated context/changelog files,
+3. runs extra safe validation when available (currently Sway/UI changes use `sway-check`),
+4. runs `scripts/sync-system-context.sh` to refresh measured live workstation state, and
+5. stages only `docs/system/SYSTEM_CONTEXT.md` automatically.
+
+The generated block records observable runtime facts such as OS/kernel, GPU mode/driver, Sway/output/scale, PipeWire/WirePlumber/default endpoints, important mounts, and failed systemd-unit counts. It does not replace semantic subsystem documentation. The AI agent that changed the system must update the owning subsystem document itself.
+
+`SYSTEM_DOCS_EXEMPT=1` exists only as an explicit manual/emergency bypass. AI agents must not use it unless the user specifically authorizes bypassing the documentation contract.
 
 For a safe one-command publish after selecting the intended files:
 
@@ -79,18 +89,19 @@ dots-publish "commit message"
 
 `dots-publish` commits only the existing staged set plus any context file staged by the pre-commit hook, then pushes the current branch. It never stages the entire dirty working tree automatically.
 
-GitHub-only agents do not receive the local hook or live Sway state. They must update the knowledge layer manually and must not replace verified live values with guesses.
+GitHub-only agents do not receive the local hook or live workstation probes. They must update the semantic knowledge layer manually and must not replace verified live values with guesses.
 
 ## Knowledge update rule
 
-After a verified durable system change, every agent must update the shared knowledge layer instead of keeping the result only in its own chat/session:
+After every verified durable workstation/configuration change made by an AI agent, the shared knowledge layer must be updated in the same task instead of keeping the result only in chat/session state:
 
 1. Update the correct chezmoi/config/source implementation.
-2. Validate the change.
-3. Update the detailed subsystem documentation if behavior or architecture changed.
-4. Update `docs/system/SYSTEM_CONTEXT.md` if cross-agent assumptions/current state changed.
-5. Append a concise entry to `docs/system/SYSTEM_CHANGELOG.md` for material changes.
+2. Validate the changed subsystem.
+3. Update at least one relevant detailed subsystem Markdown document under `docs/`.
+4. Update semantic portions of `docs/system/SYSTEM_CONTEXT.md` if cross-agent assumptions/current state changed; local commits also refresh its generated live snapshot automatically.
+5. Append a concise verified entry to `docs/system/SYSTEM_CHANGELOG.md`.
 6. Correct or clearly mark older conflicting documentation as stale when encountered.
+7. Do not report completion until implementation, validation, and documentation agree.
 
 Never write an unverified intended state into the canonical current context.
 

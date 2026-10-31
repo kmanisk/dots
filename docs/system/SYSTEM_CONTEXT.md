@@ -5,7 +5,7 @@ This is the primary machine-context document for AI agents working on this repos
 It is not a replacement for the detailed subsystem documentation. Its job is to provide one current entry point, resolve conflicts between older documents, record important invariants, and tell an agent what must be verified before making changes.
 
 Last synchronized with repository state: 2026-10-31.
-Latest material system baseline at this sync: `b2b089e53c09718114664ec8a5c0947da56ed964` (`feat(system): harden sway and synchronize agent context`).
+Material change history is tracked in `docs/system/SYSTEM_CHANGELOG.md` and Git; this file intentionally does not pin itself to a commit hash.
 Latest broad live-system audit used as an evidence baseline: `docs/system/workstation-audit-2026-10-23.md`.
 
 ## 1. Authority and freshness
@@ -79,23 +79,35 @@ Relevant files include:
 
 Do not reintroduce stacked Chromium/device-scale overrides unless there is a measured reason. Inspect the current generated scale state before changing font or chrome sizes.
 
-### Auto-synchronized live Sway snapshot
+### Auto-synchronized live workstation snapshot
 
-The block below is maintained by `scripts/sync-system-context.sh` when a verified Sway/UI change is committed from the live workstation. The repository pre-commit hook updates and stages it automatically; agents should not hand-edit inside the markers.
+The block below is maintained by `scripts/sync-system-context.sh` for every durable workstation/configuration commit made from the live chezmoi repository. It records measured runtime facts across the desktop/GPU, audio stack, mounts, kernel, and basic system health. The repository pre-commit hook refreshes and stages only this generated block automatically; agents must still update the relevant semantic subsystem documentation and changelog themselves.
 
 <!-- AUTO:SYSTEM_STATE:BEGIN -->
-> Auto-synchronized from the live workstation by `scripts/sync-system-context.sh`. Do not edit inside these markers.
+> Auto-synchronized from the live workstation by `scripts/sync-system-context.sh`. This is measured runtime state, not semantic documentation. Do not edit inside these markers.
 
 - Last live sync: **2026-10-31**.
-- Sway validation: **PASS**.
-- Sway version: `sway version 1.12`.
+- OS/kernel: `CachyOS` / `7.3.0-4-cachyos`.
 - GPU mode: `AsusMuxDgpu`.
-- Active output: `eDP-1`, `1920x1200 @ 165.004 Hz`, scale `1.20`, adaptive sync `disabled`.
-- Persisted generated UI scale: `1.20` from `~/.config/sway/config.d/99-ui-scale.conf`.
-- Reload path: `sway-safe-reload` (validates before `swaymsg reload`).
+- NVIDIA: `NVIDIA GeForce RTX 5050 Laptop GPU`, driver `615.78.08`.
+- Sway: `sway version 1.12`; validation: **not required for this commit**.
+- Active output: `eDP-1, 1920x1200 @ 165.004 Hz, scale 1.20, adaptive sync disabled`.
+- Persisted generated UI scale: `1.20`.
+- Sway reload path: `sway-safe-reload` (validates before `swaymsg reload`).
+- Audio: PipeWire `1.6.10`, WirePlumber `0.5.18`.
+- Default audio sink: `alsa_output.pci-0000_00_1f.3.analog-stereo`.
+- Default audio source: `ghelper-audio`.
+- Root mount: `/dev/nvme0n1p6[/@] btrfs /`.
+- Games mount: `/dev/nvme0n1p5 ntfs3 /mnt/Games`.
+- Windows mount: `/dev/nvme0n1p3 ntfs3 /mnt/windows`.
+- Failed systemd units: system `0`, user `0`.
 
-These are verified runtime values, not permanent hardware identifiers. Connector names and versions must still be re-queried when exact values matter.
+These values are a convenience snapshot for cross-agent context. Exact runtime-sensitive values must still be re-queried before diagnosis or modification.
 <!-- AUTO:SYSTEM_STATE:END -->
+
+
+
+
 
 
 
@@ -223,16 +235,17 @@ Read only the relevant branch of documentation for a task.
 
 ## 11. Required update contract for every agent
 
-After a verified material change to the workstation or its managed configuration:
+For every verified durable workstation/configuration change made by an AI agent, documentation is part of the same implementation task:
 
 1. Update the implementation in the correct source-of-truth file.
-2. Validate the behavior.
-3. Update the relevant detailed subsystem document if behavior/architecture changed.
-4. Update this file if any current-state fact, invariant, important path, protected baseline, or cross-agent assumption changed.
-5. Append a short entry to `docs/system/SYSTEM_CHANGELOG.md`.
+2. Validate the changed subsystem with the strongest safe check available.
+3. Update at least one relevant detailed Markdown document under `docs/` so the resulting behavior and operational assumptions are discoverable without chat history.
+4. Update the semantic portions of this file when a current-state fact, invariant, important path, protected baseline, or cross-agent assumption changes. The auto-managed runtime snapshot is refreshed by the local pre-commit hook for every durable system commit.
+5. Append a concise verified entry to `docs/system/SYSTEM_CHANGELOG.md` for the commit.
 6. If an older document now conflicts, correct it or explicitly mark the conflicting portion historical/stale.
+7. Do not report the system change complete until the implementation, validation, and documentation are synchronized.
 
-Do not update this file for speculative plans. Put future work in the appropriate roadmap/future document.
+The repository pre-commit hook enforces steps 3 and 5 for local system commits and refreshes the generated runtime snapshot automatically. It does not write semantic documentation on behalf of the agent. Do not update current-state documentation for speculative plans; put future work in the appropriate roadmap/future document.
 
 ## 12. Known documentation conflicts to resolve gradually
 

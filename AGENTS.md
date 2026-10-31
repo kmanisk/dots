@@ -28,29 +28,31 @@ A lower-priority source must never silently override a higher-priority source.
 
 ## Change protocol
 
-For every durable system change:
+Documentation is part of the implementation, not a later cleanup step. For every verified durable workstation/configuration change made by an AI agent:
 
 - Make the smallest robust change in the chezmoi source of truth.
 - Preserve unrelated files, local work, and working behavior.
 - Validate the changed subsystem before reporting success.
-- Update the relevant detailed subsystem document when architecture or behavior changed.
-- Update `docs/system/SYSTEM_CONTEXT.md` when the change alters current machine state, an invariant, a protected baseline, an important path, or an agent-facing assumption.
-- Append a concise verified entry to `docs/system/SYSTEM_CHANGELOG.md` for material system changes.
+- Update at least one relevant detailed Markdown document under `docs/` so the new behavior, configuration, path, dependency, or operational rule is discoverable by the next agent.
+- Update `docs/system/SYSTEM_CONTEXT.md` when the change alters current machine state, an invariant, a protected baseline, an important path, or an agent-facing assumption. Its auto-managed runtime block is refreshed by the repository hook for all system commits from the live workstation.
+- Append a concise verified entry to `docs/system/SYSTEM_CHANGELOG.md` for every durable system/configuration commit. Keep trivial implementation detail out of the prose, but record what changed and what was verified.
+- Correct or explicitly mark stale any older documentation that now conflicts with the verified implementation.
 - Do not document an intended state as current until verification succeeds.
-- If a previous document is now wrong, correct it or mark the conflicting statement stale; do not leave two apparently authoritative truths.
+- Do not report the task complete until implementation, validation, and documentation are synchronized in the same change set.
 
-Implementation-only changes that do not affect agent-facing behavior do not require rewriting `SYSTEM_CONTEXT.md`.
+This applies to Sway, audio, display/GPU, shell/terminal, launchers, input, theme/UI, networking, Bluetooth, storage/Btrfs, boot, systemd services, packages, gaming wrappers, virtualization, hardware-control tooling, agent infrastructure, and other workstation configuration in this repository.
 
-## Automatic documentation synchronization
+## Automatic documentation synchronization and enforcement
 
-The local chezmoi Git repository uses `scripts/git-hooks/pre-commit` for Sway/UI commits. When staged changes touch the Sway/UI source-of-truth paths, the hook:
+The local chezmoi Git repository uses `scripts/git-hooks/pre-commit` as a system-wide documentation safety net. For any staged durable system/configuration source change, the hook:
 
-1. runs the read-only Sway validation path,
-2. runs `scripts/sync-system-context.sh`,
-3. refreshes only the auto-managed live Sway snapshot inside `docs/system/SYSTEM_CONTEXT.md`, and
-4. stages that context file into the same commit.
+1. detects the system change across the chezmoi source tree, package/service manifests, provisioning hooks, and system helper scripts,
+2. runs extra subsystem validation when a safe validator exists (currently Sway changes use `sway-check`),
+3. runs `scripts/sync-system-context.sh` to refresh the auto-managed verified live-workstation snapshot in `docs/system/SYSTEM_CONTEXT.md`,
+4. stages only `SYSTEM_CONTEXT.md` automatically, and
+5. refuses the commit unless `docs/system/SYSTEM_CHANGELOG.md` and at least one agent-authored subsystem Markdown document under `docs/` are already staged.
 
-The hook never stages unrelated configuration. Detailed subsystem prose and `SYSTEM_CHANGELOG.md` still follow the manual change contract above when behavior or architecture materially changes.
+The hook never invents semantic documentation and never stages unrelated docs/configuration. The AI that made the change is responsible for updating the correct subsystem document before commit. `SYSTEM_DOCS_EXEMPT=1` is an emergency/manual escape hatch only; AI agents must not use it unless the user explicitly authorizes bypassing the documentation contract.
 
 For an explicit commit-and-push workflow, stage only the intended files and run:
 

@@ -1,6 +1,6 @@
 # System Change Log
 
-Concise cross-agent record of material, verified workstation changes.
+Concise cross-agent record of durable, verified workstation/configuration changes.
 
 This is not a replacement for Git history or subsystem documentation. Use it to answer: "What changed recently that another agent should know before touching the system?"
 
@@ -14,6 +14,14 @@ Rules:
 
 ## 2026-10-31
 
+### System-wide AI documentation contract
+
+- Generalized the repository pre-commit documentation hook from Sway/UI-only detection to all durable workstation/configuration source changes in chezmoi, package/service manifests, provisioning hooks, and system helper scripts.
+- AI-authored system commits now require both `docs/system/SYSTEM_CHANGELOG.md` and at least one relevant semantic Markdown document under `docs/`; the generated `SYSTEM_CONTEXT.md` snapshot does not satisfy the semantic-document requirement by itself.
+- Expanded `scripts/sync-system-context.sh` to record a verified cross-subsystem runtime snapshot: OS/kernel, GPU mode and NVIDIA driver, Sway/output/scale, PipeWire/WirePlumber/default endpoints, root/Games/Windows mounts, and failed systemd-unit counts.
+- Kept subsystem-specific validation layered on top: Sway/UI changes still run `sway-check`, while other subsystems remain responsible for their own strongest safe validation before completion.
+- Added `SYSTEM_DOCS_EXEMPT=1` only as an explicit manual/emergency bypass; AI agents are forbidden by `AGENTS.md` from using it unless the user explicitly authorizes bypassing documentation enforcement.
+
 ### Sway reliability and reload hardening
 
 - Made `ui-scale` persist `99-ui-scale.conf` atomically and skip unchanged writes.
@@ -22,12 +30,11 @@ Rules:
 - Removed redundant display/input defaults, simplified the Foot launcher to `footclient`, and changed one-shot Sway session initialization from `exec_always` to `exec` so ordinary reloads do not restart `swayidle`, the game workspace daemon, xscroll, or other one-shot helpers.
 - Verified Sway syntax, a live safe reload, unchanged long-running helper PIDs, and live `eDP-1` at 1920x1200 ~165.004 Hz with runtime scale 1.20.
 
-### Automatic cross-agent context synchronization
+### Initial cross-agent context synchronization
 
-- Added `scripts/sync-system-context.sh` to refresh the auto-managed live Sway snapshot in `SYSTEM_CONTEXT.md` only after successful live validation.
-- Added a repository pre-commit hook for staged Sway/UI changes; it validates Sway, refreshes the canonical snapshot, and stages only `SYSTEM_CONTEXT.md` in addition to the user's existing staged set.
+- Added the first `scripts/sync-system-context.sh` and pre-commit integration as a Sway/UI-only implementation; this was generalized later the same day by the system-wide AI documentation contract above.
 - Added `dots-publish` as a safe explicit commit-and-push wrapper: it commits only already-staged files and never performs a broad `git add -A`.
-- Kept detailed subsystem documentation and material changelog entries agent-maintained; the generated snapshot does not replace semantic documentation.
+- Established the core rule that generated runtime context never replaces agent-authored semantic subsystem documentation.
 
 ### Desktop Commander command interface
 
