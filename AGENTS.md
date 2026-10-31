@@ -8,9 +8,10 @@ Before changing or diagnosing this system:
 
 1. Read `docs/system/SYSTEM_CONTEXT.md`.
 2. Read `docs/system/system-philosophy.md`.
-3. Read only the subsystem documentation relevant to the task (`docs/audio/`, `docs/display/`, `docs/gaming/`, `docs/system/`, `docs/theme/`, `docs/virtualization/`, etc.).
-4. Inspect the current chezmoi source files that implement the behavior before editing them.
-5. If the live machine is available, run `agent-context system` or the relevant project context and verify runtime state. Never assume a documented version, device name, mount type, GPU mode, or service state is still current when it can be checked.
+3. Read `docs/system/SUBSYSTEM_MAP.md` and use it to select only the subsystem documentation relevant to the task.
+4. If a matching agent skill is available, use it for procedure/checklists only. A skill never overrides live output, current repository source, `SYSTEM_CONTEXT.md`, or owning subsystem documentation.
+5. Inspect the current chezmoi source files that implement the behavior before editing them.
+6. If the live machine is available, run `agent-context system` or the relevant project context and verify runtime state. Never assume a documented version, device name, mount type, GPU mode, or service state is still current when it can be checked.
 
 ## Authority order
 
@@ -52,7 +53,9 @@ The local chezmoi Git repository uses `scripts/git-hooks/pre-commit` as a system
 4. stages only `SYSTEM_CONTEXT.md` automatically, and
 5. refuses the commit unless `docs/system/SYSTEM_CHANGELOG.md` and at least one agent-authored subsystem Markdown document under `docs/` are already staged.
 
-The hook never invents semantic documentation and never stages unrelated docs/configuration. The AI that made the change is responsible for updating the correct subsystem document before commit. `SYSTEM_DOCS_EXEMPT=1` is an emergency/manual escape hatch only; AI agents must not use it unless the user explicitly authorizes bypassing the documentation contract.
+The hook never invents semantic documentation and never stages unrelated docs/configuration. `scripts/check-system-docs.sh` validates that the staged documentation matches the touched subsystem(s), using `docs/system/SUBSYSTEM_MAP.md` as the human routing reference. The same deterministic check runs in GitHub Actions (`.github/workflows/system-docs-check.yml`) so cloud/API commits cannot bypass the documentation contract simply because the local hook did not execute.
+
+The AI that made the change is responsible for updating the correct subsystem document before commit. `SYSTEM_DOCS_EXEMPT=1` is an emergency/manual escape hatch for the local hook only; AI agents must not use it unless the user explicitly authorizes bypassing the documentation contract. GitHub CI does not honor that bypass.
 
 For an explicit commit-and-push workflow, stage only the intended files and run:
 

@@ -11,8 +11,10 @@ The goal is to let different agents work on the same workstation without relying
 - `AGENTS.md` — shared agent behavior, safety, validation, and documentation-update contract.
 - `CLAUDE.md` — Claude-specific bootstrap pointer to the shared contract.
 - `docs/system/SYSTEM_CONTEXT.md` — canonical current-system context and source-precedence rules.
+- `docs/system/SUBSYSTEM_MAP.md` — implementation-path to owning-document/skill routing table.
 - `docs/system/SYSTEM_CHANGELOG.md` — concise material change history for cross-agent handoff.
 - `docs/system/system-philosophy.md` — stable design philosophy and system priorities.
+- `dot_agents/skills/*/SKILL.md` — canonical reusable procedural skill library managed by chezmoi.
 - `docs/` — detailed subsystem documentation.
 - chezmoi-managed source files — actual configuration source of truth.
 
@@ -34,10 +36,12 @@ The goal is to let different agents work on the same workstation without relying
 An agent working on the workstation should:
 
 1. Read the repository `AGENTS.md`.
-2. Read `docs/system/SYSTEM_CONTEXT.md`.
-3. If live-machine access is available, run `agent-context system` or the relevant project context.
-4. Read only the detailed documentation for the subsystem being changed.
-5. Inspect the actual current source/configuration before editing.
+2. Read `docs/system/SYSTEM_CONTEXT.md` and `docs/system/system-philosophy.md`.
+3. Read `docs/system/SUBSYSTEM_MAP.md` to route the task to the smallest relevant documentation set and optional skill.
+4. If a matching skill is available, use it only as a procedure/checklist; current source and live evidence remain authoritative.
+5. If live-machine access is available, run `agent-context system` or the relevant project context.
+6. Read only the detailed documentation for the subsystem being changed.
+7. Inspect the actual current source/configuration before editing.
 
 Fresh runtime evidence overrides stale documentation. Current repository source overrides old prose documentation when the two disagree.
 
@@ -66,19 +70,30 @@ Runs the standard validation sequence registered for that project and stops at t
 
 ## Event-driven Git/document synchronization
 
-The local chezmoi source repository uses `scripts/git-hooks/pre-commit` rather than a resident watcher or timer. The hook treats durable workstation/configuration source changes across the chezmoi tree, package/service manifests, provisioning hooks, and system helper scripts as documentation-bearing changes.
+The workstation uses two deterministic enforcement layers rather than an AI writer running in the background:
 
-For every such commit it:
+1. **Local pre-commit:** `scripts/git-hooks/pre-commit` runs `scripts/check-system-docs.sh --cached`, performs any safe subsystem-specific validation (currently Sway/UI), refreshes the measured live block in `SYSTEM_CONTEXT.md`, and stages only that generated context file.
+2. **GitHub Actions:** `.github/workflows/system-docs-check.yml` runs the same `scripts/check-system-docs.sh` against the pushed/PR diff. This catches Codex cloud, GitHub API, or other remote changes that never execute the laptop's Git hook.
 
-1. requires `docs/system/SYSTEM_CHANGELOG.md` to be staged,
-2. requires at least one relevant agent-authored Markdown document under `docs/` beyond the generated context/changelog files,
-3. runs extra safe validation when available (currently Sway/UI changes use `sway-check`),
-4. runs `scripts/sync-system-context.sh` to refresh measured live workstation state, and
-5. stages only `docs/system/SYSTEM_CONTEXT.md` automatically.
+`check-system-docs.sh` requires `SYSTEM_CHANGELOG.md` plus active semantic documentation matching the subsystem(s) touched. `docs/archive/`, `docs/future/`, `docs/personal/`, dated audits, `SYSTEM_CONTEXT.md`, and the changelog itself do not count as owning semantic documentation.
 
-The generated block records observable runtime facts such as OS/kernel, GPU mode/driver, Sway/output/scale, PipeWire/WirePlumber/default endpoints, important mounts, and failed systemd-unit counts. It does not replace semantic subsystem documentation. The AI agent that changed the system must update the owning subsystem document itself.
+### Shared agent instructions and skills
 
-`SYSTEM_DOCS_EXEMPT=1` exists only as an explicit manual/emergency bypass. AI agents must not use it unless the user specifically authorizes bypassing the documentation contract.
+The detailed workstation contract lives only in the repository. The global instruction files for the three primary agents are intentionally tiny chezmoi-managed routing pointers:
+
+- `~/.codex/AGENTS.md` <- `dot_codex/AGENTS.md`
+- `~/.gemini/AGENTS.md` <- `dot_gemini/AGENTS.md`
+- `~/.config/opencode/AGENTS.md` <- `dot_config/opencode/AGENTS.md`
+
+They tell an agent started outside the chezmoi directory to read the repository `AGENTS.md` before Linux-system work; they do not copy mutable hardware/runtime state.
+
+The canonical custom skill source is `dot_agents/skills/`. `sync-agent-skills` exposes each valid skill as a symlink in:
+
+- `~/.codex/skills/`
+- `~/.gemini/config/skills/`
+- `~/.config/opencode/skills/`
+
+`run_after_90-sync-agent-skills.sh` re-runs this synchronization after every `chezmoi apply`. It preserves built-in/non-symlink agent skills and removes only stale symlinks previously managed from this repository. Every shared skill carries an authority warning: it is procedural knowledge, not a current-state source.
 
 For a safe one-command publish after selecting the intended files:
 
@@ -89,7 +104,7 @@ dots-publish "commit message"
 
 `dots-publish` commits only the existing staged set plus any context file staged by the pre-commit hook, then pushes the current branch. It never stages the entire dirty working tree automatically.
 
-GitHub-only agents do not receive the local hook or live workstation probes. They must update the semantic knowledge layer manually and must not replace verified live values with guesses.
+The local emergency `SYSTEM_DOCS_EXEMPT=1` bypass does not affect GitHub CI. AI agents must not use it unless the user explicitly authorizes the bypass.
 
 ## Knowledge update rule
 

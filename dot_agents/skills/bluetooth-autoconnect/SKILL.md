@@ -4,6 +4,10 @@ description: Bluetooth auto-connect and refusal on this machine - the three dial
 version: 1.5.0
 ---
 
+## Authority and freshness
+
+This skill is procedural guidance, not a current machine-state authority. Before using any machine-specific path, device name, GPU mode, desktop/session, filesystem, version, or service-state claim below, read `~/.local/share/chezmoi/AGENTS.md`, `~/.local/share/chezmoi/docs/system/SYSTEM_CONTEXT.md`, `~/.local/share/chezmoi/docs/system/SUBSYSTEM_MAP.md`, the owning subsystem documentation, and current repo source; verify live state when available. Higher-authority evidence overrides this skill. Treat dated verification blocks as historical evidence unless re-verified.
+
 # Bluetooth auto-connect & refusal
 
 Verified 2026-10-19 against live system (BlueZ 5.87, kernel 7.2.11-cachyos).
@@ -19,6 +23,8 @@ Verified 2026-10-19 against live system (BlueZ 5.87, kernel 7.2.11-cachyos).
 ## Auto-connect dialers (removed 2026-10-19)
 
 The user asked for no background services. `bt-autoconnect.service` and `bt-auto-trust.service` were disabled, removed from `~/.config/systemd/user/`, and forgotten from chezmoi. No process dials devices now; the TUI runs in the foreground and nothing survives it. The scripts `~/.local/bin/bt-autoconnect` and `bt-auto-trust` remain on disk as manual tools only. `blueman-applet` is not running and its AutoConnect `services` list is empty, so the plugin is inert even if launched. A checked (unblocked) device can still reconnect itself when powered on, because BlueZ accepts incoming connections; block it to prevent that.
+
+Re-confirmed 2026-10-29: no watcher was added; a proposed tiny D-Bus dialer was declined a second time, so the system stays foreground-only. Device-initiated reconnect is NOT reliable: the Boult BassBox was disconnecting while unblocked, stayed disconnected through a 45 s watch, and never sent a page, even though an inquiry scan saw it at RSSI -46. Powering it on does nothing until `bt-select` applies or `Win+Shift+Enter` runs. Only the Katana keyboard self-connects, via its own daemon.
 
 Historical behavior, kept for debugging if a dialer ever comes back:
 
@@ -41,11 +47,12 @@ Historical behavior, kept for debugging if a dialer ever comes back:
 - `Win+Shift+Enter` -> `~/.local/bin/bt-refuse-toggle` (sway bind in `~/.config/sway/config.d/40-keybindings.conf`; chezmoi source `dot_local/bin/executable_bt-refuse-toggle`). One-shot foreground command; it acts on the user-selected set of audio devices.
 - Selection: `~/.config/bt-autoconnect/selection.txt`, one MAC per line (`#` comments allowed). Missing file = every paired audio device (legacy behavior); present but empty = nothing is toggled, a notification asks to run the picker.
 - Picker: `~/.local/bin/bt-select` (modern pure-bash TUI with Vim keybindings: `j`/`k` navigate, `Space` toggle, `a` toggle all, `Enter` apply, `q`/`Esc` cancel) lists paired audio devices with connection and refusal status. OK applies immediately and writes the checked MACs to `selection.txt`:
-  - checked -> `bluetoothctl unblock` + foreground connect with 5s timeout and status updates; if exactly one device is checked and connected, its `bluez_output.<mac>.1` sink becomes the default and current sink-inputs are moved to it;
+  - checked -> `bluetoothctl unblock` + parallel connect for every checked device that is disconnected. Each `bluetoothctl connect` is allowed to reach its own page timeout; there is no `timeout` wrapper (see the `br-connection-busy` note). Results are reported as `[ACTIVE]`, `[CONNECTED]` or `[OFFLINE] (powered off / out of range, stays allowed)`;
+  - routing: if exactly one checked device ended up connected, its `bluez_output.<mac>.1` sink becomes the default and current sink-inputs are moved to it. Two live checked sinks are left alone so the existing default stands. Before 2026-10-29 routing only ran when exactly one device was checked, so "both checked, one actually on" got no routing at all;
   - unchecked -> `bluetoothctl block` + disconnect.
   It never lists input devices. Unchecking alone only removed the device from the keybind set, so the dialers or the speaker itself could still reconnect it; the apply step is what makes OFF durable.
 - Read-only helpers: `bt-refuse-toggle --list` prints `MAC<TAB>NAME<TAB>blocked<TAB>connected`; `--selected` prints the effective selection. Single-pass inspection eliminates redundant BlueZ queries.
-- Refused state = every selected device has `Blocked: yes` -> pressing allows: unblock all + non-blocking background connect each (zero UI lag). Anything else -> pressing refuses: block all + disconnect each. Notification lists the device names.
+- Refused state = every selected device has `Blocked: yes` -> pressing allows: unblock all + non-blocking background connect each (zero UI lag, and no external `timeout` wrapper so the dial ends at the BlueZ page timeout instead of being killed mid-page). Anything else -> pressing refuses: block all + disconnect each. Notification lists the device names.
 - Keyboard auto-connect: Katana S K2 (`CC:04:2E:90:66:02`) uses BLE HID over GATT (HoGP UUID `00001812-0000-1000-8000-00805f9b34fb`). As a BLE peripheral, it cannot initiate connections upon wake; it advertises. Auto-connect relies on:
   1. `/etc/udev/rules.d/50-bluetooth-power.rules`: Disables USB runtime autosuspend (`power/control="on"`, `power/wakeup="enabled"`) on Realtek RTL8852 USB adapter (`0489:e122`) so the radio remains active to receive wake advertisements.
   2. `/etc/bluetooth/main.conf.d/10-autoconnect.conf`: Configured with fast 50% duty cycle LE passive scanning (`ScanIntervalAutoConnect=60`, `ScanWindowAutoConnect=30`, `ScanIntervalConnect=60`, `ScanWindowConnect=30`).
@@ -62,4 +69,6 @@ Historical behavior, kept for debugging if a dialer ever comes back:
 - Unknown dialer hunt 1 (userspace): `sudo dbus-monitor --system "destination='org.bluez'"`, then resolve the sender: `busctl --system call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus GetConnectionUnixProcessID s ":1.x"`.
 - Unknown dialer hunt 2 (kernel): `sudo btmon` - host dials show `HCI Command: Create Connection` plus `Connection Locally Initiated`; device-initiated pages are rejected by the kernel block.
 - Journal: `avdtp_connect_cb ... Host is down` / `search_cb ... Connection timed out` = something is dialing an offline/blocked device.
+- `br-connection-busy` on connect (2026-10-29 root cause): a previous `bluetoothctl connect` was killed by an external `timeout N`. Killing the client does not cancel the in-flight HCI Create Connection, so the kernel keeps the page pending and every later attempt on that device returns `br-connection-busy` until it expires. Never wrap `bluetoothctl connect` in `timeout`; let `Connect()` return `br-connection-page-timeout` on its own (~5-20 s). Both `bt-select` and `bt-refuse-toggle` were fixed accordingly, and back-to-back dials of an offline device now return clean page timeouts.
+- False negative "device offline" while it sits at RSSI -46: a 5 s connect window is too short for the BassBox, and the killed client left the busy state. Verify with an un-timed `bluetoothctl --timeout 30 connect` before concluding a device is off.
 - bluetui has no block/refuse action (connect/disconnect/pair/trust only); its disconnect is a one-shot hang-up that auto-dialers intentionally undo.

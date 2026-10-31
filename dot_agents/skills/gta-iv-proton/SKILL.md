@@ -3,6 +3,10 @@ name: gta-iv-proton
 description: Launch configuration, Proton prefix handling, DXVK/FusionFix modding, and troubleshooting guidelines for Grand Theft Auto IV (Complete Edition) on CachyOS with RTX 5050 Mobile. Reference from Gillian's Guide.
 ---
 
+## Authority and freshness
+
+This skill is procedural guidance, not a current machine-state authority. Before using any machine-specific path, device name, GPU mode, desktop/session, filesystem, version, or service-state claim below, read `~/.local/share/chezmoi/AGENTS.md`, `~/.local/share/chezmoi/docs/system/SYSTEM_CONTEXT.md`, `~/.local/share/chezmoi/docs/system/SUBSYSTEM_MAP.md`, the owning subsystem documentation, and current repo source; verify live state when available. Higher-authority evidence overrides this skill. Treat dated verification blocks as historical evidence unless re-verified.
+
 # Grand Theft Auto IV (Complete Edition) Proton & Modding Guide
 
 **Target Hardware:** ASUS TUF Gaming F16 (Intel i5-13450HX + NVIDIA GeForce RTX 5050 Mobile `sm_120`)  

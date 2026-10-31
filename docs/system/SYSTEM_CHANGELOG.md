@@ -14,6 +14,16 @@ Rules:
 
 ## 2026-10-31
 
+### Unified Codex / AGY / OpenCode automation
+
+- Added `docs/system/SUBSYSTEM_MAP.md` so fresh agents route implementation paths to the correct active docs and optional procedural skill without loading the whole documentation tree.
+- Added deterministic `scripts/check-system-docs.sh` and GitHub Actions `system-docs-check`, so local and remote/cloud system commits must carry `SYSTEM_CHANGELOG.md` plus matching semantic subsystem documentation.
+- Replaced stale global Codex/AGY/OpenCode machine-state instruction copies with thin chezmoi-managed pointers back to repository `AGENTS.md`.
+- Added `sync-agent-skills` and an after-apply hook to expose the single `dot_agents/skills/` library to Codex, Antigravity, and OpenCode while preserving built-in/non-managed skills.
+- Brought the previously live-only `reverse-engineer-anything` skill and its references under chezmoi so all three primary agents receive the same 12 custom skills.
+- Reconciled the newer live `bluetooth-autoconnect` skill changes into source before applying shared governance, preserving its 2026-10-29 foreground-only/connect-timeout fixes.
+- Added a mandatory authority/freshness notice to shared skills so dated machine details cannot override live state, current repo source, `SYSTEM_CONTEXT.md`, or owning subsystem docs.
+
 ### System-wide AI documentation contract
 
 - Generalized the repository pre-commit documentation hook from Sway/UI-only detection to all durable workstation/configuration source changes in chezmoi, package/service manifests, provisioning hooks, and system helper scripts.

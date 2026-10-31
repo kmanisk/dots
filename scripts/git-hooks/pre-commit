@@ -9,7 +9,7 @@ staged="$(git diff --cached --name-only --diff-filter=ACMR)"
 [ -n "$staged" ] || exit 0
 
 # Paths that represent durable workstation/configuration implementation rather than docs/history.
-system_change_re='^(\.chezmoidata\.toml$|\.chezmoiignore$|\.chezmoiexternal\.toml\.tmpl$|\.chezmoitemplates/|dot_|private_|encrypted_|packages/|systemd/|install\.sh$|run_(once|onchange)_|scripts/)'
+system_change_re='^(AGENTS\.md$|CLAUDE\.md$|\.chezmoidata\.toml$|\.chezmoiignore$|\.chezmoiexternal\.toml\.tmpl$|\.chezmoitemplates/|\.github/workflows/system-docs-check\.yml$|dot_|private_|encrypted_|packages/|systemd/|install\.sh$|run_(once|onchange|after|before)_|scripts/)'
 if ! grep -Eq "$system_change_re" <<<"$staged"; then
     exit 0
 fi
@@ -17,23 +17,9 @@ fi
 printf 'pre-commit: durable workstation/configuration change detected\n'
 
 if [ "${SYSTEM_DOCS_EXEMPT:-0}" != "1" ]; then
-    if ! grep -qx 'docs/system/SYSTEM_CHANGELOG.md' <<<"$staged"; then
-        printf '%s\n' \
-            'pre-commit: BLOCKED: system changes require docs/system/SYSTEM_CHANGELOG.md in the same commit.' \
-            'Update the changelog with the verified change and validation result.' \
-            'AI agents must not bypass this rule. Manual emergency override: SYSTEM_DOCS_EXEMPT=1.' >&2
-        exit 1
-    fi
-
-    semantic_docs="$(grep -E '^docs/.*\.md$' <<<"$staged" | grep -Ev '^docs/system/(SYSTEM_CONTEXT|SYSTEM_CHANGELOG)\.md$' || true)"
-    if [ -z "$semantic_docs" ]; then
-        printf '%s\n' \
-            'pre-commit: BLOCKED: system changes require at least one relevant subsystem Markdown document under docs/.' \
-            'SYSTEM_CONTEXT.md is generated context and does not replace semantic subsystem documentation.' \
-            'AI agents must update the owning docs as part of the same task/commit.' \
-            'Manual emergency override: SYSTEM_DOCS_EXEMPT=1.' >&2
-        exit 1
-    fi
+    "$repo/scripts/check-system-docs.sh" --cached
+else
+    printf 'pre-commit: SYSTEM_DOCS_EXEMPT=1; local semantic-doc check bypassed by explicit user/manual override\n'
 fi
 
 # Never auto-stage unrelated manual edits already present in the canonical context file.

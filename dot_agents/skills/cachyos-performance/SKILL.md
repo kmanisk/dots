@@ -4,6 +4,10 @@ description: System-level performance guidelines, package management, dual-GPU o
 version: 1.1.0
 ---
 
+## Authority and freshness
+
+This skill is procedural guidance, not a current machine-state authority. Before using any machine-specific path, device name, GPU mode, desktop/session, filesystem, version, or service-state claim below, read `~/.local/share/chezmoi/AGENTS.md`, `~/.local/share/chezmoi/docs/system/SYSTEM_CONTEXT.md`, `~/.local/share/chezmoi/docs/system/SUBSYSTEM_MAP.md`, the owning subsystem documentation, and current repo source; verify live state when available. Higher-authority evidence overrides this skill. Treat dated verification blocks as historical evidence unless re-verified.
+
 # CachyOS & Performance Architecture Guidelines
 
 ## Core Objective

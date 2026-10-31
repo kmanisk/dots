@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# Expose the one canonical chezmoi skill library to Codex, Antigravity, and OpenCode.
+set -euo pipefail
+
+quiet=0
+check=0
+for arg in "$@"; do
+    case "$arg" in
+        --quiet|-q) quiet=1 ;;
+        --check) check=1 ;;
+        *) printf 'Usage: sync-agent-skills [--quiet] [--check]\n' >&2; exit 2 ;;
+    esac
+done
+
+repo="$(chezmoi source-path 2>/dev/null || true)"
+if [ -z "$repo" ] || [ ! -d "$repo/dot_agents/skills" ]; then
+    printf 'sync-agent-skills: canonical skill source not found\n' >&2
+    exit 2
+fi
+source_dir="$repo/dot_agents/skills"
+
+targets=(
+    "$HOME/.codex/skills"
+    "$HOME/.gemini/config/skills"
+    "$HOME/.config/opencode/skills"
+)
+
+problems=0
+changes=0
+
+log() {
+    [ "$quiet" -eq 1 ] || printf '%s\n' "$*"
+}
+
+for target in "${targets[@]}"; do
+    if [ "$check" -eq 0 ]; then
+        mkdir -p "$target"
+    elif [ ! -d "$target" ]; then
+        printf 'sync-agent-skills: missing target directory: %s\n' "$target" >&2
+        problems=$((problems + 1))
+        continue
+    fi
+
+    while IFS= read -r skill_dir; do
+        [ -n "$skill_dir" ] || continue
+        name="$(basename "$skill_dir")"
+        manifest="$skill_dir/SKILL.md"
+
+        declared_name="$(awk -F': *' '/^name:/{print $2; exit}' "$manifest")"
+        description="$(awk -F': *' '/^description:/{sub(/^description:[[:space:]]*/, ""); print; exit}' "$manifest")"
+        if [ "$declared_name" != "$name" ] || [ -z "$description" ]; then
+            printf 'sync-agent-skills: invalid manifest: %s (name=%q description=%q)\n' \
+                "$manifest" "$declared_name" "$description" >&2
+            problems=$((problems + 1))
+            continue
+        fi
+
+        link="$target/$name"
+        if [ -L "$link" ]; then
+            existing="$(readlink -f "$link" 2>/dev/null || true)"
+            desired="$(readlink -f "$skill_dir")"
+            if [ "$existing" = "$desired" ]; then
+                continue
+            fi
+            if [ "$check" -eq 1 ]; then
+                printf 'sync-agent-skills: wrong link: %s -> %s (wanted %s)\n' "$link" "$existing" "$desired" >&2
+                problems=$((problems + 1))
+            else
+                rm -f "$link"
+                ln -s "$skill_dir" "$link"
+                log "sync-agent-skills: relinked $link"
+                changes=$((changes + 1))
+            fi
+        elif [ -e "$link" ]; then
+            # Never replace agent-owned/built-in real directories.
+            printf 'sync-agent-skills: preserving non-symlink path: %s\n' "$link" >&2
+            problems=$((problems + 1))
+        elif [ "$check" -eq 1 ]; then
+            printf 'sync-agent-skills: missing link: %s\n' "$link" >&2
+            problems=$((problems + 1))
+        else
+            ln -s "$skill_dir" "$link"
+            log "sync-agent-skills: linked $link"
+            changes=$((changes + 1))
+        fi
+    done < <(find "$source_dir" -mindepth 1 -maxdepth 1 -type d -exec test -f '{}/SKILL.md' \; -print | sort)
+
+    # Remove only stale symlinks previously managed from this canonical source tree.
+    while IFS= read -r link; do
+        [ -n "$link" ] || continue
+        raw="$(readlink "$link" 2>/dev/null || true)"
+        case "$raw" in
+            "$source_dir"/*)
+                if [ ! -e "$link" ]; then
+                    if [ "$check" -eq 1 ]; then
+                        printf 'sync-agent-skills: stale managed link: %s -> %s\n' "$link" "$raw" >&2
+                        problems=$((problems + 1))
+                    else
+                        rm -f "$link"
+                        log "sync-agent-skills: removed stale link $link"
+                        changes=$((changes + 1))
+                    fi
+                fi
+                ;;
+        esac
+    done < <(find "$target" -mindepth 1 -maxdepth 1 -type l -print 2>/dev/null | sort)
+done
+
+if [ "$problems" -ne 0 ]; then
+    printf 'sync-agent-skills: %d problem(s)\n' "$problems" >&2
+    exit 1
+fi
+
+if [ "$check" -eq 1 ]; then
+    log 'sync-agent-skills: all agent skill links are synchronized'
+else
+    log "sync-agent-skills: complete ($changes change(s))"
+fi

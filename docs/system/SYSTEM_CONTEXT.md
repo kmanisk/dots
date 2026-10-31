@@ -112,6 +112,8 @@ These values are a convenience snapshot for cross-agent context. Exact runtime-s
 
 
 
+
+
 ## 4. System design invariants
 
 The stable design philosophy is defined in `docs/system/system-philosophy.md`. Important operational invariants are:
@@ -214,6 +216,8 @@ Runtime-generated state such as `~/.local/share/agent/environment.json` is evide
 
 See `docs/system/agent-control-plane.md` for the control-plane architecture.
 
+Cross-agent routing is centralized: Codex, Antigravity/AGY, and OpenCode global instruction files are thin pointers back to this repository, while `dot_agents/skills/` is the canonical procedural skill library. `sync-agent-skills` exposes that library to each agent without copying skill contents. Use `docs/system/SUBSYSTEM_MAP.md` to decide which docs and optional skill belong to a task.
+
 ## 10. Documentation map
 
 Use this file to choose the next source, not as a reason to load the entire documentation tree.
@@ -223,6 +227,7 @@ Use this file to choose the next source, not as a reason to load the entire docu
 - `docs/system/workstation-audit-2026-10-23.md`: last broad measured workstation audit at this sync.
 - `docs/system/SYSTEM-REPRODUCIBILITY.md`: provisioning/recovery reference; verify stale assumptions before using.
 - `docs/system/SYSTEM_CHANGELOG.md`: concise material system-change history for agents.
+- `docs/system/SUBSYSTEM_MAP.md`: task/config-path routing to owning docs and optional skills.
 - `docs/audio/`: audio architecture and detailed DSP/routing docs.
 - `docs/display/`: Wayland, dGPU, display, vibrance, brightness.
 - `docs/gaming/`: game-specific launch/runtime configuration.
