@@ -5,7 +5,7 @@ This is the primary machine-context document for AI agents working on this repos
 It is not a replacement for the detailed subsystem documentation. Its job is to provide one current entry point, resolve conflicts between older documents, record important invariants, and tell an agent what must be verified before making changes.
 
 Last synchronized with repository state: 2026-10-31.
-Latest repository baseline considered during this sync: `6064cedec6eb7248668cec5c2d20783d606c725c` (`docs(agent): centralize shared system context`), plus the verified Sway/Desktop Commander changes recorded in the current working commit.
+Latest material system baseline at this sync: `b2b089e53c09718114664ec8a5c0947da56ed964` (`feat(system): harden sway and synchronize agent context`).
 Latest broad live-system audit used as an evidence baseline: `docs/system/workstation-audit-2026-10-23.md`.
 
 ## 1. Authority and freshness
