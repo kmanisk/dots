@@ -64,6 +64,23 @@ Regenerates `~/.local/share/agent/environment.json` from the live machine. It is
 
 Runs the standard validation sequence registered for that project and stops at the first failure.
 
+## Event-driven Git/document synchronization
+
+The local chezmoi source repository uses `scripts/git-hooks/pre-commit` rather than a resident watcher or timer. When the staged commit touches Sway/UI source-of-truth paths, the hook validates the live Sway configuration, runs `scripts/sync-system-context.sh`, and stages the auto-managed live snapshot in `docs/system/SYSTEM_CONTEXT.md` into the same commit.
+
+The generated block is intentionally narrow: it records verified volatile Sway state such as the active output, refresh, scale, GPU mode, and validation status. It does not replace the semantic subsystem documentation or the material change log.
+
+For a safe one-command publish after selecting the intended files:
+
+```sh
+git add <specific-files>
+dots-publish "commit message"
+```
+
+`dots-publish` commits only the existing staged set plus any context file staged by the pre-commit hook, then pushes the current branch. It never stages the entire dirty working tree automatically.
+
+GitHub-only agents do not receive the local hook or live Sway state. They must update the knowledge layer manually and must not replace verified live values with guesses.
+
 ## Knowledge update rule
 
 After a verified durable system change, every agent must update the shared knowledge layer instead of keeping the result only in its own chat/session:

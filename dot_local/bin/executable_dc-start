@@ -4,9 +4,33 @@
 # ==============================================================================
 set -euo pipefail
 
-ACTION="${1:-status}"
+ACTION="${1:-ensure}"
+
+show_status() {
+    if systemctl --user is-active desktop-commander.service >/dev/null 2>&1; then
+        echo "Desktop Commander Remote: ACTIVE (Running headlessly in background)"
+        local log_file
+        log_file=$(ls -t "$HOME"/.desktop-commander-device/remote-*.log 2>/dev/null | head -n 1 || true)
+        if [ -n "$log_file" ] && [ -f "$log_file" ]; then
+            echo "Log File: $log_file"
+            echo "--------------------------------------------------"
+            tail -n 6 "$log_file"
+        fi
+        return 0
+    fi
+
+    echo "Desktop Commander Remote: INACTIVE"
+    return 1
+}
 
 case "$ACTION" in
+    ensure)
+        if ! systemctl --user is-active desktop-commander.service >/dev/null 2>&1; then
+            systemctl --user start desktop-commander.service
+            sleep 1
+        fi
+        show_status
+        ;;
     start)
         systemctl --user start desktop-commander.service
         echo "Desktop Commander Remote: STARTED"
@@ -19,30 +43,21 @@ case "$ACTION" in
         systemctl --user restart desktop-commander.service
         echo "Desktop Commander Remote: RESTARTED"
         ;;
+    status)
+        # Read-only: report current state and never start/stop the service.
+        show_status
+        ;;
     logs|log)
         LOG_FILE=$(ls -t "$HOME"/.desktop-commander-device/remote-*.log 2>/dev/null | head -n 1 || true)
         if [ -n "$LOG_FILE" ] && [ -f "$LOG_FILE" ]; then
             exec tail -f "$LOG_FILE"
         else
             echo "No log file found."
+            exit 1
         fi
         ;;
-    status|*)
-        if ! systemctl --user is-active desktop-commander.service >/dev/null 2>&1; then
-            systemctl --user start desktop-commander.service
-            sleep 1
-        fi
-
-        if systemctl --user is-active desktop-commander.service >/dev/null 2>&1; then
-            echo "Desktop Commander Remote: ACTIVE (Running headlessly in background)"
-            LOG_FILE=$(ls -t "$HOME"/.desktop-commander-device/remote-*.log 2>/dev/null | head -n 1 || true)
-            if [ -n "$LOG_FILE" ] && [ -f "$LOG_FILE" ]; then
-                echo "Log File: $LOG_FILE"
-                echo "--------------------------------------------------"
-                tail -n 6 "$LOG_FILE"
-            fi
-        else
-            echo "Desktop Commander Remote: INACTIVE"
-        fi
+    *)
+        echo "Usage: dc [start|stop|restart|status|logs]" >&2
+        exit 2
         ;;
 esac

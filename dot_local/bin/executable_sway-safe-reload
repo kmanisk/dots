@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Validate the complete Sway config before reloading the running compositor.
+set -euo pipefail
+
+CONF="${SWAY_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/sway/config}"
+QUIET=0
+[ "${1:-}" = "--quiet" ] && QUIET=1
+
+if [ ! -r "$CONF" ]; then
+    printf 'sway-safe-reload: config not readable: %s\n' "$CONF" >&2
+    exit 2
+fi
+
+if ! validation="$(sway -C -c "$CONF" 2>&1)"; then
+    printf 'sway-safe-reload: validation FAILED; current session was not reloaded.\n%s\n' "$validation" >&2
+    notify-send -a sway -u critical -t 5000 "Sway reload blocked" "Config validation failed; current session kept intact." 2>/dev/null || true
+    exit 1
+fi
+
+if ! swaymsg -t get_version >/dev/null 2>&1; then
+    printf 'sway-safe-reload: no reachable Sway IPC session\n' >&2
+    exit 3
+fi
+
+if ! swaymsg reload >/dev/null 2>&1; then
+    printf 'sway-safe-reload: swaymsg reload failed\n' >&2
+    notify-send -a sway -u critical -t 4000 "Sway reload failed" "Config validated, but the IPC reload command failed." 2>/dev/null || true
+    exit 4
+fi
+
+if [ "$QUIET" -eq 0 ]; then
+    printf 'Sway config valid; reload complete.\n'
+    notify-send -a sway -t 1200 "Sway" "Config validated and reloaded" 2>/dev/null || true
+fi

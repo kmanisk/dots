@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# Read-only Sway health check. Does not reload or modify configuration.
+set -uo pipefail
+
+CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+CONF="${SWAY_CONFIG:-$CONFIG_HOME/sway/config}"
+SCALE_CONF="$CONFIG_HOME/sway/config.d/99-ui-scale.conf"
+CHROME_CONF="$CONFIG_HOME/sway/config.d/99-ui-chrome.conf"
+failures=0
+warnings=0
+
+ok()   { printf 'OK   %s\n' "$*"; }
+warn() { printf 'WARN %s\n' "$*"; warnings=$((warnings + 1)); }
+fail() { printf 'FAIL %s\n' "$*"; failures=$((failures + 1)); }
+
+if validation="$(sway -C -c "$CONF" 2>&1)"; then
+    ok "Sway config syntax"
+else
+    fail "Sway config syntax"
+    printf '%s\n' "$validation" >&2
+fi
+
+configured_scale=""
+if [ -r "$SCALE_CONF" ]; then
+    configured_scale="$(grep -oE 'scale[[:space:]]+[0-9]+([.][0-9]+)?' "$SCALE_CONF" | awk '{print $2}' | head -n1)"
+    scale_count="$(grep -cE '^[[:space:]]*output[[:space:]].*[[:space:]]scale[[:space:]]+[0-9]+([.][0-9]+)?[[:space:]]*$' "$SCALE_CONF" || true)"
+    if [ "$scale_count" -eq 1 ] && [[ "$configured_scale" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+        ok "generated scale fragment: $configured_scale"
+    else
+        fail "generated scale fragment is malformed"
+    fi
+else
+    fail "generated scale fragment missing: $SCALE_CONF"
+fi
+
+if [ -s "$CHROME_CONF" ] \
+    && grep -qE '^font[[:space:]]+pango:' "$CHROME_CONF" \
+    && grep -qE '^titlebar_padding[[:space:]]+[0-9]+' "$CHROME_CONF" \
+    && grep -qE '^titlebar_border_thickness[[:space:]]+[0-9]+' "$CHROME_CONF"; then
+    ok "generated chrome fragment"
+else
+    fail "generated chrome fragment missing or malformed"
+fi
+
+if swaymsg -t get_version >/dev/null 2>&1; then
+    outputs="$(swaymsg -r -t get_outputs 2>/dev/null | python3 -c '
+import json,sys
+for o in json.load(sys.stdin):
+    if not o.get("active"): continue
+    m=o.get("current_mode") or {}
+    hz=(m.get("refresh",0) or 0)/1000
+    print(f"{o.get(chr(110)+chr(97)+chr(109)+chr(101))} {m.get(chr(119)+chr(105)+chr(100)+chr(116)+chr(104))}x{m.get(chr(104)+chr(101)+chr(105)+chr(103)+chr(104)+chr(116))}@{hz:.3f}Hz scale={o.get(chr(115)+chr(99)+chr(97)+chr(108)+chr(101))}")
+' 2>/dev/null)"
+    if [ -n "$outputs" ]; then
+        while IFS= read -r line; do ok "output $line"; done <<< "$outputs"
+    else
+        fail "no active Sway output reported"
+    fi
+
+    live_scale="$(swaymsg -r -t get_outputs 2>/dev/null | python3 -c 'import json,sys; a=[o for o in json.load(sys.stdin) if o.get("active")]; print(a[0].get("scale", "") if a else "")' 2>/dev/null)"
+    if [ -n "$configured_scale" ] && [ -n "$live_scale" ]; then
+        if awk -v a="$configured_scale" -v b="$live_scale" 'BEGIN { d=a-b; if (d<0)d=-d; exit !(d<0.001) }'; then
+            ok "live scale matches generated state"
+        else
+            warn "live scale $live_scale differs from generated $configured_scale"
+        fi
+    fi
+
+    mode="$(swaymsg -r -t get_binding_state 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("name", "unknown"))' 2>/dev/null)"
+    ok "binding mode: ${mode:-unknown}"
+else
+    warn "no reachable Sway IPC session; live-state checks skipped"
+fi
+
+for helper in ui-scale ui-sync sway-safe-reload game-workspace-daemon keep-awake apply-vibrance; do
+    if [ -x "$HOME/.local/bin/$helper" ]; then
+        ok "helper executable: $helper"
+    else
+        fail "helper missing/not executable: $HOME/.local/bin/$helper"
+    fi
+done
+
+if compgen -G "$CONFIG_HOME/sway/config.d/.99-ui-scale.conf.tmp.*" >/dev/null; then
+    warn "stale ui-scale temporary file exists"
+else
+    ok "no stale ui-scale temporary files"
+fi
+
+printf '\nSummary: %d failure(s), %d warning(s)\n' "$failures" "$warnings"
+[ "$failures" -eq 0 ]

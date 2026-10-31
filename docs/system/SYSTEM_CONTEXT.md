@@ -4,8 +4,8 @@ This is the primary machine-context document for AI agents working on this repos
 
 It is not a replacement for the detailed subsystem documentation. Its job is to provide one current entry point, resolve conflicts between older documents, record important invariants, and tell an agent what must be verified before making changes.
 
-Last synchronized with repository state: 2026-10-29.
-Latest repository change considered during this sync: `1a533b95dd9d6c8661b8f617b5914c0d3f369f6f` (`feat(sway): central UI scaling with scale-aware system chrome`).
+Last synchronized with repository state: 2026-10-31.
+Latest repository baseline considered during this sync: `6064cedec6eb7248668cec5c2d20783d606c725c` (`docs(agent): centralize shared system context`), plus the verified Sway/Desktop Commander changes recorded in the current working commit.
 Latest broad live-system audit used as an evidence baseline: `docs/system/workstation-audit-2026-10-23.md`.
 
 ## 1. Authority and freshness
@@ -61,18 +61,44 @@ Do not treat DRM card numbers, connector enumeration, or an old `eDP-1`/`eDP-2` 
 
 ### UI scaling
 
-As of repository commit `1a533b95dd9d6c8661b8f617b5914c0d3f369f6f`, Sway output scaling is the central application/UI scale source.
+Sway output scaling is the central application/UI scale source. Fresh live verification on 2026-10-31 found `eDP-1` at 1920x1200, approximately 165.004 Hz, runtime scale `1.20`, with GPU mode `AsusMuxDgpu`.
 
 Relevant files include:
 
 - `dot_config/sway/config.d/45-ui-scale.conf`
-- `dot_config/sway/config.d/99-ui-scale.conf` when generated/persisted
+- generated runtime `~/.config/sway/config.d/99-ui-scale.conf` (not pinned as a tracked fixed scale)
+- generated runtime `~/.config/sway/config.d/99-ui-chrome.conf`
 - `dot_config/ui-metrics.conf`
 - `dot_local/bin/executable_ui-scale`
 - `dot_local/bin/executable_ui-sync`
+- `dot_local/bin/executable_sway-check`
+- `dot_local/bin/executable_sway-safe-reload`
 - `dot_config/theme/hooks.d/executable_50-ui-chrome`
 
+`ui-scale` writes scale state atomically and skips replacing unchanged content. `ui-sync` skips unchanged generated-file writes/reloads. Sway maintenance should use read-only `sway-check` and validated `sway-safe-reload`; `Win + Shift + R` is bound to the latter.
+
 Do not reintroduce stacked Chromium/device-scale overrides unless there is a measured reason. Inspect the current generated scale state before changing font or chrome sizes.
+
+### Auto-synchronized live Sway snapshot
+
+The block below is maintained by `scripts/sync-system-context.sh` when a verified Sway/UI change is committed from the live workstation. The repository pre-commit hook updates and stages it automatically; agents should not hand-edit inside the markers.
+
+<!-- AUTO:SYSTEM_STATE:BEGIN -->
+> Auto-synchronized from the live workstation by `scripts/sync-system-context.sh`. Do not edit inside these markers.
+
+- Last live sync: **2026-10-31**.
+- Sway validation: **PASS**.
+- Sway version: `sway version 1.12`.
+- GPU mode: `AsusMuxDgpu`.
+- Active output: `eDP-1`, `1920x1200 @ 165.004 Hz`, scale `1.20`, adaptive sync `disabled`.
+- Persisted generated UI scale: `1.20` from `~/.config/sway/config.d/99-ui-scale.conf`.
+- Reload path: `sway-safe-reload` (validates before `swaymsg reload`).
+
+These are verified runtime values, not permanent hardware identifiers. Connector names and versions must still be re-queried when exact values matter.
+<!-- AUTO:SYSTEM_STATE:END -->
+
+
+
 
 ## 4. System design invariants
 

@@ -41,6 +41,27 @@ For every durable system change:
 
 Implementation-only changes that do not affect agent-facing behavior do not require rewriting `SYSTEM_CONTEXT.md`.
 
+## Automatic documentation synchronization
+
+The local chezmoi Git repository uses `scripts/git-hooks/pre-commit` for Sway/UI commits. When staged changes touch the Sway/UI source-of-truth paths, the hook:
+
+1. runs the read-only Sway validation path,
+2. runs `scripts/sync-system-context.sh`,
+3. refreshes only the auto-managed live Sway snapshot inside `docs/system/SYSTEM_CONTEXT.md`, and
+4. stages that context file into the same commit.
+
+The hook never stages unrelated configuration. Detailed subsystem prose and `SYSTEM_CHANGELOG.md` still follow the manual change contract above when behavior or architecture materially changes.
+
+For an explicit commit-and-push workflow, stage only the intended files and run:
+
+```sh
+dots-publish "commit message"
+```
+
+`dots-publish` commits only what is already staged (plus the context file added by the pre-commit hook) and pushes the current branch. It never runs `git add -A` or silently publishes unrelated dirty files.
+
+Agents operating only through GitHub, without the live workstation or its Git hooks, must follow the update contract manually and must not fabricate live-state values.
+
 ## Engineering rules
 
 - Assume CachyOS/Arch, Sway/Wayland, fish, systemd, PipeWire/WirePlumber, NVIDIA, and chezmoi unless current context proves otherwise.

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Keep the canonical live Sway snapshot synchronized whenever Sway/UI config is committed.
+set -euo pipefail
+
+repo="$(git rev-parse --show-toplevel)"
+cd "$repo"
+
+staged="$(git diff --cached --name-only --diff-filter=ACMR)"
+[ -n "$staged" ] || exit 0
+
+if ! grep -Eq '^(dot_config/sway/|dot_config/ui-metrics\.conf$|dot_local/bin/executable_(ui-scale|ui-sync|sway-check|sway-safe-reload)$)' <<<"$staged"; then
+    exit 0
+fi
+
+printf 'pre-commit: Sway/UI change detected; validating and syncing canonical system context\n'
+
+if [ -x "$HOME/.local/bin/sway-check" ]; then
+    "$HOME/.local/bin/sway-check"
+elif [ -x "$repo/dot_local/bin/executable_sway-check" ]; then
+    "$repo/dot_local/bin/executable_sway-check"
+else
+    sway -C -c "${XDG_CONFIG_HOME:-$HOME/.config}/sway/config"
+fi
+
+"$repo/scripts/sync-system-context.sh"
+git add docs/system/SYSTEM_CONTEXT.md
+
+printf 'pre-commit: SYSTEM_CONTEXT.md synchronized and staged\n'

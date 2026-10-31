@@ -37,12 +37,15 @@ Rather than requiring an open terminal window that could accidentally be closed,
 
 ### Controlling the Service
 ```bash
-start                     # Displays daemon status and recent connection logs
-dc                        # Alias for start
-dc-start logs             # Streams live tool-call activity in the terminal (tail -f)
-systemctl --user status desktop-commander
-systemctl --user restart desktop-commander
+dc             # Ensure the service is running, then show status + recent logs
+dc status      # Read-only status; never starts or stops the service
+dc start       # Start the service
+dc stop        # Stop the service
+dc restart     # Restart the service
+dc logs        # Follow the current remote log (tail -f)
 ```
+
+`dc` is the preferred interface. The older `start` fish alias still resolves to the same `dc-start` controller for compatibility, but new usage should prefer `dc` to avoid ambiguous commands such as `start start`. Unknown subcommands fail with usage text instead of falling through to an implicit start.
 
 ---
 

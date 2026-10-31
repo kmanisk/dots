@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Commit already-staged chezmoi changes, auto-sync system context via the repo hook,
+# then push the resulting commit. Unstaged files are never added implicitly.
+set -euo pipefail
+
+repo="${CHEZMOI_SOURCE_DIR:-}"
+if [ -z "$repo" ] && command -v chezmoi >/dev/null 2>&1; then
+    repo="$(chezmoi source-path)"
+fi
+[ -n "$repo" ] || repo="$HOME/.local/share/chezmoi"
+
+cd "$repo"
+
+if git diff --cached --quiet; then
+    printf 'dots-publish: no staged changes. Stage only the files you intend to publish first.\n' >&2
+    exit 2
+fi
+
+message="${*:-}"
+if [ -z "$message" ]; then
+    printf 'Usage: dots-publish "commit message"\n' >&2
+    exit 2
+fi
+
+branch="$(git branch --show-current)"
+if [ -z "$branch" ]; then
+    printf 'dots-publish: detached HEAD; refusing to push\n' >&2
+    exit 3
+fi
+
+printf 'Staged files:\n'
+git diff --cached --name-only | sed 's/^/  /'
+printf '\n'
+
+git commit -m "$message"
+git push origin "$branch"
+
+printf 'dots-publish: pushed %s to origin/%s\n' "$(git rev-parse --short HEAD)" "$branch"
