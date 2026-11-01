@@ -121,18 +121,52 @@ function M.on_attach(client, bufnr)
 end
 
 -- ---------------------------------------------------------------------------
--- Buffer closing
+-- Tabufline safety guards
 -- ---------------------------------------------------------------------------
--- nvchad.tabufline.close_buffer runs :bnext/:bdelete on the current window.
--- Inside the command-line window (q:) those commands raise
--- "E11: Invalid in command-line window", so leave the cmdwin first. Wrapping the
--- module keeps every caller safe, including the tabufline close button and the
--- <leader>q / <A-w> mappings.
+-- NvChad's next()/prev() assume vim.t.bufs contains at least one listed buffer.
+-- The Alpha dashboard intentionally has none, so the stock <Tab>/<S-Tab> maps
+-- otherwise call nvim_set_current_buf(nil) and raise E5108. Sanitize stale
+-- entries and make navigation a no-op until a real listed buffer exists.
+--
+-- close_buffer runs :bnext/:bdelete on the current window. Inside the
+-- command-line window (q:) those commands raise "E11: Invalid in command-line
+-- window", so leave the cmdwin first. Wrapping the module protects every caller,
+-- including NvChad defaults, custom buffer mappings, and tabufline actions.
 do
     local ok, tabufline = pcall(require, "nvchad.tabufline")
-    if ok and not tabufline._cmdwin_guard then
-        tabufline._cmdwin_guard = true
+    if ok and not tabufline._local_safety_guards then
+        tabufline._local_safety_guards = true
+        local next_buffer = tabufline.next
+        local prev_buffer = tabufline.prev
         local close_buffer = tabufline.close_buffer
+
+        local function has_tab_buffers()
+            local valid = {}
+            for _, bufnr in ipairs(type(vim.t.bufs) == "table" and vim.t.bufs or {}) do
+                if type(bufnr) == "number"
+                    and api.nvim_buf_is_valid(bufnr)
+                    and api.nvim_get_option_value("buflisted", { buf = bufnr })
+                then
+                    valid[#valid + 1] = bufnr
+                end
+            end
+            vim.t.bufs = valid
+            return #valid > 0
+        end
+
+        tabufline.next = function(...)
+            if not has_tab_buffers() then
+                return
+            end
+            return next_buffer(...)
+        end
+
+        tabufline.prev = function(...)
+            if not has_tab_buffers() then
+                return
+            end
+            return prev_buffer(...)
+        end
 
         tabufline.close_buffer = function(...)
             if fn.getcmdwintype() ~= "" then

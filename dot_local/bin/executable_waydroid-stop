@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Stop the Waydroid user session and container without leaving background runtime.
+set -euo pipefail
+
+export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
+
+# Stop the Android session first so it can tear down cleanly.
+waydroid session stop >/dev/null 2>&1 || true
+for _ in $(seq 1 20); do
+    if ! waydroid status 2>/dev/null | grep -q 'Session:.*RUNNING'; then
+        break
+    fi
+    sleep 0.1
+done
+
+# Venus is only relevant to the legacy/fallback renderer mode.
+systemctl --user stop wd-venus.service >/dev/null 2>&1 || true
+
+# waydroid-nvidia-setup enables the system container service. Restore this
+# workstation's on-demand invariant every time we stop: no boot-time Waydroid and
+# no resident container after use. The launcher can still start a disabled unit.
+# Never prompt from a desktop launcher.
+if ! sudo -n systemctl disable --now waydroid-container.service; then
+    echo "waydroid-stop: session stopped, but waydroid-container.service could not be disabled/stopped without authentication" >&2
+    command -v notify-send >/dev/null 2>&1 && \
+        notify-send -u normal "Waydroid session stopped" "Container service may still be enabled/running; stop it manually if needed." || true
+    exit 1
+fi

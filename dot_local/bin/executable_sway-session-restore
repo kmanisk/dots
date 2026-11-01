@@ -16,6 +16,7 @@ already running are never duplicated. Exits after completing.
 """
 import json
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -257,7 +258,7 @@ def restore_system_state(sock, saved, dry):
 
 def restore_ws(sock, ws, entries, present, dry, steam_killed=False):
     # Apps that can legitimately have multiple windows open at once.
-    MULTI_INSTANCE = {"alacritty", "ghostty", "foot", "kitty"}
+    MULTI_INSTANCE = {"alacritty", "ghostty", "foot", "footclient", "kitty"}
     # Track per-app launch count for multi-instance apps this call.
     launched_count: dict = {}
     launched = 0
@@ -285,12 +286,25 @@ def restore_ws(sock, ws, entries, present, dry, steam_killed=False):
         workdir = e.get("working_directory") or str(Path.home())
         if not Path(workdir).is_dir():
             workdir = str(Path.home())
-        line = " ".join(cmd)
-        if workdir != str(Path.home()):
-            exec_cmd = (f'workspace number {ws}; exec --no-startup-id '
-                        f'sh -c "cd {json.dumps(workdir)} && exec {line}"')
+
+        # Migration for snapshots written by the old Foot server-PID logic:
+        # a plain ws1 shell was often recorded as cwd=/ because every Foot
+        # surface reports the shared server PID. Do not resurrect that broken
+        # startup state; a bare ws1 terminal defaults to HOME instead.
+        if ws == "1" and base in {"foot", "footclient"} and len(cmd) == 1 and workdir == "/":
+            workdir = str(Path.home())
+
+        if base in {"foot", "footclient"}:
+            # Foot server mode supports an explicit per-client cwd. This avoids
+            # inheriting the server's directory and avoids shell quoting entirely.
+            launch = [cmd[0], "-D", workdir, *cmd[1:]]
+            line = shlex.join(launch)
         else:
-            exec_cmd = f"workspace number {ws}; exec --no-startup-id {line}"
+            line = shlex.join(cmd)
+            if workdir != str(Path.home()):
+                inner = f"cd -- {shlex.quote(workdir)} && exec {line}"
+                line = f"sh -c {shlex.quote(inner)}"
+        exec_cmd = f"workspace number {ws}; exec --no-startup-id {line}"
         if dry:
             print(exec_cmd)
         else:

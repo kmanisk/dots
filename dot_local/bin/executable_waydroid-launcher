@@ -1,49 +1,104 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# waydroid-launcher — ensure Waydroid container + session, then open UI or app.
+# waydroid-launcher — ensure Waydroid container + selected NVIDIA mode, then UI.
 # Usage:
 #   waydroid-launcher                    # full Android UI
-#   waydroid-launcher com.example.app    # single app (args -> app launch)
-# Pass-through extras: waydroid-launcher --help
+#   waydroid-launcher com.example.app    # launch one Android package
 # ==============================================================================
 set -euo pipefail
 
 export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-1}"
 export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
 
+CFG=/var/lib/waydroid/waydroid.cfg
+
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: $(basename "$0") [package.name]  — ensure session, open full UI or app"
     exit 0
 fi
 
-# 1. Container daemon (LXC + binder). Passwordless sudo is configured on this host.
-if ! systemctl is-active -q waydroid-container 2>/dev/null; then
-    sudo systemctl start waydroid-container
-    sleep 3
+cfg_value() {
+    local key="$1"
+    [[ -r "$CFG" ]] || return 0
+    awk -F= -v key="$key" '
+        $1 ~ "^[[:space:]]*" key "[[:space:]]*$" {
+            v=$2; sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$/, "", v); print v; exit
+        }
+    ' "$CFG"
+}
+
+MODE="$(cfg_value nvidia_driver_mode)"
+
+# waydroid-nvidia 0.2.x no longer accepts the pre-0.2 Venus path keys. Detect
+# that state explicitly so the launcher never fails silently after an upgrade.
+if [[ -z "$MODE" ]] && grep -Eq '^[[:space:]]*(nvidia_venus_socket|nvidia_guest_layout)[[:space:]]*=' "$CFG" 2>/dev/null; then
+    msg="Waydroid NVIDIA config is from the old Venus layout. Run: sudo waydroid-nvidia-setup --mode nvidia-prolapse --native-gl off --refresh 165"
+    echo "Error: $msg" >&2
+    command -v notify-send >/dev/null 2>&1 && notify-send -u critical "Waydroid needs migration" "$msg" || true
+    exit 2
 fi
 
-# 2. Venus render server (NVIDIA path: drm renderD129 + venus.sock).
-if ! systemctl --user is-active -q wd-venus 2>/dev/null; then
-    systemctl --user start wd-venus
-    sleep 3
+# 0.2.x defaults to nvidia-prolapse when no explicit mode is present.
+MODE="${MODE:-nvidia-prolapse}"
+case "$MODE" in
+    nvidia-prolapse|glibc-shim|venus) ;;
+    *) echo "Error: unsupported Waydroid NVIDIA mode '$MODE' in $CFG" >&2; exit 2 ;;
+esac
+
+# 1. Container daemon (LXC + binder). Passwordless sudo is configured locally.
+if ! systemctl is-active -q waydroid-container.service 2>/dev/null; then
+    sudo systemctl start waydroid-container.service
+    sleep 2
 fi
 
-# 3. User session. `session start` blocks, so detach it and wait for RUNNING.
+# 2. Venus has a host renderer; nvidia-prolapse/glibc-shim do not need it.
+if [[ "$MODE" == "venus" ]]; then
+    if ! systemctl --user is-active -q wd-venus.service 2>/dev/null; then
+        systemctl --user start wd-venus.service
+        sleep 1
+    fi
+else
+    systemctl --user stop wd-venus.service >/dev/null 2>&1 || true
+fi
+
+# 3. Start the user session. Keep the startup log so failures are actionable.
 if ! waydroid status 2>/dev/null | grep -q 'Session:.*RUNNING'; then
-    setsid -f waydroid session start >/dev/null 2>&1 < /dev/null
+    session_log="$(mktemp -t waydroid-session.XXXXXX.log)"
+    trap 'rm -f "${session_log:-}"' EXIT
+    setsid -f waydroid session start >"$session_log" 2>&1 < /dev/null
+
     for _ in $(seq 1 30); do
         waydroid status 2>/dev/null | grep -q 'Session:.*RUNNING' && break
-        sleep 2
+        sleep 1
     done
+
+    if ! waydroid status 2>/dev/null | grep -q 'Session:.*RUNNING'; then
+        echo "Error: Waydroid session failed to reach RUNNING state (mode: $MODE)." >&2
+        [[ -s "$session_log" ]] && { echo "--- session start ---" >&2; cat "$session_log" >&2; }
+        command -v notify-send >/dev/null 2>&1 && notify-send -u critical "Waydroid failed to start" "Mode: $MODE. Run waydroid-launcher from a terminal for the startup error." || true
+        exit 1
+    fi
 fi
 
-if ! waydroid status 2>/dev/null | grep -q 'Session:.*RUNNING'; then
-    echo "Error: Waydroid session failed to reach RUNNING state." >&2
-    echo "Check: systemctl status waydroid-container, systemctl --user status wd-venus" >&2
+# 4. The session can report RUNNING before the client bridge is ready. Probe the
+# app service with a short timeout so launchers do not emit repeated
+# "Failed to get service waydroidplatform" errors on a cold start.
+for _ in $(seq 1 30); do
+    if timeout 1 waydroid app list >/dev/null 2>&1; then
+        break
+    fi
+    sleep 1
+done
+
+if ! timeout 1 waydroid app list >/dev/null 2>&1; then
+    echo "Error: Waydroid client bridge did not become ready (mode: $MODE)." >&2
+    command -v notify-send >/dev/null 2>&1 && notify-send -u critical "Waydroid failed to become ready" "Mode: $MODE. Run waydroid-launcher from a terminal for details." || true
     exit 1
 fi
 
-# 4. Open UI or requested app.
+# 5. Open UI or requested app. Waydroid may replace/destroy its Wayland surface
+# during ordinary Android activity transitions, so compositor window-close events
+# are not a reliable signal for shutting down the container. Use waydroid-stop.
 if [[ $# -gt 0 ]]; then
     exec waydroid app launch "$@"
 else

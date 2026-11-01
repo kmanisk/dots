@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Stop Waydroid
+GenericName=Android Container Control
+Comment=Stop the Waydroid session and container service.
+Exec=waydroid-stop
+TryExec=waydroid-stop
+Icon=waydroid
+Terminal=false
+Categories=X-WayDroid-App;Utility;
+NoDisplay=false

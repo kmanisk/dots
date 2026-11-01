@@ -1,5 +1,27 @@
 # Waydroid + NVIDIA on CachyOS — Setup & Troubleshooting Log
 
+## Current live state — 2026-11-01
+
+- Installed package: `waydroid-nvidia-bin 0.2.0-1`; host NVIDIA driver `615.78.08`, open kernel module, `nvidia_drm.modeset=Y`, dGPU-only Sway session on the RTX 5050.
+- The 0.2 migration is complete. `/var/lib/waydroid/waydroid.cfg` now selects `nvidia_driver_mode = nvidia-prolapse`, `nvidia_native_gl = off`, and `nvidia_prolapse_install = vendor-image`; `vendor_ota` points at the v0.2.0 NVIDIA vendor-image release.
+- The supported migration command was run successfully:
+
+  ```bash
+  sudo waydroid-nvidia-setup --mode nvidia-prolapse --native-gl off --refresh 165
+  ```
+
+  Its release gate passed all 22 Android/Android32 cases plus media checks against NVIDIA kernel module `615.78.08`. The installed vendor image is v0.2.0 and the previous configuration was preserved under `/var/lib/waydroid/before-vendor-image-20261101-135304/`.
+- Live verification after migration reports `Session: RUNNING`, `Container: RUNNING`, Android `sys.boot_completed=1`, and SurfaceFlinger GLES as ANGLE on NVIDIA Vulkan/NVK for the RTX 5050. `wd-venus.service` is not required in `nvidia-prolapse` mode.
+- `~/.local/bin/waydroid-launcher` is 0.2-mode-aware and waits for the Waydroid client bridge before opening the full UI or an app, avoiding the transient `Failed to get service waydroidplatform` race seen on cold starts. The user `Waydroid.desktop` entry used by the Alt+Space Fuzzel launcher resolves `waydroid-launcher` from the Sway session PATH instead of hardcoding the local username.
+- Waydroid is now strictly on-demand. `waydroid-container.service` is disabled at boot; the launcher starts it when needed. `~/.local/bin/waydroid-stop` stops the Android session, stops legacy Venus if present, then runs `systemctl disable --now waydroid-container.service` so future `waydroid-nvidia-setup` runs cannot accidentally leave the container enabled. Fuzzel exposes a separate `Stop Waydroid` entry and the main desktop entry's Stop action uses the same helper. Automatic shutdown from Sway window-close events is intentionally not used because normal Android activity/surface replacement can destroy and recreate the `app_id=Waydroid` surface, making compositor close events ambiguous.
+- Host audio was re-audited after the 0.2 migration: the guest has `audio.primary.waydroid.so`, `/run/user/1000/pulse/native` is correctly bind-mounted as `/run/xdg/pulse/native`, Android's persisted music volume is nonzero, and `audio doctor` reports 0 errors/0 warnings. Do not modify global PipeWire/DAX routing solely for a silent protected Hotstar title; first prove that an Android playback stream is actually created.
+- The current Waydroid image contains Android MediaDrm framework libraries and the ClearKey DRM plugin only (`libdrmclearkeyplugin.so`); no Widevine CDM/plugin is installed. JioHotstar protected playback can therefore fail with black video and may never establish the normal media/audio pipeline. Do not spoof Widevine L1, device attestation, HDCP, or extracted DRM keys. Use a supported Widevine-capable browser or certified physical Android device for protected Hotstar playback. If unprotected Android apps are also silent, authorize the normal ADB debugging prompt and inspect `dumpsys audio`/logcat as a separate audio issue.
+- `/dev/udmabuf` access is correct for the desktop user, so the known "cursor invisible / black screenshot" permission failure is not present on this machine.
+
+### Historical note
+
+The sections below document the previously working 0.1.2 Venus deployment and its troubleshooting history. Treat Venus-specific daily commands as historical unless the current configuration explicitly selects `nvidia_driver_mode=venus`.
+
 Machine: ASUS TUF F16 · i5-13450HX · RTX 5050 Mobile (Blackwell) · Sway 1.12 Wayland · 1920×1200@165Hz · CachyOS (`linux-cachyos`), UFW active.
 Stack: `waydroid-nvidia-bin 0.1.2-1` (Venus over vtest socket) · LineageOS 20 GAPPS · `supergfxctl` mode `AsusMuxDgpu` (dGPU-only).
 

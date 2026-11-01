@@ -96,6 +96,8 @@ The canonical custom skill source is `dot_agents/skills/`. `sync-agent-skills` e
 
 `run_after_90-sync-agent-skills.sh` re-runs this synchronization after every `chezmoi apply`. It preserves built-in/non-symlink agent skills and removes only stale symlinks previously managed from this repository. Every shared skill carries an authority warning: it is procedural knowledge, not a current-state source.
 
+The 2026-11-01 skill refresh removed two stale machine-state assumptions: `bluetooth-autoconnect` now treats BlueZ native HID reconnect as the owner for the Katana keyboard rather than a resident Python reconnect daemon, and `waydroid-cachyos-root` no longer encodes an Intel-only rendering invariant. The Waydroid skill explicitly routes agents to the live `waydroid.cfg`, current `waydroid-nvidia-bin` mode, and `docs/virtualization/waydroid-guide.md` before making GPU/runtime claims. These are examples of the rule above: skills carry procedure, while live state and owning docs carry current truth.
+
 For a safe one-command publish after selecting the intended files:
 
 ```sh

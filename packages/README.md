@@ -11,7 +11,7 @@ in `.chezmoidata.toml`.
 | `gaming.txt` | Steam, Gamescope, Gamemode, Mangohud, Goverlay | Official / `features.gaming = true` |
 | `nvidia.txt` | NVIDIA dGPU drivers, 32-bit Vulkan/OpenCL | Official / `gpu_strategy = "hybrid-optimus-d3cold"` |
 | `asus.txt` | asusctl, supergfxctl | Official / `features.asus_ctl = true` |
-| `sway.txt` | Sway desktop stack (mako, fuzzel, grim, slurp, brave-origin-bin) | Official / `features.sway = true` |
+| `sway.txt` | Sway desktop stack (mako, fuzzel, grim, slurp, brave-origin-bin, ImageMagick for curated wallpaper normalization) | Official / `features.sway = true` |
 | `audio.txt` | PipeWire, WirePlumber, audio firmware, rnnoise | Official / audio provider starts with `pipewire` |
 | `development.txt` | Compilers, runtimes (Node.js, Python, ccache, mold) | Official / `features.development = true` |
 | `aur-explicit.txt` | AUR packages (antigravity-cli, xremap, vkbasalt, lib32-vkbasalt) | AUR via paru / helper present |

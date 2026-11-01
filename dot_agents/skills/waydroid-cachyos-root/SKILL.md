@@ -12,9 +12,7 @@ This skill is procedural guidance, not a current machine-state authority. Before
 ## 1. System Topology & Hardware Offload Rules
 
 - **Host Session**: CachyOS rolling, Sway / Wayland (`wayland-1`).
-- **GPU Invariant**: 
-  - Waydroid UI & Android hardware acceleration run exclusively on the **Intel UHD iGPU** (`/dev/dri/renderD128` via `minigbm_gbm_mesa` and `mesa` EGL / Intel Vulkan).
-  - The discrete NVIDIA RTX 5050 Mobile (`/dev/dri/renderD129`) remains managed for offload. Waydroid itself never attaches to the NVIDIA render node.
+- **GPU rule**: never assume an Intel-only or NVIDIA-only path from this skill. Read `docs/virtualization/waydroid-guide.md` and verify the live `waydroid-nvidia-bin` version, `waydroid.cfg`, render node, Sway GPU, and selected `nvidia_driver_mode` first. On the current dGPU-only RTX 5050 workstation, waydroid-nvidia 0.2.x supports NVIDIA directly and upstream defaults to `nvidia-prolapse`; Venus is a fallback mode, not a permanent invariant.
 - **Binder IPC**: Uses native CachyOS kernel binderfs (`CONFIG_ANDROID_BINDERFS=y`). Mountpoint is `/dev/binderfs` with devices `binder`, `hwbinder`, and `vndbinder`. No out-of-tree DKMS binder modules.
 - **Container Freeze Handling**: `suspend_action = none` in `/var/lib/waydroid/waydroid.cfg` to prevent cgroup freezer deadlocks when switching windows.
 
@@ -65,7 +63,14 @@ waydroid-launcher                           # full Android UI
 waydroid-launcher org.lsposed.manager       # LSPosed Manager
 waydroid-launcher com.android.vending       # Google Play Store
 waydroid-launcher com.android.settings      # Settings
+
+# Fully stop the Android session/container and restore boot-disable state
+waydroid-stop
 ```
+
+The workstation keeps `waydroid-container.service` disabled and starts it only through `waydroid-launcher`. Do not implement automatic shutdown from Sway window-close events: Waydroid can destroy/recreate its `app_id=Waydroid` surface during normal activity transitions, so a compositor close event is not equivalent to the user exiting Android.
+
+Protected-media note: the current Waydroid image has ClearKey DRM but no Widevine CDM/plugin. Do not diagnose a protected JioHotstar black/silent title as a host PipeWire failure until an Android playback stream is proven, and do not spoof hardware-backed Widevine/attestation or extracted DRM keys.
 
 ### ADB Connection & Module Management
 ```bash

@@ -216,15 +216,19 @@ When an author distributes a theme without a master `colors.toml`, the engine ex
 
 `omarchy-import --catalog` prefers Omarchy's published validated registry catalog and checks out each registry-pinned commit when that endpoint is reachable. If the registry CDN is unavailable, it falls back to the current `omarchy.org/themes` gallery and repository HEAD, then to legacy endpoints only as a last resort. The importer canonicalizes one local JSON file per repository, removes imports no longer listed, and mirrors the resulting imported directory back into chezmoi. A dead catalog link is reported as unreachable and is not silently replaced by a third-party mirror. During the 2026-11-01 live reconciliation the registry hostname did not resolve from this machine, so the gallery fallback was used: 233 entries were listed, 232 were reachable/imported, and `ankur311sudo/gruvu` returned repository-not-found.
 
-### Theme Wallpaper Sets
+### Centralized Theme Wallpaper Library
 
-Community wallpaper discovery is metadata-only during catalog import: each theme records at most **5** deterministic image paths from its own repository, preferring the canonical `backgrounds/` directory and deprioritizing old, alternate, portrait, or vertical archives. This keeps the catalog small and prevents eager download of hundreds of large images. The 2026-11-01 live catalog has wallpaper candidates for all 232 reachable community themes. The same metadata is attached to 21 of the 22 locally maintained official Omarchy built-ins from `omacom/omarchy/themes/<name>/backgrounds/`; the legacy local `omarchy-osaka-jade` has no exact current upstream directory and is intentionally left without unrelated wallpaper metadata.
+Every exposed theme now has a curated local wallpaper mapping. The persistent root is `~/.local/share/theme/wallpapers/`: shared curated assets live under `assets/`, preserved Omarchy/repository backgrounds live under `upstream/`, and `manifest.json` records source provenance plus theme-to-asset mappings. The former `~/.cache/theme/wallpapers/` tree was migrated into this central root and is no longer the active storage path.
 
-`theme-wallpaper` fetches image bytes only when requested. Importing or applying a theme never starts a wallpaper download. On first explicit use it fetches up to five pinned GitHub assets through libcurl's bounded parallel transfer path, validates PNG/JPEG/WebP payloads and the 50 MiB/file cap, and falls back to the Python downloader only for failed files. A per-theme `flock` prevents duplicate first-use fetches from rapid hotkeys. Files are cached under `~/.cache/theme/wallpapers/<theme>/`, and the selected filename is remembered under `~/.local/state/theme/wallpaper/<theme>`. Ordinary `theme-set` remains network-free; when a cached selection exists it restores that wallpaper and updates `~/.config/current_wallpaper` for session restart persistence.
+`theme-wallpaper-library` is the explicit one-shot maintenance command. Wallhaven color buckets are used only to discover a conservative vetted source pool; after the images are local, assignment is based on the actual image pixels. A small ImageMagick histogram records dominant/chromatic colors, mean luminance, and mean saturation, and every theme is scored globally using its accent, authored Base16 hues, background luminance, and saturation. Choice #1 is the absolute best visual match; choices #2/#3 stay among the strongest visual candidates with a reuse penalty to avoid repetitive mappings. The verified 327-theme fleet uses all 63 curated assets, with 48 distinct first-choice assets and a maximum all-slot reuse of 35.
 
-Sway controls mirror the Omarchy background workflow without a resident service:
-- `Win + Shift + W`, `Alt + Shift + W`, or `Win + Ctrl + W`: next wallpaper for the active theme; first use fetches its <=5-image set.
-- `Win + Ctrl + Shift + W`: previous wallpaper.
+Automated selection is deliberately conservative about generative-AI provenance: General/SFW results only, at least 1920x1200, 16:9 or 16:10, favorites-first, explicit `AI art` search exclusion, full metadata rejection for known AI tags/source domains, and an upload cutoff before 2022-01-01. Metadata cannot mathematically prove authorship, so newer images are never selected automatically; they require manual review. Curated files are normalized to WebP quality 92 at up to 2560x1600 without upscaling. The 2026-11-01 verified pool contains uploads from 2014 through 2021 only, with a minimum local size of 1920x1200.
+
+Ordinary `theme-set` remains network-free. `theme-wallpaper next|prev|random|set` uses already-local curated assets and persists the chosen file through `~/.config/current_wallpaper`; repository wallpapers in `upstream/` remain a compatibility fallback. Source/provenance metadata is managed in chezmoi while image binaries remain local data outside Git. Full policy, storage, recovery, and rebuild details are in [`wallpaper-library.md`](wallpaper-library.md).
+
+Sway controls remain daemonless:
+- `Win + Shift + W`, `Alt + Shift + W`, or `Win + Ctrl + W`: next mapped wallpaper for the active theme.
+- `Win + Ctrl + Shift + W`: previous mapped wallpaper.
 - The retired `ds3-wallpaper` helper is not used by the theme system; the old static DS3 image pack may remain on disk as ordinary images.
 
 ---
@@ -233,12 +237,18 @@ Sway controls mirror the Omarchy background workflow without a resident service:
 
 ### Switching Themes:
 ```bash
-# Apply a theme by name (<80ms)
+# Read-only preflight before applying anything
+theme-set --check drac
+theme-set --check-all
+
+# Apply a theme by name
 theme-set drac
 theme-set tokyonight
 theme-set forest-green
 
-# Launch the interactive Rofi theme picker (Native Script Mode with in-place mutations)
+# Launch the interactive Rofi theme picker (Native Script Mode)
+# Enter performs read-only preflight, then a synchronous verified apply; failures stay visible.
+# A stale cache is synchronized before rows are exposed, so selection cannot race cache replacement.
 rofi-theme                          # Keys: Enter (Apply), Ctrl+D (Delete), Ctrl+R (Sync), Ctrl+I (Info)
 
 # List themes (clean output for scripts and piping)
@@ -262,20 +272,25 @@ thsync                              # alias for theme-sync
 
 ### Theme Wallpapers:
 ```bash
-# Current theme: first call fetches up to five upstream images, later calls are local
+# Normal local cycling for the active theme
 theme-wallpaper next
 theme-wallpaper prev
 theme-wallpaper random
 
-# Inspect/cache a specific theme without changing the desktop
+# Inspect a theme's curated mapping plus repository fallback
 theme-wallpaper list japan-night
-theme-wallpaper fetch japan-night
 
-# Select a specific cached slot (1..5)
-theme-wallpaper set 3 japan-night
+# Select a specific mapped slot
+theme-wallpaper set 2 japan-night
 
-# Re-fetch the current pinned candidate set after an upstream refresh
-theme-wallpaper refresh japan-night
+# Central library maintenance; explicit network operation
+theme-wallpaper-library plan
+theme-wallpaper-library sync
+theme-wallpaper-library status
+theme-wallpaper-library audit
+
+# Rehydrate already-recorded curated assets if local image data is missing
+theme-wallpaper-library fetch japan-night
 ```
 
 ### Importing Omarchy Themes:

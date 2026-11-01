@@ -46,6 +46,7 @@ To eliminate startup delay, reduce token bloat for agents, and enable modular co
 | `q` / `:q` | `exit` | Exit terminal shell |
 | `agy` | `command agy --dangerously-skip-permissions` | Launch Antigravity CLI |
 | `fixtether` | `setup-tether-dns` | Restore mobile tethering DNS resolution |
+| `clip` | `clip <text>`, `clip <file> [file ...]`, or `<command> \| clip` | Copy literal text, one or more regular files' contents, or stdin to the Wayland clipboard. Fish globs such as `clip *.rs` expand to multiple files. |
 
 ---
 

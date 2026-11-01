@@ -24,7 +24,10 @@ MAX_WALLPAPERS = 5
 FETCH_WORKERS = 5
 MAX_IMAGE_BYTES = 50 * 1024 * 1024
 THEME_CACHE = Path(os.path.expanduser("~/.cache/theme/themes"))
-WALLPAPER_CACHE = Path(os.path.expanduser("~/.cache/theme/wallpapers"))
+WALLPAPER_ROOT = Path(os.path.expanduser("~/.local/share/theme/wallpapers"))
+WALLPAPER_CACHE = WALLPAPER_ROOT / "upstream"
+LIBRARY_MANIFEST = WALLPAPER_ROOT / "manifest.json"
+LIBRARY_HELPER = Path(os.path.expanduser("~/.local/bin/theme-wallpaper-library"))
 STATE_DIR = Path(os.path.expanduser("~/.local/state/theme/wallpaper"))
 ACTIVE_THEME = Path(os.path.expanduser("~/.local/state/theme/name"))
 CURRENT_WALLPAPER = Path(os.path.expanduser("~/.config/current_wallpaper"))
@@ -140,6 +143,51 @@ def cache_dir(theme_name: str) -> Path:
 
 def state_file(theme_name: str) -> Path:
     return STATE_DIR / theme_name
+
+
+def load_library_manifest() -> dict:
+    try:
+        return json.loads(LIBRARY_MANIFEST.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def library_entry(theme_name: str) -> tuple[dict, dict] | None:
+    manifest = load_library_manifest()
+    entry = (manifest.get("themes") or {}).get(theme_name)
+    if not isinstance(entry, dict):
+        return None
+    return manifest, entry
+
+
+def library_images(theme_name: str) -> list[Path]:
+    resolved = library_entry(theme_name)
+    if not resolved:
+        return []
+    manifest, entry = resolved
+    assets = manifest.get("assets") or {}
+    result: list[Path] = []
+    for asset_id in entry.get("assets") or []:
+        asset = assets.get(asset_id)
+        if not isinstance(asset, dict):
+            continue
+        relative = str(asset.get("file") or "")
+        path = WALLPAPER_ROOT / relative
+        if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES:
+            result.append(path)
+    return result[:MAX_WALLPAPERS]
+
+
+def hydrate_library(theme_name: str, force: bool = False) -> list[Path]:
+    if not LIBRARY_HELPER.is_file():
+        die(f"missing wallpaper library helper: {LIBRARY_HELPER}")
+    command = [str(LIBRARY_HELPER), "fetch", theme_name]
+    if force:
+        command.append("--force")
+    result = subprocess.run(command, check=False)
+    if result.returncode != 0:
+        die(f"failed to hydrate centralized wallpaper library for {theme_name}")
+    return library_images(theme_name)
 
 
 @contextmanager
@@ -295,6 +343,10 @@ def load_manifest(theme_name: str) -> dict:
 
 
 def cached_images(theme_name: str) -> list[Path]:
+    curated = library_images(theme_name)
+    if curated:
+        return curated
+
     manifest = load_manifest(theme_name)
     files: list[Path] = []
     for item in manifest.get("files", []):
@@ -451,9 +503,16 @@ def apply(theme_name: str, path: Path, position: int, total: int) -> None:
 
 
 def ensure_images(theme_name: str, theme: dict, force: bool = False) -> list[Path]:
+    if library_entry(theme_name):
+        images = library_images(theme_name)
+        if force or not images:
+            notify("Theme wallpaper", f"Hydrating curated library for {theme.get('display_name') or theme_name}")
+            images = hydrate_library(theme_name, force=force)
+        return images
+
     images = cached_images(theme_name)
     if force or not images:
-        notify("Theme wallpaper", f"Fetching backgrounds for {theme.get('display_name') or theme_name}")
+        notify("Theme wallpaper", f"Fetching upstream backgrounds for {theme.get('display_name') or theme_name}")
         images = fetch(theme_name, theme, force=force)
     return images
 
@@ -462,17 +521,18 @@ def usage() -> None:
     print("""Usage: theme-wallpaper [command] [theme]
 
 Commands:
-  next [theme]       Fetch on first use, then apply next wallpaper (default)
-  prev [theme]       Fetch on first use, then apply previous wallpaper
-  random [theme]     Fetch on first use, then apply a random wallpaper
+  next [theme]       Apply next palette-matched wallpaper (default)
+  prev [theme]       Apply previous palette-matched wallpaper
+  random [theme]     Apply a random mapped wallpaper
   set N [theme]      Apply wallpaper N (1..5)
-  fetch [theme]      Cache up to five upstream wallpapers without applying
-  refresh [theme]    Re-download the selected upstream set
-  list [theme]       Show upstream candidates and local cache state
+  fetch [theme]      Hydrate mapped library assets, or upstream fallback assets
+  refresh [theme]    Re-download the mapped/local source set
+  list [theme]       Show library mapping, upstream fallback and local state
   current [theme]    Show the remembered wallpaper for a theme
 
-Theme defaults to the currently active theme. Cached images live under
-~/.cache/theme/wallpapers/<theme>/ and are fetched only on demand.
+Theme defaults to the currently active theme. The centralized persistent library
+lives under ~/.local/share/theme/wallpapers/. Network access occurs only when a
+mapped asset is missing or an explicit fetch/refresh is requested.
 """)
 
 
@@ -505,12 +565,23 @@ def main() -> int:
 
     if command == "list":
         print(f"Theme: {theme.get('display_name') or theme_name} ({theme_name})")
-        print(f"Repository: {(theme.get('source') or {}).get('repository') or 'none'}")
-        print(f"Upstream candidates: {len(candidates)}/{MAX_WALLPAPERS}")
+        resolved = library_entry(theme_name)
+        if resolved:
+            manifest, entry = resolved
+            print(f"Curated library: {len(entry.get('assets') or [])} mapped asset(s), bucket {entry.get('bucket') or 'unknown'}")
+            assets = manifest.get("assets") or {}
+            scores = entry.get("match_scores") or {}
+            for index, asset_id in enumerate(entry.get("assets") or [], 1):
+                asset = assets.get(asset_id) or {}
+                score = scores.get(asset_id)
+                score_text = f" score={float(score):.1f}" if isinstance(score, (int, float)) else ""
+                print(f"  {index}. {asset_id}{score_text} {asset.get('page_url') or ''}")
+        print(f"Repository fallback: {(theme.get('source') or {}).get('repository') or 'none'}")
+        print(f"Upstream fallback candidates: {len(candidates)}/{MAX_WALLPAPERS}")
         for index, item in enumerate(candidates, 1):
             print(f"  {index}. {item}")
         images = cached_images(theme_name)
-        print(f"Cached: {len(images)}/{MAX_WALLPAPERS}")
+        print(f"Local: {len(images)}/{MAX_WALLPAPERS}")
         selected = selected_image(theme_name, images)
         for index, path in enumerate(images, 1):
             marker = " *" if selected == path else ""
@@ -524,12 +595,14 @@ def main() -> int:
 
     if command == "fetch":
         images = ensure_images(theme_name, theme)
-        print(f"Cached {len(images)} wallpaper(s) in {cache_dir(theme_name)}")
+        location = WALLPAPER_ROOT if library_entry(theme_name) else cache_dir(theme_name)
+        print(f"Available {len(images)} wallpaper(s) under {location}")
         return 0
 
     if command == "refresh":
         images = ensure_images(theme_name, theme, force=True)
-        print(f"Refreshed {len(images)} wallpaper(s) in {cache_dir(theme_name)}")
+        location = WALLPAPER_ROOT if library_entry(theme_name) else cache_dir(theme_name)
+        print(f"Refreshed {len(images)} wallpaper(s) under {location}")
         return 0
 
     images = ensure_images(theme_name, theme)

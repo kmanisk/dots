@@ -10,8 +10,9 @@ Target machine: CachyOS Linux · Sway (Wayland) · Katana S K1 60% Keyboard (xre
 | :--- | :--- | :--- | :--- |
 | **`Win + V`** | Sway (Global) | Open Clipboard Menu | Floating centered terminal picker with full prompt preview & search |
 | **`Caps + c`** | xremap (Katana 60%) | Open Clipboard Menu | Quick one-hand access to the floating clipboard picker |
-| **`Caps + .`** | xremap (Katana 60%) | Screenshot Buffer Picker | Opens modal to select specific screenshots with Space/arrows, or standard Ctrl+V |
-| **`Caps + Space`** | xremap (Universal) | Capture Screenshot | Fullscreen capture saved to disk, copied to clipboard, and buffered for AI |
+| **`Caps + .`** | xremap (Katana 60%) | Paste Clipboard | Standard `Ctrl+V` paste |
+| **`Caps + Space`** | xremap (Universal) | Capture Screenshot | Fullscreen capture saved to disk and copied to clipboard; also queued only while buffer mode is ON |
+| **`Caps + Shift + Space`** | xremap (Universal) | Toggle Buffer Mode | Turns screenshot accumulation ON/OFF; does not open the picker |
 | **`Caps + v`** | xremap (Katana 60%) | View First Screenshot | Opens the latest clipboard screenshot in imv |
 | **`Win + Alt + L`** | Sway (Global) | Screen Black Toggle | Instantly toggles display backlight off/on; keeps agent, rain audio, and downloads running |
 | **`Win + Alt + D`** | Sway (Global) | Desktop Commander Scratchpad | Toggles floating agent monitor streaming live ChatGPT tool calls |
@@ -31,15 +32,15 @@ Target machine: CachyOS Linux · Sway (Wayland) · Katana S K1 60% Keyboard (xre
 
 When feeding multiple screenshots of a website or UI to an AI prompt (ChatGPT, Claude, Gemini in Brave):
 
-1. **Capture Across Pages / Tabs:**
-   - Press **`Caps + Space`** on your UI or website.
-   - Scroll, navigate to next page/tab, press **`Caps + Space`** again.
-   - Each press saves the image to `~/Pictures/Screenshots/`, updates clipboard, and queues into the in-memory buffer (`$XDG_RUNTIME_DIR/screenshot-buffer-$UID/`).
-   - A desktop notification confirms `#N in queue`.
+1. **Normal Fullscreen Capture:**
+   - Press **`Caps + Space`** to capture the current screen.
+   - The image is saved under `~/Pictures/Screenshots/` (or `Screenshots/Gaming` on game workspaces) and copied to the clipboard.
+   - With buffer mode OFF, it is not queued and `Screenshot Done` confirms completion.
+   - Press **`Caps + Shift + Space`** to turn buffer mode ON; subsequent `Caps + Space` captures are also queued until you toggle the mode OFF.
 
 2. **Choose and Paste into Prompt:**
    - Switch to your AI chat prompt (ChatGPT, Claude, Gemini in Brave).
-   - Press **`Caps + .`** (or `Win + Alt + V`).
+   - Press **`Win + Alt + V`** to open the explicit screenshot-buffer picker.
    - The centered 1760x1040 Screenshot Buffer Picker opens instantly.
    - Navigate through screenshots using **Up / Down** arrow keys with live high-res preview on the right.
    - Tap **`Space`** on the screenshots you want to send.
@@ -50,7 +51,7 @@ When feeding multiple screenshots of a website or UI to an AI prompt (ChatGPT, C
    - Pasted screenshots are archived to prevent duplicates.
 
 3. **Normal Text Paste:**
-   - When no screenshots are in the buffer queue, pressing **`Caps + .`** performs a normal `Ctrl+V` paste instantly.
+   - **`Caps + .`** always performs a normal `Ctrl+V` paste; it no longer opens or depends on the screenshot buffer.
 
 ---
 

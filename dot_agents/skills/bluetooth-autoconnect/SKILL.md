@@ -1,7 +1,7 @@
 ---
 name: bluetooth-autoconnect
 description: Bluetooth auto-connect and refusal on this machine - the three dialers (bt-autoconnect, bt-auto-trust, blueman AutoConnect plugin), BlueZ block semantics, the audio-device refusal toggle (Win+Shift+Enter), and the bt-select TUI picker. Use when debugging Bluetooth reconnects, auto-connect behavior, block state, refusal, or device selection.
-version: 1.5.0
+version: 1.6.0
 ---
 
 ## Authority and freshness
@@ -24,7 +24,7 @@ Verified 2026-10-19 against live system (BlueZ 5.87, kernel 7.2.11-cachyos).
 
 The user asked for no background services. `bt-autoconnect.service` and `bt-auto-trust.service` were disabled, removed from `~/.config/systemd/user/`, and forgotten from chezmoi. No process dials devices now; the TUI runs in the foreground and nothing survives it. The scripts `~/.local/bin/bt-autoconnect` and `bt-auto-trust` remain on disk as manual tools only. `blueman-applet` is not running and its AutoConnect `services` list is empty, so the plugin is inert even if launched. A checked (unblocked) device can still reconnect itself when powered on, because BlueZ accepts incoming connections; block it to prevent that.
 
-Re-confirmed 2026-10-29: no watcher was added; a proposed tiny D-Bus dialer was declined a second time, so the system stays foreground-only. Device-initiated reconnect is NOT reliable: the Boult BassBox was disconnecting while unblocked, stayed disconnected through a 45 s watch, and never sent a page, even though an inquiry scan saw it at RSSI -46. Powering it on does nothing until `bt-select` applies or `Win+Shift+Enter` runs. Only the Katana keyboard self-connects, via its own daemon.
+Re-confirmed 2026-10-29 for audio devices: no audio watcher was added; a proposed tiny D-Bus dialer was declined, so audio-device management stays foreground-only. Device-initiated reconnect is NOT reliable for the Boult BassBox: it stayed disconnected through a 45 s watch until `bt-select` or `Win+Shift+Enter` dialed it. The Katana keyboard is different: as of 2026-11-01 it relies on BlueZ's native BLE HID reconnect policy, not a custom resident Python daemon.
 
 Historical behavior, kept for debugging if a dialer ever comes back:
 
@@ -53,14 +53,16 @@ Historical behavior, kept for debugging if a dialer ever comes back:
   It never lists input devices. Unchecking alone only removed the device from the keybind set, so the dialers or the speaker itself could still reconnect it; the apply step is what makes OFF durable.
 - Read-only helpers: `bt-refuse-toggle --list` prints `MAC<TAB>NAME<TAB>blocked<TAB>connected`; `--selected` prints the effective selection. Single-pass inspection eliminates redundant BlueZ queries.
 - Refused state = every selected device has `Blocked: yes` -> pressing allows: unblock all + non-blocking background connect each (zero UI lag, and no external `timeout` wrapper so the dial ends at the BlueZ page timeout instead of being killed mid-page). Anything else -> pressing refuses: block all + disconnect each. Notification lists the device names.
-- Keyboard auto-connect: Katana S K2 (`CC:04:2E:90:66:02`) uses BLE HID over GATT (HoGP UUID `00001812-0000-1000-8000-00805f9b34fb`). As a BLE peripheral, it cannot initiate connections upon wake; it advertises. Auto-connect relies on:
-  1. `/etc/udev/rules.d/50-bluetooth-power.rules`: Disables USB runtime autosuspend (`power/control="on"`, `power/wakeup="enabled"`) on Realtek RTL8852 USB adapter (`0489:e122`) so the radio remains active to receive wake advertisements.
-  2. `/etc/bluetooth/main.conf.d/10-autoconnect.conf`: Configured with fast 50% duty cycle LE passive scanning (`ScanIntervalAutoConnect=60`, `ScanWindowAutoConnect=30`, `ScanIntervalConnect=60`, `ScanWindowConnect=30`).
-  3. `~/.local/bin/bt-keyboard-reconnect` & `bt-keyboard-reconnect.service`: Dedicated, ultra-lightweight D-Bus daemon (0% CPU when dormant). Detects sleep disconnect, arms non-blocking async `Connect()`, catches wake beacons within milliseconds, actively verifies whether xremap has grabbed the Katana input node (`is_xremap_attached`), and triggers `ensure_xremap` on connection, wake, and login. Never interacts with audio devices.
-  4. `/etc/udev/rules.d/99-xremap-keyboard.rules`: Hardware-level udev trigger. Matches `ACTION=="add", SUBSYSTEM=="input", ATTRS{name}=="Katana S K* Keyboard"` and restarts `xremap.service` asynchronously (`--no-block`), completely eliminating inotify permission race conditions upon Bluetooth/USB keyboard discovery.
+- Keyboard auto-connect: Katana S K2 (`CC:04:2E:90:66:02`) uses BLE HID over GATT (HoGP UUID `00001812-0000-1000-8000-00805f9b34fb`). As a BLE peripheral, it advertises when awake. Auto-connect relies on:
+  1. `/etc/udev/rules.d/50-bluetooth-power.rules`: keeps the Realtek RTL8852 Bluetooth radio available for wake advertisements.
+  2. `/etc/bluetooth/main.conf.d/10-autoconnect.conf`: BlueZ native reconnect is the single owner. The live policy includes HID in `ReconnectUUIDs`, `ReconnectAttempts=7`, backoff `1,2,4,8,16,32,64`, and the configured LE auto-connect scan window.
+  3. `xremap.service`: runs `--watch=config,device`, so it dynamically discovers input devices without an external restart daemon.
+  4. `/etc/udev/rules.d/99-xremap-keyboard.rules`: retained as a hardware-level attachment backstop for newly added keyboards.
+  5. `~/.local/bin/bt-katana`: one-shot manual/login/resume fallback only. It no longer restarts xremap after a connection because device watching/udev already own attachment.
+  The former `bt-keyboard-reconnect.service` and `~/.local/bin/bt-keyboard-reconnect` were removed on 2026-11-01 after live logs showed duplicate retry attempts colliding with BlueZ (`Operation already in progress`) and periodic retry wakeups while BlueZ already had native reconnect enabled.
 - Safety: the selection is intersected with `audio_devices()`, so the Katana S K2 (or any input-only device) is never blocked or disconnected even if its MAC is hand-added to `selection.txt`.
 - `bt-refuse-toggle --dry-run` previews without changing state. Notifications via mako (`x-canonical-private-synchronous:bt-refuse`).
-- Verified 2026-10-19: both Bluetooth user services stopped, disabled, unit files and chezmoi sources removed; no BT daemon processes remain. TUI apply verified live: soundcore checked -> connected and default sink, BassBox unchecked -> `Blocked=yes`, disconnected, still off through a former dialer interval; keyboard untouched.
+- Verified 2026-11-01: audio auto-dialer services and the former keyboard reconnect daemon are all stopped/removed; no custom Bluetooth daemon process remains. TUI/manual audio controls remain foreground-only, while the Katana keyboard uses BlueZ native reconnect and xremap device watching.
 
 ## Debugging quickies
 

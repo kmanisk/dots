@@ -3,7 +3,8 @@ Type=Application
 Name=Waydroid
 GenericName=Android Container
 Comment=Start Waydroid session and open the full Android UI.
-Exec=/home/onyx/.local/bin/waydroid-launcher
+Exec=waydroid-launcher
+TryExec=waydroid-launcher
 Icon=waydroid
 Categories=X-WayDroid-App;Utility;
 Actions=stop;
@@ -11,5 +12,5 @@ X-Purism-FormFactor=Workstation;Mobile;
 
 [Desktop Action stop]
 Name=Stop Waydroid
-Exec=waydroid session stop
+Exec=waydroid-stop
 Icon=waydroid

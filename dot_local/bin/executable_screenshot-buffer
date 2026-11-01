@@ -115,8 +115,12 @@ case "$CMD" in
 
         FILE="$BUF_DIR/shot_$(date +%s%N).png"
         if grim -g "$GEOM" "$FILE" 2>/dev/null && [ -s "$FILE" ]; then
-            # Also keep latest in active clipboard
+            # This command already wrote FILE into the buffer. Suppress the
+            # clipboard watcher briefly so copying it does not enqueue a duplicate.
+            touch "$BUF_DIR/.pasting"
             wl-copy -t image/png < "$FILE" 2>/dev/null || true
+            sleep 0.15
+            rm -f "$BUF_DIR/.pasting"
 
             count=$(find "$BUF_DIR" -maxdepth 1 -name "shot_*.png" 2>/dev/null | wc -l)
             notify-send -a "Screenshot Buffer" -t 1500 -i camera-photo \
@@ -205,11 +209,11 @@ case "$CMD" in
         if [ -f "$BUF_DIR/.auto_mode" ]; then
             rm -f "$BUF_DIR/.auto_mode"
             notify-send -a "Screenshot Buffer" -t 2000 -i camera-photo \
-                "Auto-Buffer: OFF" "Screenshots will not accumulate."
+                "Buffer Mode: OFF" "Caps+Space returns to normal save + clipboard mode."
         else
             touch "$BUF_DIR/.auto_mode"
             notify-send -a "Screenshot Buffer" -t 2000 -i camera-photo \
-                "Auto-Buffer: ON" "All screenshots (Win+S) will accumulate. Win+Alt+V to paste all."
+                "Buffer Mode: ON" "Caps+Space screenshots will also be queued until you toggle this off."
         fi
         ;;
 

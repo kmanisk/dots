@@ -1,5 +1,7 @@
 # Dark Souls III — CachyOS Modding & Execution Master Architecture
 
+> Current state (2026-11-01): the physical Dark Souls III game directory is no longer present on this workstation. The four local application-menu entries (`darksouls3.desktop`, `ds3-randomizer.desktop`, `cycles-installer.desktop`, `me3-manager.desktop`) were removed from both the live XDG application directory and chezmoi source so Fuzzel no longer advertises an uninstalled game. The rest of this document is retained as historical configuration/reference unless the game is reinstalled.
+
 **Target System:** CachyOS rolling (x86-64-v3, BORE/EEVDF) · Sway (Wayland) / i3wm (X11) @ 1920x1200 165Hz  
 **Hardware:** ASUS TUF Gaming F16 (Intel Core i5-13450HX + NVIDIA GeForce RTX 5050 Mobile 6GB GDDR6 Blackwell)  
 **Game AppID:** `374320`  

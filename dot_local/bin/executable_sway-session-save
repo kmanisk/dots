@@ -17,11 +17,14 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 SAVE_DIR = Path.home() / ".config" / "sway" / "session"
 SESSION = SAVE_DIR / "session.json"
 PREV = SAVE_DIR / "session.json.prev"
+BACKUP_DIR = SAVE_DIR / "backups"
+MAX_BACKUPS = 8
 STEAM_KILLED = SAVE_DIR / "steam_was_killed"
 NL_STATE = Path.home() / ".config" / "nightlight_state"
 BAR_STATE = Path.home() / ".local" / "state" / "sway" / "bar_state"
@@ -109,6 +112,41 @@ def cwd_of(pid):
         return str(p.resolve()) if p.exists() else str(Path.home())
     except Exception:
         return str(Path.home())
+
+
+def terminal_cwd_from_title(title):
+    """Recover a terminal's cwd from the Fish/Pure window title.
+
+    Foot server mode reports the shared server PID for every surface, so
+    /proc/<sway-pid>/cwd is the server cwd, not the shell cwd. Pure's vendor
+    fish_title uses "<cwd> - <command>" (or "<cwd>: <last> - <command>").
+    Only accept an existing absolute/home-relative directory; otherwise the
+    caller falls back to HOME rather than persisting the server's cwd.
+    """
+    text = str(title or "").strip()
+    if " - " not in text:
+        return None
+    left, _command = text.rsplit(" - ", 1)
+    cwd_text = left.split(": ", 1)[0].strip()
+    if not (cwd_text == "~" or cwd_text.startswith("~/") or cwd_text.startswith("/")):
+        return None
+    candidate = Path(os.path.expanduser(cwd_text))
+    try:
+        return str(candidate) if candidate.is_dir() else None
+    except OSError:
+        return None
+
+
+def working_directory_for(cmd, pid, title):
+    """Return the restorable cwd for a saved application.
+
+    Terminal server processes are special: never use the Foot server cwd as
+    per-window state. Prefer the window title's shell cwd and otherwise use HOME.
+    """
+    base = Path(cmd[0]).name.lower() if cmd else ""
+    if base in {"foot", "footclient", "alacritty", "ghostty", "kitty"}:
+        return terminal_cwd_from_title(title) or str(Path.home())
+    return cwd_of(pid) if pid else str(Path.home())
 
 
 def child_pids(pid):
@@ -315,6 +353,52 @@ def notify(summary, body):
         pass
 
 
+def valid_session_file(path):
+    """True only for a readable session snapshot with at least one workspace."""
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    return (
+        isinstance(data, dict)
+        and isinstance(data.get("workspaces"), dict)
+        and bool(data["workspaces"])
+    )
+
+
+def atomic_copy(src, dst):
+    """Copy *src* to *dst* without exposing a partially-written backup."""
+    tmp = dst.with_name(dst.name + ".tmp")
+    data = src.read_bytes()
+    with open(tmp, "wb") as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, dst)
+
+
+def backup_current_session():
+    """Preserve the current valid snapshot before replacing it.
+
+    `session.json.prev` remains the immediate rollback target and a bounded
+    history keeps the last few known-good snapshots for recovery from repeated
+    bad saves. Invalid current files are never promoted into backup slots.
+    """
+    if not SESSION.exists() or not valid_session_file(SESSION):
+        return False
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    atomic_copy(SESSION, PREV)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    atomic_copy(SESSION, BACKUP_DIR / f"session-{stamp}.json")
+    backups = sorted(BACKUP_DIR.glob("session-*.json"), reverse=True)
+    for old in backups[MAX_BACKUPS:]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    return True
+
+
 def main():
     quiet = "--quiet" in sys.argv
     sock = discover_socket()
@@ -354,7 +438,7 @@ def main():
         snapshot["system_state"] = sys_state
 
     # Apps that can legitimately have multiple windows open at once.
-    MULTI_INSTANCE = {"alacritty", "ghostty"}
+    MULTI_INSTANCE = {"alacritty", "ghostty", "foot", "footclient", "kitty"}
 
     for ws, wins in targets.items():
         entries = []
@@ -374,9 +458,15 @@ def main():
                 # Single-instance app already recorded — skip duplicate.
                 continue
             seen[key] = seen.get(key, 0) + 1
+            workdir = working_directory_for(cmd, pid, title)
+            # One-time cleanup for the legacy Foot server-cwd bug: the default
+            # plain shell on ws1 must not perpetuate a restored `/` cwd. Other
+            # terminal directories/workspaces remain exact.
+            if ws == "1" and base in {"foot", "footclient"} and len(cmd) == 1 and workdir == "/":
+                workdir = str(Path.home())
             entries.append({
                 "command": cmd,
-                "working_directory": cwd_of(pid) if pid else str(Path.home()),
+                "working_directory": workdir,
                 "app_id": w["app_id"], "class": w["class"],
             })
         if entries:
@@ -393,10 +483,17 @@ def main():
             json.dump(snapshot, f, indent=2)
             f.flush()
             os.fsync(f.fileno())
-        if SESSION.exists():
-            os.replace(SESSION, PREV)
+
+        # Copy the previous valid snapshot to rollback/history first. Do not
+        # move SESSION out of the way: until the final atomic replace succeeds,
+        # the currently working snapshot remains available at its normal path.
+        backup_current_session()
         os.replace(tmp, SESSION)
     except OSError as e:
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
         log(f"invalid: write failed ({e}), keeping previous session")
         return 1
 

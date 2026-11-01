@@ -14,9 +14,10 @@ Use this document as the single source of truth for keyboard layering, eliminati
   * No dedicated arrow cluster or navigation cluster (`Home`, `End`, `PageUp`, `PageDown`, `Insert`, `Delete`).
 * **Daemon Execution:** Headless `xremap` user service via systemd.
   * Service Unit: `~/.config/systemd/user/xremap.service`
-  * Exec Command: `/usr/bin/xremap --watch --allow-launch true %h/.config/xremap/config.yml`
+  * Exec Command: `/usr/bin/xremap --ignore "Pulsefire" --watch=config,device --allow-launch true %h/.config/xremap/config.yml`
   * Flag `--allow-launch true` is required to execute external shell binaries/scripts directly on key combinations.
   * Environment Inherited: `WAYLAND_DISPLAY`, `SWAYSOCK`, `DISPLAY`.
+  * Katana reconnect ownership: BlueZ native reconnect policy handles the bonded/trusted BLE HID device. The former `bt-keyboard-reconnect.service` Python daemon was removed on 2026-11-01 because it duplicated BlueZ retry/scanning and sometimes collided with an already-pending BlueZ connection. `xremap --watch=device` plus `/etc/udev/rules.d/99-xremap-keyboard.rules` handle input attachment without a resident keyboard helper. `bt-katana` remains a one-shot manual/login/resume fallback and no longer restarts xremap unnecessarily.
 
 ---
 
@@ -81,9 +82,13 @@ modmap:
 | `Caps + \` | `VolumeDown` | System volume down |
 
 ### Screenshots (Direct Script Launchers)
+
+`Caps + Shift + Space` toggles screenshot buffer mode. With buffer mode OFF, `Caps + Space` is a normal saved+clipboard fullscreen screenshot. With buffer mode ON, the same capture is additionally queued for later multi-screenshot workflows.
+
 | Chord | Emitted Action | System Behavior |
 | :--- | :--- | :--- |
-| `Caps + Space` | `launch: ["screenshot-fullscreen", "--clipboard-only"]` | Fullscreen capture $\to$ Clipboard only (zero file storage) |
+| `Caps + Space` | `launch: ["screenshot-fullscreen"]` | Fullscreen capture saved to `~/Pictures/Screenshots` (or `Screenshots/Gaming`) and copied to clipboard; enters the screenshot buffer only when buffer mode is enabled |
+| `Caps + Shift + Space` | `launch: ["screenshot-buffer", "toggle"]` | Toggle screenshot buffer mode ON/OFF |
 | `Caps + s` | `launch: ["screenshot-region", "--save"]` | Slurp/Grim region selection $\to$ Saved to `~/Pictures/Screenshots` + Clipboard |
 
 ### Window Management & Process Killer

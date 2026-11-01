@@ -16,6 +16,8 @@ import math
 import colorsys
 import signal
 import fcntl
+import filecmp
+import shutil
 from contextlib import contextmanager
 
 
@@ -26,7 +28,9 @@ HOOKS_DIR = os.path.expanduser("~/.config/theme/hooks.d")
 QT5_COLOR_FILE = os.path.expanduser("~/.config/qt5ct/colors/nvchad.conf")
 QT6_COLOR_FILE = os.path.expanduser("~/.config/qt6ct/colors/nvchad.conf")
 LOCK_FILE = os.path.join(STATE_DIR, ".lock")
-WALLPAPER_CACHE_DIR = os.path.expanduser("~/.cache/theme/wallpapers")
+WALLPAPER_ROOT_DIR = os.path.expanduser("~/.local/share/theme/wallpapers")
+WALLPAPER_CACHE_DIR = os.path.join(WALLPAPER_ROOT_DIR, "upstream")
+WALLPAPER_LIBRARY_MANIFEST = os.path.join(WALLPAPER_ROOT_DIR, "manifest.json")
 WALLPAPER_STATE_DIR = os.path.join(STATE_DIR, "wallpaper")
 CURRENT_WALLPAPER_FILE = os.path.expanduser("~/.config/current_wallpaper")
 WALLPAPER_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
@@ -49,13 +53,15 @@ def run_ipc(cmd, label, timeout=1.0):
     try:
         result = subprocess.run(
             cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
             timeout=timeout,
             check=False,
         )
         if result.returncode != 0:
-            print(f"[WARN] {label} exited with status {result.returncode}", file=sys.stderr)
+            detail = result.stderr.strip() or result.stdout.strip() or f"exit status {result.returncode}"
+            print(f"[WARN] {label}: {detail}", file=sys.stderr)
             return False
         return True
     except Exception as exc:
@@ -139,12 +145,108 @@ def write_atomic(filepath, content):
     os.makedirs(dirname, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", dir=dirname, delete=False) as tf:
         tf.write(content)
+        tf.flush()
+        os.fsync(tf.fileno())
         temp_name = tf.name
     os.replace(temp_name, filepath)
 
 
+def write_atomic_if_changed(filepath, content):
+    """Atomically replace a text file only when its bytes actually change."""
+    try:
+        with open(filepath, "r", encoding="utf-8") as handle:
+            if handle.read() == content:
+                return False
+    except OSError:
+        pass
+    write_atomic(filepath, content)
+    return True
+
+
+def preserve_scale_managed_chrome(filename, rendered, current_path):
+    """Keep ui-sync-owned geometry while replacing theme-owned colors.
+
+    theme-set owns palette/content; ui-sync owns scale-derived dimensions. Reading
+    those few live values into the staged render prevents a rewrite/rescale loop
+    on same-theme reapply while preserving correct sizes across theme changes.
+    """
+    try:
+        with open(current_path, "r", encoding="utf-8") as handle:
+            current = handle.read()
+    except OSError:
+        return rendered
+
+    if filename == "mako.conf":
+        for key in ("font", "padding", "margin", "width", "border-size", "border-radius"):
+            match = re.search(rf"(?m)^{re.escape(key)}=.*$", current)
+            if match:
+                rendered = re.sub(
+                    rf"(?m)^{re.escape(key)}=.*$",
+                    match.group(0),
+                    rendered,
+                    count=1,
+                )
+        return rendered
+
+    if filename == "swaybar.conf":
+        match = re.search(r"(?m)^[ \t]*font[ \t]+pango:.*$", current)
+        if match:
+            rendered = re.sub(
+                r"(?m)^[ \t]*font[ \t]+pango:.*$",
+                match.group(0),
+                rendered,
+                count=1,
+            )
+        return rendered
+
+    if filename == "gtk.css":
+        values = re.findall(r"font-size:[ \t]*[0-9.]+pt", current)
+        if values:
+            iterator = iter(values)
+            rendered = re.sub(
+                r"font-size:[ \t]*[0-9.]+pt",
+                lambda match: next(iterator, match.group(0)),
+                rendered,
+            )
+        return rendered
+
+    return rendered
+
+
 def cached_theme_wallpaper(name):
-    """Return the remembered cached wallpaper for a theme, without networking."""
+    """Return the remembered local wallpaper for a theme, without networking.
+
+    The centralized curated library is authoritative when the theme is mapped;
+    the migrated per-theme upstream cache remains a compatibility fallback.
+    """
+    state_path = os.path.join(WALLPAPER_STATE_DIR, name)
+    try:
+        selected = open(state_path, "r", encoding="utf-8").read().strip()
+    except OSError:
+        selected = ""
+
+    library_images = []
+    try:
+        with open(WALLPAPER_LIBRARY_MANIFEST, "r", encoding="utf-8") as handle:
+            manifest = json.load(handle)
+        entry = (manifest.get("themes") or {}).get(name) or {}
+        assets = manifest.get("assets") or {}
+        for asset_id in entry.get("assets") or []:
+            asset = assets.get(asset_id) or {}
+            relative = str(asset.get("file") or "")
+            candidate = os.path.join(WALLPAPER_ROOT_DIR, relative)
+            if os.path.isfile(candidate) and os.path.splitext(candidate)[1].lower() in WALLPAPER_EXTENSIONS:
+                library_images.append(candidate)
+    except (OSError, json.JSONDecodeError, TypeError):
+        library_images = []
+
+    if library_images:
+        if selected:
+            for candidate in library_images:
+                if os.path.basename(candidate) == selected:
+                    return candidate
+        return library_images[0]
+
     directory = os.path.join(WALLPAPER_CACHE_DIR, name)
     if not os.path.isdir(directory):
         return None
@@ -156,12 +258,6 @@ def cached_theme_wallpaper(name):
     )[:5]
     if not images:
         return None
-
-    state_path = os.path.join(WALLPAPER_STATE_DIR, name)
-    try:
-        selected = open(state_path, "r", encoding="utf-8").read().strip()
-    except OSError:
-        selected = ""
     if selected:
         candidate = os.path.join(directory, selected)
         if candidate in images and os.path.isfile(candidate):
@@ -380,6 +476,7 @@ def normalize_palette(theme_data, name):
     # Schema 1 contrast correction (for example white syntax on a white theme).
     smart_fg = ensure_contrast(raw_fg, bg, min_ratio=4.5, is_dark=is_dark)
     bright_fg = ensure_contrast(b30.get("white", smart_fg), bg, min_ratio=7.0, is_dark=is_dark)
+    muted = ensure_contrast(muted, bg, min_ratio=3.0, is_dark=is_dark)
     true_red = ensure_contrast(true_red, bg, min_ratio=3.0, is_dark=is_dark)
     true_orange = ensure_contrast(true_orange, bg, min_ratio=3.0, is_dark=is_dark)
     true_yellow = ensure_contrast(true_yellow, bg, min_ratio=3.0, is_dark=is_dark)
@@ -390,12 +487,12 @@ def normalize_palette(theme_data, name):
     true_pink = ensure_contrast(true_pink, bg, min_ratio=3.0, is_dark=is_dark)
     true_teal = ensure_contrast(true_teal, bg, min_ratio=3.0, is_dark=is_dark)
 
-    # Smart selection foreground against accent:
-    accent_lum = relative_luminance(accent)
-    if accent_lum > 0.35:
-        accent_fg = bg if relative_luminance(bg) < 0.1 else "#121212"
-    else:
-        accent_fg = "#ffffff"
+    # Pick the highest-contrast foreground for accent-backed selections.
+    # This is more robust than a luminance threshold for saturated mid-tones.
+    accent_fg = max(
+        (bg, "#121212", "#ffffff"),
+        key=lambda candidate: contrast_ratio(candidate, accent),
+    )
 
     r = {
         "name": name,
@@ -426,9 +523,19 @@ def normalize_palette(theme_data, name):
     r["base01"] = bg2
     r["base02"] = sel
     r["base03"] = muted
-    r["base04"] = b30.get("grey_fg2") or b16.get("BASE04", muted)
+    r["base04"] = ensure_contrast(
+        b30.get("grey_fg2") or b16.get("BASE04", muted),
+        bg,
+        min_ratio=3.0,
+        is_dark=is_dark,
+    )
     r["base05"] = smart_fg
-    r["base06"] = b16.get("BASE06", smart_fg)
+    r["base06"] = ensure_contrast(
+        b16.get("BASE06", smart_fg),
+        bg,
+        min_ratio=4.5,
+        is_dark=is_dark,
+    )
     r["base07"] = bright_fg
     r["base08"] = true_red
     r["base09"] = true_orange
@@ -442,11 +549,20 @@ def normalize_palette(theme_data, name):
     for k in [f"base0{x}" for x in "0123456789abcdef"]:
         r[k.upper()] = r[k]
 
-    # Add all base_30 keys, safeguarding white contrast and surface polarity
+    # Add all base_30 keys without allowing authored aliases to undo the
+    # normalized contrast floor. Hue/saturation stay authored; only lightness
+    # moves when one of these chromatic aliases is otherwise unreadable.
     surface_keys = {"black2", "one_bg", "one_bg2", "one_bg3", "line", "lightbg", "pmenu_bg", "statusline_bg", "darker_black"}
+    chromatic_keys = {
+        "red", "orange", "yellow", "sun", "green", "vibrant_green",
+        "cyan", "teal", "blue", "nord_blue", "purple",
+        "dark_purple", "pink", "baby_pink",
+    }
     for k, v in b30.items():
-        if k == "white" and is_dark and contrast_ratio(v, bg) < 4.5:
-            r[k] = smart_fg
+        if k == "white":
+            r[k] = ensure_contrast(v, bg, min_ratio=4.5, is_dark=is_dark)
+        elif k in chromatic_keys:
+            r[k] = ensure_contrast(v, bg, min_ratio=3.0, is_dark=is_dark)
         elif k in surface_keys:
             l_v = relative_luminance(v)
             if is_dark and l_v > 0.25:
@@ -579,6 +695,111 @@ def normalize_palette(theme_data, name):
 
     return r, theme_type
 
+def validate_normalized_palette(r):
+    """Return semantic preflight failures for one normalized theme palette."""
+    failures = []
+    required_hex = [
+        "bg", "bg2", "sel", "muted", "fg", "bright_fg", "accent",
+        "red", "orange", "yellow", "green", "cyan", "blue",
+        "purple", "pink", "teal", "border_focus", "border_muted",
+    ]
+    for key in required_hex:
+        value = r.get(key)
+        if not isinstance(value, str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", value):
+            failures.append(f"{key}: invalid color {value!r}")
+
+    bg = r.get("bg", "#000000")
+    floors = {
+        "fg": 4.5,
+        "white": 4.5,
+        "base04": 3.0,
+        "base06": 4.5,
+        "muted": 3.0,
+        "red": 3.0,
+        "orange": 3.0,
+        "yellow": 3.0,
+        "sun": 3.0,
+        "green": 3.0,
+        "vibrant_green": 3.0,
+        "cyan": 3.0,
+        "teal": 3.0,
+        "blue": 3.0,
+        "nord_blue": 3.0,
+        "purple": 3.0,
+        "dark_purple": 3.0,
+        "pink": 3.0,
+        "baby_pink": 3.0,
+        "border_focus": 3.0,
+        "border_muted": 1.7,
+    }
+    for key, floor in floors.items():
+        if key in r and contrast_ratio(r[key], bg) + 1e-9 < floor:
+            failures.append(
+                f"{key}: contrast {contrast_ratio(r[key], bg):.3f}:1 < {floor:.1f}:1"
+            )
+
+    accent_fg = r.get("accent_fg")
+    accent = r.get("accent")
+    if accent_fg and accent and contrast_ratio(accent_fg, accent) < 3.0:
+        failures.append(
+            f"accent_fg: contrast {contrast_ratio(accent_fg, accent):.3f}:1 < 3.0:1"
+        )
+    return failures
+
+
+def resolve_theme_data(name):
+    path = os.path.join(CACHE_DIR, f"{name}.json")
+    resolved_name = name
+    if not os.path.exists(path):
+        candidate = os.path.join(CACHE_DIR, f"omarchy-{name}.json")
+        if not os.path.exists(candidate):
+            raise FileNotFoundError(f"Theme '{name}' not found in cache. Run 'theme-sync' first.")
+        path = candidate
+        resolved_name = f"omarchy-{name}"
+    with open(path, "r", encoding="utf-8") as handle:
+        return resolved_name, json.load(handle)
+
+
+def check_theme(name, quiet=False):
+    """Compile/validate a theme in memory without changing live state."""
+    try:
+        resolved_name, theme_data = resolve_theme_data(name)
+        r, _theme_type = normalize_palette(theme_data, resolved_name)
+    except Exception as exc:
+        if not quiet:
+            print(f"FAIL {name}: {exc}", file=sys.stderr)
+        return False
+
+    failures = validate_normalized_palette(r)
+    pattern = re.compile(r"\{\{([a-zA-Z0-9_]+)\}\}")
+    for template_path in glob.glob(os.path.join(TEMPLATES_DIR, "*")):
+        if os.path.isdir(template_path):
+            continue
+        try:
+            with open(template_path, "r", encoding="utf-8") as handle:
+                source = handle.read()
+            rendered = pattern.sub(lambda m: str(r.get(m.group(1), m.group(0))), source)
+        except Exception as exc:
+            failures.append(f"{os.path.basename(template_path)}: {exc}")
+            continue
+        unresolved = sorted(set(pattern.findall(rendered)))
+        if unresolved:
+            failures.append(
+                f"{os.path.basename(template_path)}: unresolved tokens {', '.join(unresolved)}"
+            )
+        if not rendered.strip():
+            failures.append(f"{os.path.basename(template_path)}: rendered output is empty")
+
+    if failures:
+        if not quiet:
+            for failure in failures:
+                print(f"FAIL {resolved_name}: {failure}", file=sys.stderr)
+        return False
+    if not quiet:
+        print(f"PASS {resolved_name}")
+    return True
+
+
 def update_cava_config(cava_config_path, rendered_color_section):
     """Preserves all sections and non-color settings, replacing only [color]."""
     if not os.path.exists(cava_config_path):
@@ -630,24 +851,18 @@ def generate_neo_colors(r):
     return "\n".join(lines) + "\n"
 
 def apply_theme(name, no_nvim=False):
-    theme_json_path = os.path.join(CACHE_DIR, f"{name}.json")
-    if not os.path.exists(theme_json_path):
-        cand = os.path.join(CACHE_DIR, f"omarchy-{name}.json")
-        if os.path.exists(cand):
-            theme_json_path = cand
-            name = f"omarchy-{name}"
-        else:
-            print(f"Error: Theme '{name}' not found in cache. Run 'theme-sync' first.", file=sys.stderr)
-            return 1
-
     try:
-        with open(theme_json_path, "r", encoding="utf-8") as f:
-            theme_data = json.load(f)
-    except Exception as e:
-        print(f"Error reading theme JSON: {e}", file=sys.stderr)
+        name, theme_data = resolve_theme_data(name)
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
         return 1
 
     r, theme_type = normalize_palette(theme_data, name)
+    palette_failures = validate_normalized_palette(r)
+    if palette_failures:
+        for failure in palette_failures:
+            print(f"Validation failed: {failure}", file=sys.stderr)
+        return 1
     current_type = get_current_theme_type()
 
     # -------------------------------------------------------------
@@ -669,6 +884,18 @@ def apply_theme(name, no_nvim=False):
             with open(tf, "r", encoding="utf-8") as f:
                 template_text = f.read()
             rendered = pattern.sub(lambda m: str(r.get(m.group(1), m.group(0))), template_text)
+            rendered = preserve_scale_managed_chrome(
+                fname,
+                rendered,
+                os.path.join(STATE_DIR, fname),
+            )
+            unresolved = sorted(set(pattern.findall(rendered)))
+            if unresolved:
+                print(
+                    f"Validation failed: {fname} has unresolved tokens: {', '.join(unresolved)}",
+                    file=sys.stderr,
+                )
+                return 1
             staged_path = os.path.join(next_dir, fname)
             write_atomic(staged_path, rendered)
             staged_files[staged_path] = os.path.join(STATE_DIR, fname)
@@ -735,18 +962,54 @@ def apply_theme(name, no_nvim=False):
             return 1
 
     # -------------------------------------------------------------
-    # ATOMIC PROMOTION (file-by-file into destination paths)
+    # CHANGE-AWARE TRANSACTIONAL PROMOTION
     # -------------------------------------------------------------
-    for staged_p, target_p in staged_files.items():
-        try:
-            os.replace(staged_p, target_p)
-        except Exception as e:
-            print(f"Error promoting {staged_p} -> {target_p}: {e}", file=sys.stderr)
-            return 1
+    # Avoid unnecessary inode churn and native file-watcher reloads when a
+    # generated target is byte-identical. Before touching a changed target,
+    # keep a private rollback copy in .next so a rare promotion failure cannot
+    # leave a half-applied theme on disk.
+    state_name = os.path.join(STATE_DIR, "name")
+    state_type = os.path.join(STATE_DIR, "type")
+    promotion_items = list(staged_files.items()) + [
+        (staged_name, state_name),
+        (staged_type, state_type),
+    ]
+    promotion_plan = []
+    changed_targets = set()
+    for index, (staged_p, target_p) in enumerate(promotion_items):
+        if os.path.isfile(target_p) and filecmp.cmp(staged_p, target_p, shallow=False):
+            os.remove(staged_p)
+            continue
+        backup = None
+        if os.path.isfile(target_p):
+            backup = os.path.join(next_dir, f".rollback-{index}")
+            shutil.copy2(target_p, backup)
+        promotion_plan.append((staged_p, target_p, backup))
 
-    # Promote state markers last
-    os.replace(staged_name, os.path.join(STATE_DIR, "name"))
-    os.replace(staged_type, os.path.join(STATE_DIR, "type"))
+    promoted = []
+    try:
+        for staged_p, target_p, backup in promotion_plan:
+            os.replace(staged_p, target_p)
+            promoted.append((target_p, backup))
+            changed_targets.add(target_p)
+    except Exception as exc:
+        print(f"Error promoting theme outputs: {exc}; rolling back", file=sys.stderr)
+        for target_p, backup in reversed(promoted):
+            try:
+                if backup and os.path.exists(backup):
+                    os.replace(backup, target_p)
+                elif os.path.exists(target_p):
+                    os.remove(target_p)
+            except Exception as rollback_exc:
+                print(f"[WARN] rollback failed for {target_p}: {rollback_exc}", file=sys.stderr)
+        return 1
+    finally:
+        for _staged_p, _target_p, backup in promotion_plan:
+            if backup and os.path.exists(backup):
+                try:
+                    os.remove(backup)
+                except OSError:
+                    pass
 
     # Clean up .next directory safely
     try:
@@ -778,7 +1041,13 @@ def apply_theme(name, no_nvim=False):
     # A successful live reload also compiles Base46's disk cache, so avoid a
     # redundant headless compile. If no live socket succeeds, compile once
     # headlessly. Mark the cache current only after a verified compile.
-    if not no_nvim:
+    cache_theme_file = os.path.expanduser("~/.local/share/nvim/base46/current_theme")
+    try:
+        cache_theme_current = open(cache_theme_file, "r", encoding="utf-8").read().strip()
+    except OSError:
+        cache_theme_current = ""
+    nvim_needs_refresh = bool(changed_targets) or cache_theme_current != name
+    if not no_nvim and nvim_needs_refresh:
         runtime_dir = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
         nvim_sockets = []
         for sock in glob.glob(os.path.join(runtime_dir, "nvim.*")):
@@ -804,7 +1073,6 @@ def apply_theme(name, no_nvim=False):
             for sock in failed_sockets:
                 reload_nvim_socket(sock, name, timeout=2.0)
 
-        cache_theme_file = os.path.expanduser("~/.local/share/nvim/base46/current_theme")
         if cache_ready:
             try:
                 os.makedirs(os.path.dirname(cache_theme_file), exist_ok=True)
@@ -818,7 +1086,8 @@ def apply_theme(name, no_nvim=False):
             )
 
     # Sway IPC: live client borders and swaybar colors (single batched command)
-    if procs["sway"]:
+    sway_theme_target = os.path.join(STATE_DIR, "sway.conf")
+    if procs["sway"] and sway_theme_target in changed_targets:
         sway_cmd = (
             f"client.focused {r['border_focus']} {r['bg2']} {r['fg']} {r['border_focus']} {r['border_focus']}; "
             f"client.focused_inactive {r['border_muted']} {r['bg']} {r['muted']} {r['border_muted']} {r['border_muted']}; "
@@ -840,38 +1109,44 @@ def apply_theme(name, no_nvim=False):
         # (picked up by the config.d glob include); regenerated on every theme-set.
         try:
             colors_conf = os.path.expanduser("~/.config/sway/config.d/80-theme-colors.conf")
-            with open(colors_conf, "w") as fh:
-                fh.write("# GENERATED by theme-set — do not edit manually.\n")
-                fh.write("# Visibility-safe borders derived from the theme accent/background.\n")
-                fh.write(f"client.focused {r['border_focus']} {r['bg2']} {r['fg']} {r['border_focus']} {r['border_focus']}\n")
-                fh.write(f"client.focused_inactive {r['border_muted']} {r['bg']} {r['muted']} {r['border_muted']} {r['border_muted']}\n")
-                fh.write(f"client.unfocused {r['border_muted']} {r['bg']} {r['muted']} {r['border_muted']} {r['border_muted']}\n")
-                fh.write(f"client.urgent {r['red']} {r['bg']} {r['red']} {r['red']} {r['red']}\n")
-        except Exception:
-            pass
+            colors_content = (
+                "# GENERATED by theme-set — do not edit manually.\n"
+                "# Visibility-safe borders derived from the theme accent/background.\n"
+                f"client.focused {r['border_focus']} {r['bg2']} {r['fg']} {r['border_focus']} {r['border_focus']}\n"
+                f"client.focused_inactive {r['border_muted']} {r['bg']} {r['muted']} {r['border_muted']} {r['border_muted']}\n"
+                f"client.unfocused {r['border_muted']} {r['bg']} {r['muted']} {r['border_muted']} {r['border_muted']}\n"
+                f"client.urgent {r['red']} {r['bg']} {r['red']} {r['red']} {r['red']}\n"
+            )
+            write_atomic_if_changed(colors_conf, colors_content)
+        except Exception as exc:
+            print(f"[WARN] Sway theme state write failed: {exc}", file=sys.stderr)
 
     # Zed editor: touch settings.json to trigger instant inotify reload of active theme
     zed_settings = os.path.expanduser("~/.config/zed/settings.json")
-    if os.path.exists(zed_settings):
+    zed_theme_target = os.path.expanduser("~/.config/zed/themes/nvchad-system.json")
+    if zed_theme_target in changed_targets and os.path.exists(zed_settings):
         try:
             os.utime(zed_settings, None)
         except Exception:
             pass
 
-    # Alacritty terminal: touch alacritty.toml to guarantee instant inotify reload
+    # Alacritty watches its generated theme target. Touch only when that target
+    # changed, avoiding a redundant reload on same-theme reapply.
     alacritty_cfg = os.path.expanduser("~/.config/alacritty/alacritty.toml")
-    if os.path.exists(alacritty_cfg):
+    alacritty_theme_target = os.path.join(STATE_DIR, "alacritty.toml")
+    if alacritty_theme_target in changed_targets and os.path.exists(alacritty_cfg):
         try:
             os.utime(alacritty_cfg, None)
         except Exception:
             pass
 
     # Kitty terminal: SIGUSR1 reloads configuration and color themes on the fly
-    for pid in procs["kitty"]:
-        try:
-            os.kill(pid, signal.SIGUSR1)
-        except Exception:
-            pass
+    if os.path.join(STATE_DIR, "kitty-colors.conf") in changed_targets:
+        for pid in procs["kitty"]:
+            try:
+                os.kill(pid, signal.SIGUSR1)
+            except Exception:
+                pass
 
     # Foot terminal: update live windows with OSC only.
     # SIGUSR1/SIGUSR2 do NOT reload foot-colors.ini; they switch to the
@@ -880,7 +1155,8 @@ def apply_theme(name, no_nvim=False):
     # palette. New clients load the current generated palette via the footclient
     # wrapper; existing clients are updated directly through their PTYs here.
     foot_pids = procs.get("foot", []) + procs.get("footclient", [])
-    if foot_pids:
+    foot_theme_target = os.path.expanduser("~/.config/foot/foot-colors.ini")
+    if foot_pids and foot_theme_target in changed_targets:
         foot_pts = set()
         for foot_pid in foot_pids:
             try:
@@ -934,28 +1210,30 @@ def apply_theme(name, no_nvim=False):
                     pass
 
     # btop: direct SIGUSR2 signal for instantaneous in-memory theme & config reload
-    for pid in procs["btop"]:
-        try:
-            os.kill(pid, signal.SIGUSR2)
-        except Exception:
-            pass
+    if os.path.join(STATE_DIR, "btop.theme") in changed_targets:
+        for pid in procs["btop"]:
+            try:
+                os.kill(pid, signal.SIGUSR2)
+            except Exception:
+                pass
 
     # legendary-tui: direct SIGUSR2 signal for instantaneous in-memory theme reload
-    for pid in procs.get("legendary-tui", []):
-        try:
-            os.kill(pid, signal.SIGUSR2)
-        except Exception:
-            pass
+    if changed_targets:
+        for pid in procs.get("legendary-tui", []):
+            try:
+                os.kill(pid, signal.SIGUSR2)
+            except Exception:
+                pass
 
     # Short-lived reload commands are synchronous so a newer theme can never
     # be overtaken by an older asynchronous IPC request.
-    if procs["dunst"]:
+    if procs["dunst"] and os.path.join(STATE_DIR, "dunst.conf") in changed_targets:
         run_ipc(["dunstctl", "reload"], "Dunst reload", timeout=0.75)
 
-    if procs["mako"]:
+    if procs["mako"] and os.path.join(STATE_DIR, "mako.conf") in changed_targets:
         run_ipc(["makoctl", "reload"], "Mako reload", timeout=0.75)
 
-    if procs["yazi"]:
+    if procs["yazi"] and os.path.join(STATE_DIR, "yazi.toml") in changed_targets:
         run_ipc(["ya", "emit-to", "0", "app:theme"], "Yazi theme DDS", timeout=0.75)
 
     # GTK dark preference & theme sync for GTK3 (Thunar) and GTK4.
@@ -975,11 +1253,12 @@ def apply_theme(name, no_nvim=False):
 
 
     # Cava: reload colors only via SIGUSR2 (instantaneous, 0 audio drop)
-    for pid in procs.get("cava", []):
-        try:
-            os.kill(pid, signal.SIGUSR2)
-        except Exception:
-            pass
+    if os.path.join(STATE_DIR, "cava.conf") in changed_targets:
+        for pid in procs.get("cava", []):
+            try:
+                os.kill(pid, signal.SIGUSR2)
+            except Exception:
+                pass
 
     # 8. Wallpaper application is ordered with the rest of the switch so rapid
     # theme changes cannot leave the previous wallpaper behind. Theme switching
@@ -990,13 +1269,25 @@ def apply_theme(name, no_nvim=False):
         wallpaper = cached_theme_wallpaper(name)
     if wallpaper:
         wp_path = os.path.expanduser(wallpaper)
-        if os.path.isfile(wp_path) and run_ipc(
+        desired_wallpaper = os.path.realpath(wp_path)
+        try:
+            current_wallpaper = open(CURRENT_WALLPAPER_FILE, "r", encoding="utf-8").read().strip()
+            current_wallpaper = os.path.realpath(current_wallpaper) if current_wallpaper else ""
+        except OSError:
+            current_wallpaper = ""
+        if os.path.isfile(wp_path) and current_wallpaper != desired_wallpaper and run_ipc(
             ["swaymsg", f"output * bg '{wp_path}' fill"],
             "Sway wallpaper update",
             timeout=0.75,
         ):
-            # Keep session restore synchronized with the theme-selected image.
-            write_atomic(CURRENT_WALLPAPER_FILE, os.path.realpath(wp_path) + "\n")
+            # Keep session restore and per-theme selection state synchronized
+            # with the actually applied image (including after a library remap).
+            write_atomic_if_changed(CURRENT_WALLPAPER_FILE, desired_wallpaper + "\n")
+            os.makedirs(WALLPAPER_STATE_DIR, exist_ok=True)
+            write_atomic_if_changed(
+                os.path.join(WALLPAPER_STATE_DIR, name),
+                os.path.basename(wp_path) + "\n",
+            )
 
     # 9. Hooks are failure-isolated but ordered. They are intentionally short
     # lived and cached; waiting prevents an older hook from winning a later switch.
@@ -1011,18 +1302,35 @@ def apply_theme(name, no_nvim=False):
 def main():
     args = sys.argv[1:]
     if not args:
-        print("Usage: theme-set <name> [--no-nvim] | --list | --current | --info <name> | --next | --prev")
+        print("Usage: theme-set <name> [--no-nvim] | --check <name> | --check-all | --list | --current | --info <name> | --next | --prev")
         return 1
 
     no_nvim = "--no-nvim" in args
     filtered_args = [a for a in args if a != "--no-nvim"]
 
     if not filtered_args:
-        print("Usage: theme-set <name> [--no-nvim] | --list | --current | --info <name> | --next | --prev")
+        print("Usage: theme-set <name> [--no-nvim] | --check <name> | --check-all | --list | --current | --info <name> | --next | --prev")
         return 1
 
     cmd = filtered_args[0]
     all_themes = get_available_themes()
+
+    if cmd in {"-h", "--help", "help"}:
+        print("Usage: theme-set <name> [--no-nvim] | --check <name> | --check-all | --list | --current | --info <name> | --next | --prev")
+        return 0
+
+    if cmd == "--check" and len(filtered_args) > 1:
+        return 0 if check_theme(filtered_args[1]) else 1
+
+    if cmd == "--check-all":
+        failures = [name for name in all_themes if not check_theme(name, quiet=True)]
+        if failures:
+            for name in failures:
+                check_theme(name, quiet=False)
+            print(f"FAIL {len(failures)}/{len(all_themes)} themes", file=sys.stderr)
+            return 1
+        print(f"PASS {len(all_themes)} themes")
+        return 0
 
     if cmd in ("--info", "-i") and len(filtered_args) > 1:
         target_name = filtered_args[1]

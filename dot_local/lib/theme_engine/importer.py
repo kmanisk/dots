@@ -54,7 +54,7 @@ LEGACY_CATALOG_URLS = [
 IMPORTED_OMARCHY_DIR = os.path.expanduser("~/.config/theme/imported/omarchy")
 PREVIEWS_DIR = os.path.expanduser("~/.cache/theme/previews")
 IMPORT_TMP_BASE = os.path.expanduser("~/.cache/theme/import-tmp")
-WALLPAPERS_CACHE = os.path.expanduser("~/.cache/theme/wallpapers")
+WALLPAPERS_CACHE = os.path.expanduser("~/.local/share/theme/wallpapers/upstream")
 MAX_WALLPAPERS_PER_THEME = 5
 
 os.makedirs(IMPORTED_OMARCHY_DIR, exist_ok=True)

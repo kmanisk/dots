@@ -444,7 +444,9 @@ Rather than relying on heavy GNOME or KDE Bluetooth control panels, the system u
   * Consumes 0.0% CPU and zero RAM when closed.
 
 ### B. Bluetooth Control Model (Daemonless, Manual-Only)
-Since 2026-10-19 there are **no Bluetooth automation services**: `bt-autoconnect.service` and `bt-auto-trust.service` were stopped, disabled, deleted from disk, and removed from chezmoi. No `bt-*` unit files or processes remain; BlueZ block state replaces every background dialer.
+Since 2026-10-19 there are **no custom user Bluetooth audio automation services**: `bt-autoconnect.service` and `bt-auto-trust.service` were stopped, disabled, deleted from disk, and removed from chezmoi. BlueZ block state replaces background audio dialers.
+
+As of 2026-11-01 the Katana S K2 BLE keyboard also has no custom reconnect daemon. The former `bt-keyboard-reconnect.service` and `~/.local/bin/bt-keyboard-reconnect` were removed after live verification showed BlueZ already owns HID reconnect and duplicate retries could collide with an in-progress BlueZ connection. `xremap.service` watches device changes, the keyboard udev rule remains an attachment backstop, and `bt-katana` is only a one-shot manual/login/resume fallback. This input-device policy is separate from the foreground-only audio-device controls below.
 
 * **`bt-select` (`~/.local/bin/bt-select`)** - manual whiptail picker, audio devices only (input devices such as the Katana S K2 keyboard are never listed):
   * Checked devices are unblocked, then any disconnected selections are dialed concurrently with plain `bluetoothctl connect`. The script deliberately does not wrap BlueZ `Connect()` in an external `timeout`: killing `bluetoothctl` while the controller page is still active can leave a pending HCI connection and make the next attempt fail with `br-connection-busy` until the controller timeout expires.

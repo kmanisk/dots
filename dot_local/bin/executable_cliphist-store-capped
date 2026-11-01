@@ -25,7 +25,7 @@ if [ -f "$BUF_DIR/.auto_mode" ] && [ ! -f "$BUF_DIR/.pasting" ]; then
         mkdir -p "$BUF_DIR"
         cp "$tmp" "$BUF_DIR/shot_$(date +%s%N).png"
         count=$(find "$BUF_DIR" -maxdepth 1 -name "shot_*.png" 2>/dev/null | wc -l)
-        notify-send -a "Screenshot Buffer" -t 1200 -i camera-photo "Image Buffered" "#$count in queue. Caps+. to paste all." 2>/dev/null || true
+        notify-send -a "Screenshot Buffer" -t 1200 -i camera-photo "Screenshot Buffered" "#$count queued. Win+Alt+V opens the picker." 2>/dev/null || true
     fi
 fi
 

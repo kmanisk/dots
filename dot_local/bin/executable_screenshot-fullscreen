@@ -86,13 +86,16 @@ if [ -n "${WAYLAND_DISPLAY:-}" ] || [ -n "${SWAYSOCK:-}" ]; then
         wl-copy -t image/png < "$FILE"
         if [ "$SAVE" = 1 ]; then
             if [ "$IS_GAMING" = 1 ]; then
-                notify-send -a "Gaming Screenshot" -t 1500 -i camera-photo "Gaming Screenshot" "Saved to Screenshots/Gaming + clipboard"
+                notify-send -a "Screenshot" -t 1500 -i camera-photo "Screenshot Done" "Saved to Screenshots/Gaming + clipboard"
             else
                 BUF_DIR="${XDG_RUNTIME_DIR:-/tmp}/screenshot-buffer-$UID"
-                mkdir -p "$BUF_DIR"
-                cp "$FILE" "$BUF_DIR/shot_$(date +%s%N).png"
-                count=$(find "$BUF_DIR" -maxdepth 1 -name "shot_*.png" 2>/dev/null | wc -l)
-                notify-send -a "Screenshot Buffer" -t 1500 -i camera-photo "Screenshot Buffered" "#$count in queue. Caps+Shift+Space to pick."
+                if [ -f "$BUF_DIR/.auto_mode" ]; then
+                    # wl-copy above is watched by cliphist-store-capped, which owns
+                    # the single queue insertion + buffer notification.
+                    :
+                else
+                    notify-send -a "Screenshot" -t 1500 -i camera-photo "Screenshot Done" "Saved to Screenshots + clipboard"
+                fi
             fi
         else
             rm -f "$FILE"
@@ -111,13 +114,17 @@ else
         timeout 2s xclip -selection clipboard -t image/png -i "$FILE" 2>/dev/null || true
         if [ "$SAVE" = 1 ]; then
             if [ "$IS_GAMING" = 1 ]; then
-                notify-send -a "Gaming Screenshot" -t 1500 -i camera-photo "Gaming Screenshot" "Saved to Screenshots/Gaming + clipboard"
+                notify-send -a "Screenshot" -t 1500 -i camera-photo "Screenshot Done" "Saved to Screenshots/Gaming + clipboard"
             else
                 BUF_DIR="${XDG_RUNTIME_DIR:-/tmp}/screenshot-buffer-$UID"
-                mkdir -p "$BUF_DIR"
-                cp "$FILE" "$BUF_DIR/shot_$(date +%s%N).png"
-                count=$(find "$BUF_DIR" -maxdepth 1 -name "shot_*.png" 2>/dev/null | wc -l)
-                notify-send -a "Screenshot Buffer" -t 1500 -i camera-photo "Screenshot Buffered" "#$count in queue. Caps+Shift+Space to pick."
+                if [ -f "$BUF_DIR/.auto_mode" ]; then
+                    mkdir -p "$BUF_DIR"
+                    cp "$FILE" "$BUF_DIR/shot_$(date +%s%N).png"
+                    count=$(find "$BUF_DIR" -maxdepth 1 -name "shot_*.png" 2>/dev/null | wc -l)
+                    notify-send -a "Screenshot Buffer" -t 1500 -i camera-photo "Screenshot Buffered" "#$count queued. Caps+Shift+Space toggles buffer mode."
+                else
+                    notify-send -a "Screenshot" -t 1500 -i camera-photo "Screenshot Done" "Saved to Screenshots + clipboard"
+                fi
             fi
         else
             notify-send -a "Screenshot" -t 1500 -i camera-photo "Screenshot" "Fullscreen copied to clipboard"

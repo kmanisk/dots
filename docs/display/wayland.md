@@ -10,3 +10,8 @@ Mouse and keyboard response on Sway feels instant — including in games — and
 - **500 Hz mouse polling** (`usbhid.mousepoll=2`) removed the X11 event-flood stalls Wine hit at 1000 Hz — input thread stays responsive (see `gaming/elden-ring/wayland-troubleshooting-and-fixes.md` §8).
 
 Where X11 still wins: exotic automation (xdotool-style), some screen readers/IM tooling. Raw latency crown is Wayland's.
+## Cursor sizing and display-state ownership (2026-11-01)
+
+The Phinger cursor is currently standardized at **24 px** across the Sway seat, `environment.d`, GTK 3, GTK 4, and GSettings. Cursor size is a display/UI setting only; this change does not alter output mode or compositor scaling. Live verification after the change showed `eDP-1` still running at 1920x1200, approximately 165.004 Hz, with Sway scale 1.30.
+
+Authoritative managed consumers are `dot_config/sway/config.d/10-display.conf`, `dot_config/environment.d/30-cursor.conf`, and the GTK settings files. Use the existing cursor helper for future changes instead of editing one consumer independently, so Sway, GTK, session environment, and XWayland fallback state do not drift.

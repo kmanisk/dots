@@ -89,7 +89,7 @@ The repository uses declarative package lists under `packages/` managed by `run_
 | `gaming.txt` | Gaming tools (`steam`, `gamescope`, `gamemode`, `mangohud`, `goverlay`) | Official (`pacman`) | `features.gaming = true` |
 | `nvidia.txt` | NVIDIA utilities and 32-bit Vulkan/OpenCL drivers | Official (`pacman`) | `gpu_strategy = "hybrid-optimus-d3cold"` |
 | `asus.txt` | ASUS hardware management tools (`asusctl`, `supergfxctl`) | Official (`pacman`) | `features.asus_ctl = true` |
-| `sway.txt` | Sway Wayland desktop stack plus the Omarchy-compatible Nerd Font set (`JetBrainsMono`, Cascadia, Meslo, Fira Code, Victor Mono, Bitstream Vera Mono, Iosevka) | Official (`pacman` / `cachyos`) | `features.sway = true` |
+| `sway.txt` | Sway Wayland desktop stack, ImageMagick for curated wallpaper normalization, plus the Omarchy-compatible Nerd Font set (`JetBrainsMono`, Cascadia, Meslo, Fira Code, Victor Mono, Bitstream Vera Mono, Iosevka) | Official (`pacman` / `cachyos`) | `features.sway = true` |
 | `audio.txt` | PipeWire, WirePlumber, and neural RNNoise DSP stack | Official (`pacman`) | `providers.audio = "pipewire-standard"` |
 | `development.txt` | Runtimes and build accelerators (`nodejs`, `python`, `mold`, `ccache`) | Official (`pacman`) | `features.development = true` |
 | `aur-explicit.txt` | Explicit foreign/AUR packages (`antigravity-cli`, `bibata-cursor`, `xremap`, `vkbasalt`, `lib32-vkbasalt`) | AUR (`paru`) | AUR helper present |

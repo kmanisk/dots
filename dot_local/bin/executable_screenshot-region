@@ -59,10 +59,8 @@ if [ -n "${WAYLAND_DISPLAY:-}" ] || [ -n "${SWAYSOCK:-}" ]; then
         wl-copy -t image/png < "$FILE"
         BUF_DIR="${XDG_RUNTIME_DIR:-/tmp}/screenshot-buffer-$UID"
         if [ -f "$BUF_DIR/.auto_mode" ]; then
-            mkdir -p "$BUF_DIR"
-            cp "$FILE" "$BUF_DIR/shot_$(date +%s%N).png"
-            count=$(find "$BUF_DIR" -maxdepth 1 -name "shot_*.png" 2>/dev/null | wc -l)
-            notify-send -a "Screenshot" -t 1500 -i camera-photo "Screenshot Buffered" "#$count in queue. Caps+Shift+Space to pick."
+            # wl-copy above is watched by cliphist-store-capped, which owns
+            # the single queue insertion + buffer notification.
             [ "$SAVE" = 0 ] && rm -f "$FILE"
         elif [ "$SAVE" = 1 ]; then
             notify-send -a "Screenshot" -t 1500 -i camera-photo "Screenshot" "Region saved to Screenshots + clipboard"

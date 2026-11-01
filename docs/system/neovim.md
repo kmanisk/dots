@@ -17,6 +17,26 @@ Neovim 0.12.6 remains installed and the existing executable selection is preserv
 
 Tests and exact rollback: [workstation audit](workstation-audit-2026-10-23.md).
 
+## Verified tabufline dashboard guard, 2026-11-01
+
+NvChad's current `nvchad.tabufline.next()` / `prev()` implementation assumes
+`vim.t.bufs` contains at least one listed buffer. The Alpha dashboard is an
+unlisted `nofile` buffer and legitimately starts with `vim.t.bufs = {}`; using
+NvChad's default `<Tab>` / `<S-Tab>` mappings there therefore attempted
+`nvim_set_current_buf(nil)` and raised `E5108: Invalid 'buf': Expected Lua number`.
+
+The managed `lua/configs/ide.lua` now wraps the NvChad tabufline module once at
+startup. Before next/previous navigation it removes stale/invalid entries from
+`vim.t.bufs` and returns without changing buffers when no listed buffer exists.
+The same wrapper keeps the existing command-line-window close guard, so the
+protection applies to NvChad defaults and all custom mappings without patching
+files under `~/.local/share/nvim/lazy/`.
+
+Headless verification on Neovim 0.12.5 passed both cases: Alpha remained on the
+same dashboard buffer with empty tab state and no error, while two real listed
+files cycled previous/next correctly. The source and live chezmoi-managed
+`ide.lua` are identical after apply.
+
 This document specifies the architecture, keybindings, and plugin layer for the overhauled Neovim configuration in `~/.config/nvim`, designed as a full-featured, resource-light IDE mirroring Zed.
 
 ---
@@ -56,9 +76,11 @@ This document specifies the architecture, keybindings, and plugin layer for the 
 ### Search & Buffers
 * `<leader>f` / `<leader>ff`: Find files (`Telescope find_files`).
 * `<leader>fw` / `<leader>sp`: Live grep project search.
-* `<leader>bb`: Buffer switcher.
-* `<leader>x`: Close current buffer (`tabufline.close_buffer()`).
-* `<S-h>` / `<S-l>`: Switch to previous / next buffer tab.
+* `<leader>,`: Buffer switcher (`Telescope buffers`).
+* `<Tab>` / `<S-Tab>`: NvChad next / previous buffer navigation, protected by the local empty-tab guard.
+* `<S-j>` / `<A-j>`: Next buffer.
+* `<S-k>` / `<A-k>`: Previous buffer.
+* `<A-w>`, `<leader>q`, `<leader>dd`, `<leader>df`: Close current buffer through the guarded `tabufline.close_buffer()` path.
 * `<leader>sr`: Search and replace (`search-replace.nvim`).
 * `s` / `S`: Sneak forward / backward 2-character motion with single-letter label direct jumps.
 

@@ -14,6 +14,78 @@ Rules:
 
 ## 2026-11-01
 
+### Theme palette, wallpaper matching, and hot-reload hardening
+
+- Hardened `theme-set` with read-only `--check` / `--check-all` preflight, post-Base30 contrast enforcement, unresolved-template rejection, fsynced/change-aware writes, transactional rollback on promotion failure, and preservation of the Mako/Swaybar/GTK geometry owned by `ui-sync`. Generated consumers now hot-reload only when their target changes; a verified same-theme reapply changed no theme-state, Neovim-marker, or wallpaper mtimes.
+- Reworked centralized wallpaper assignment to profile the actual local image pixels instead of trusting Wallhaven bucket metadata as the match authority. The best-scoring visual match remains first and alternatives are reuse-balanced; all 327 themes pass audit, all 63 curated assets are used, 48 are first choices somewhere, and maximum all-slot reuse is 35. No network fetch or asset replacement was needed for the remap.
+- Verified live dark -> light -> original switching (`gruvchad` -> `github_light` -> `apollo-after-dark`) with two Neovim instances plus Foot, Fuzzel, Mako, Sway IPC, wallpaper persistence, and output scale 1.30 intact. Apollo now selects `wallhaven-r25x6m.webp` and its remembered wallpaper state matches the applied file.
+- Hardened `rofi-theme`: stale cache synchronization is completed before the 327 rows are exposed, Enter preflights and synchronously applies the exact selected ID, failures stay visible with captured diagnostics, and Ctrl+R reports the real sync result instead of always claiming success. Binary-safe script-mode tests verified exactly 327 unique rows, successful same-theme no-op apply, invalid-theme error retention, and sync result handling.
+
+### Fullscreen screenshots no longer enter the screenshot buffer
+
+- `Caps+Space` still launches `screenshot-fullscreen`, saves the capture to the normal screenshot directory (or `Screenshots/Gaming`), and copies it to the clipboard. It does not enqueue by default; enqueueing occurs only while explicit screenshot buffer mode is enabled with `Caps+Shift+Space`.
+- With buffer mode OFF the success notification is `Screenshot Done`; with buffer mode ON it becomes `Screenshot Buffered` and reports the queue count. Existing queued files are not deleted.
+
+### Compacted Ctrl+Space scratch terminal and notification/OSD chrome
+
+- Reduced the dedicated `scratch-term` Foot override from 16.5 pt to 16 pt; notes/DC scratchpads and the global Foot font are unchanged.
+- Reduced Mako base chrome in `ui-metrics.conf` from font/padding/margin/width/radius `17/10/10/500/8` to `15/8/8/440/6`; `ui-sync` continues deriving scale-correct live values, so brightness, volume, night-light, and ordinary notifications all become slightly smaller without changing the compositor scale.
+
+### Caps+Shift+Space controls explicit screenshot buffer mode
+
+- `CapsLock-Shift-Space` now toggles `screenshot-buffer toggle` instead of opening the picker. `CapsLock-Space` remains the normal fullscreen screenshot action and CapsLock tap remains `Esc`.
+- With buffer mode OFF, `Caps+Space` saves and copies normally with `Screenshot Done`; with buffer mode ON, the same fullscreen capture is additionally queued and reports `Screenshot Buffered`. No other xremap mappings were changed.
+
+### Removed redundant Bluetooth keyboard reconnect daemon
+
+- Removed the resident `bt-keyboard-reconnect.service` and Python helper after live verification showed BlueZ already owns Katana S K2 BLE HID reconnect (`ReconnectUUIDs`, retry backoff, trusted/bonded/wake-enabled device) and the custom daemon could collide with pending BlueZ connects. The keyboard remained connected after retirement; `xremap --watch=config,device` and the existing udev keyboard rule own attachment.
+- Kept `bt-katana` as a one-shot manual/login/resume fallback but removed its redundant xremap restarts. This removes roughly 13 MiB PSS of resident Python memory and periodic retry wakeups without removing Bluetooth functionality.
+
+### Waydroid protected-media diagnosis and on-demand shutdown
+
+- Verified the post-migration Waydroid audio bridge itself is intact: `audio.primary.waydroid.so` uses the correctly mounted host Pulse socket, Android media volume is nonzero, and the host PipeWire/DAX audit remains clean. The current Android image ships ClearKey DRM only and no Widevine CDM/plugin, explaining JioHotstar protected-video black/silent playback without implicating the host DSP stack.
+- Added `waydroid-stop`, a separate Fuzzel `Stop Waydroid` entry, and the desktop Stop action. The helper stops the Android session and legacy Venus service, then `disable --now`s `waydroid-container.service`; the NVIDIA setup-created boot enablement was removed so Waydroid is on-demand only. A compositor close-event guard was tested and rejected because Android activity transitions can destroy/recreate the Waydroid surface and cause false shutdowns.
+
+### Waydroid 0.2 migration completed and launcher readiness
+
+- Completed the `waydroid-nvidia-bin 0.2.0-1` migration with `nvidia-prolapse`, `nvidia_native_gl=off`, and the v0.2.0 vendor image. The package release gate passed all 22 Android/Android32 cases plus media checks on NVIDIA module `615.78.08`; live Android is boot-complete and SurfaceFlinger reports ANGLE on NVIDIA Vulkan/NVK.
+- Hardened `waydroid-launcher` against the cold-start race where Waydroid reports `Session: RUNNING` before the client bridge is available: it now waits for `waydroid app list` to succeed before opening the UI/app. The user `Waydroid.desktop` entry used by Alt+Space Fuzzel now calls `waydroid-launcher` through the verified Sway PATH instead of a hardcoded home path. Bash syntax, desktop-file validation, source/live parity, client-bridge readiness, and the running Waydroid session were verified.
+
+### Fish clipboard file arguments
+
+- Extended the lazy-loaded Fish `clip` function so `clip file`, `clip file1 file2`, and glob-expanded groups such as `clip *.rs` copy regular-file contents to the Wayland clipboard; literal arguments and `<command> | clip` retain their previous behavior.
+- Verified Fish syntax and all three input modes with an isolated fake `wl-copy`, leaving the real clipboard untouched; chezmoi source and live function are identical after targeted apply.
+
+### Removed stale Dark Souls III launcher entries
+
+- The Dark Souls III game directory is absent. Removed the four local XDG/chezmoi menu entries for the game, randomizer, CYCLES installer, and ME3 manager so Fuzzel no longer lists an uninstalled title; historical game documentation and helper scripts remain for reference.
+
+### Centralized curated wallpaper library for every theme
+
+- Added `theme-wallpaper-library` and moved theme wallpaper storage to `~/.local/share/theme/wallpapers/`: shared curated assets in `assets/`, preserved Omarchy/repository fallbacks in `upstream/`, and a chezmoi-managed provenance/mapping manifest. The former `~/.cache/theme/wallpapers/` cache was hash-verified, consolidated into the central root, and removed without losing unique files.
+- Mapped all 327 exposed themes to three palette-matched choices while storing only 63 unique curated assets. Automated selection uses Wallhaven General/SFW 16:9 or 16:10 sources of at least 1920x1200, an explicit AI metadata/source denylist, and a conservative pre-2022 upload cutoff; local files are WebP quality 92 with no upscaling and a 2560x1600 ceiling. Metadata/date filtering is treated as conservative provenance evidence rather than proof of authorship. Added `imagemagick` to `packages/sway.txt` so a rebuild has the required `magick` normalization tool.
+- `theme-set` remains network-free and now prefers the centralized curated mapping; `theme-wallpaper` cycles local mapped assets and retains `upstream/` as compatibility fallback. Verified library audit: 327/327 themes, 63/63 local curated assets, three choices per theme, selected uploads from 2014-2021 only, local dimensions from 1920x1200 through 2560x1600.
+- Verified live Sway cycling on `waffle-cat`: `next` applied curated slot 2/3 and `set 1` returned to slot 1/3 with successful compositor IPC. `~/.config/current_wallpaper` points into the centralized `assets/` tree and the obsolete cache path is not recreated.
+
+### Alt+Space launcher proportions and cursor sizing
+
+- Kept the native Fuzzel `Alt + Space` launcher at its original compact `width=36`, `lines=10` proportions while setting `image-size-ratio=0` so the separate oversized selected-app preview is gone. Added `FUZZEL_LINE_HEIGHT=26` to the central UI metrics so `ui-sync` generates a 20px logical row at scale 1.30, giving slightly larger application icons without making the launcher feel bulky or rigid.
+- Reduced the Phinger cursor from 32px to the next native 24px raster and synchronized Sway, GTK3/4, GSettings, Xresources, environment.d, and the live Sway seat.
+- Verified the real Fuzzel UI after restoring the compact proportions: no large lower preview is rendered and the list keeps the minimal narrow shape with modestly enlarged row icons. `fuzzel --check-config`, `ui-sync`, source/live parity, and Sway validation are clean.
+
+### Sway session restore cwd and backup hardening
+
+- Fixed Foot session cwd capture: Sway reports the shared Foot server PID for every terminal surface, so the old saver stored the server cwd (`/`) and startup restore opened the ws1 shell at root, producing the Pure prompt lock indicator. Terminal cwd is now recovered per window from the Fish/Pure title, with `$HOME` fallback when it cannot be proven.
+- Restore now launches Foot clients with explicit `footclient -D <cwd>` and migrates legacy plain ws1 `footclient` snapshots whose erroneous cwd is `/` to `$HOME`. Foot/Footclient are treated as multi-instance entries in both save and restore paths.
+- Hardened session backups: the current valid snapshot is atomically copied rather than moved to `session.json.prev`, and the last 8 validated snapshots are retained under `~/.config/sway/session/backups/`; invalid sessions are never promoted into backup slots.
+- Verified live: two consecutive saves produced ws1 cwd `/home/onyx` in both `session.json` and `session.json.prev`, preserved the pre-fix snapshot in history, `sway-session-save.service` remains enabled/active, source/live helpers match, and a direct legacy-root restore test resolves to `footclient -D /home/onyx` without launching a window.
+
+### Neovim dashboard tabufline navigation guard
+
+- Fixed `E5108: Invalid 'buf': Expected Lua number` from NvChad buffer navigation on the Alpha dashboard. `vim.t.bufs` is legitimately empty there, while the installed `nvchad.tabufline.next()` / `prev()` implementation dereferences its first element.
+- Added a local compatibility guard in managed `lua/configs/ide.lua` that removes stale/invalid tab-buffer entries and makes next/previous navigation a no-op when no listed buffer exists. The existing command-line-window close guard remains in the same wrapper; no files under the lazy plugin directory are patched.
+- Verified headlessly on Neovim 0.12.5: Alpha stays on the same dashboard buffer with empty tab state and no error, and two real listed files still cycle previous/next correctly. Source and live chezmoi targets match after apply.
+
 ### Bluetooth connection retry safety
 
 - Removed external `timeout` wrappers from `bt-select` and `bt-refuse-toggle` connection attempts. BlueZ `Connect()` is now allowed to finish its controller page naturally, avoiding pending HCI connection attempts that could make immediate retries fail with `br-connection-busy`.

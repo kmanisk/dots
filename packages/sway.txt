@@ -18,6 +18,7 @@ brave-origin-bin
 alacritty
 foot
 swayimg
+imagemagick
 pamixer
 brightnessctl
 pavucontrol

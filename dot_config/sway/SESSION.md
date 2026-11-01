@@ -12,10 +12,12 @@ logout/reboot/shutdown begins → one-shot save → Sway exits
 
 - Save: `sway-session-save` reads `swaymsg get_tree` + `/proc` cmdlines,
   writes `~/.config/sway/session/session.json` atomically (tmp + fsync +
-  rename), rotating the previous valid snapshot to `session.json.prev`.
+  rename), copies the previous valid snapshot atomically to `session.json.prev`,
+  and keeps the last 8 valid snapshots under `session/backups/`.
 - Restore: `sway-session-restore` launches missing apps onto their saved
   workspaces via Sway IPC, then exits. Already-running apps are never
-  duplicated.
+  duplicated. Foot terminals receive their saved cwd explicitly with
+  `footclient -D`, so the shared Foot server cwd is never inherited.
 
 ## Why no daemon
 
@@ -57,10 +59,24 @@ go to stdout (journal for service runs) plus a desktop notification.
   Enabled via `run_onchange_linux-20-reconcile-services.sh`, same as the
   existing i3 unit. It self-discovers `SWAYSOCK` (no hardcoded UID/PID).
 
+## Foot terminal cwd handling
+
+With Foot client/server mode, every terminal surface reports the shared Foot
+server PID to Sway. `/proc/<pid>/cwd` is therefore the server cwd, not the cwd of
+the shell shown in that specific window. The saver recovers per-window cwd from
+the Fish/Pure title (`<cwd> - fish` or `<cwd>: <command> - <current-command>`)
+and falls back to `$HOME` when it cannot prove a terminal cwd. A plain ws1 shell
+saved as `/` by the old server-PID implementation is migrated to `$HOME`; other
+terminal directories and workspaces keep their exact cwd. Multiple Foot windows
+are treated as valid multi-instance session entries.
+
 ## Failure behavior
 
 - Empty/malformed tree, no Sway socket, or write error → save aborts,
   `session.json` untouched (exit 1).
+- The current `session.json` is never moved away before a new snapshot is ready.
+  Only a validated current snapshot is copied into `session.json.prev` and the
+  bounded backup history; an invalid current file is never promoted to backup.
 - Malformed/missing session on restore → reported, startup continues
   (exit 0).
 - Crash: last good `session.json` is never overwritten by a bad snapshot.
@@ -96,10 +112,20 @@ placeholder watcher (unneeded under forced-tabbed workspaces),
 
 ## Recovery
 
-If a session is wrong, restore the backup and re-apply:
+Immediate rollback still uses the previous valid snapshot:
 
 ```
 cp ~/.config/sway/session/session.json.prev ~/.config/sway/session/session.json
+sway-session-restore --all
+```
+
+For an older known-good state, inspect the bounded history and copy the desired
+file into place before restoring:
+
+```
+ls -lt ~/.config/sway/session/backups/
+cp ~/.config/sway/session/backups/session-YYYYMMDD-HHMMSS-ffffff.json \
+  ~/.config/sway/session/session.json
 sway-session-restore --all
 ```
 

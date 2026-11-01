@@ -39,7 +39,7 @@ include ~/.config/sway/config.d/*.conf
   * Current runtime UI scale: `1.30`.
   * `10-display.conf` owns mode/refresh/adaptive-sync/tearing policy; it deliberately does not hardcode scale.
   * `ui-scale` owns compositor scaling and atomically persists it in generated `99-ui-scale.conf`.
-  * `ui-sync` derives scale-aware system chrome and skips writes/reloads when generated content is unchanged. Mako notification/OSD sizing is controlled by `MAKO_FONT` and `MAKO_WIDTH` in `~/.config/ui-metrics.conf`; with `CHROME_FOLLOW=0` the values are divided by the output scale, so the base value is effectively the physical point size.
+  * `ui-sync` derives scale-aware system chrome and skips writes/reloads when generated content is unchanged. Mako notification/OSD sizing is controlled by the `MAKO_*` values in `~/.config/ui-metrics.conf`; the current compact bases are font 15, padding/margin 8, width 440, and radius 6. With `CHROME_FOLLOW=0` these are divided by output scale, keeping brightness/volume/night-light/general notifications physically compact.
   * Adaptive Sync: `off` (prevents panel backlight flickering/gamma shifts on 165Hz laptop panels).
   * Allow Tearing: `yes` (reduces frame delivery latency in fullscreen gaming).
 * **GPU Strategy:**
@@ -76,7 +76,11 @@ Workspaces are mapped directly under the home/upper row of the right hand to eli
 * **Window Graceful Close:** `Win + q` (polite WM_DELETE close).
 * **Window Force Kill:** `Win + BackSpace` (SIGKILL via `force-kill-window`).
 * **Media Play/Pause:** `Win + Alt + P` calls `~/.local/bin/media-play-pause`, which toggles the active MPRIS player with `playerctl` and shows a short Mako notification for the resulting `Playing` / `Paused` state. The helper is one-shot with no resident process. The former Aura preset bindings moved to `Win + Alt + [` (previous preset) and `Win + Alt + ]` (next preset).
-* **Current-Theme Wallpapers:** `Win + Shift + W`, `Alt + Shift + W`, and `Win + Ctrl + W` advance through the active theme's cached Omarchy backgrounds; `Win + Ctrl + Shift + W` goes backward. The former `ds3-wallpaper` helper is removed and no keybinding uses the static Dark Souls 3 pack. `theme-wallpaper` fetches at most five images from the theme's own GitHub commit on first use; later changes are local and `theme-set` restores the remembered cached image without network access.
+* **Current-Theme Wallpapers:** `Win + Shift + W`, `Alt + Shift + W`, and `Win + Ctrl + W` advance through the active theme's local curated wallpaper mapping; `Win + Ctrl + Shift + W` goes backward. All 327 exposed themes currently have three mapped choices from the centralized `~/.local/share/theme/wallpapers/` library. Normal cycling and `theme-set` are network-free; explicit source discovery/download is handled separately by `theme-wallpaper-library`. Repository/Omarchy backgrounds are preserved under `upstream/` only as fallback data. The former `ds3-wallpaper` helper is removed and no keybinding uses the static Dark Souls 3 pack.
+
+### Alt+Space application launcher
+
+`Alt + Space` launches native Wayland Fuzzel. Its compact proportions remain `width=36` and `lines=10`; `image-size-ratio=0` disables the separate large selected-app preview. `ui-sync` derives `line-height` from `FUZZEL_LINE_HEIGHT=26` in `~/.config/ui-metrics.conf`; at the current 1.30 compositor scale this generates a 20px logical row, about a 26px physical row/icon target, while the font remains 14px logical. This keeps the original minimal shape while making list icons modestly larger than the old font-metric default.
 
 ### Utility TUI Windows
 
@@ -84,13 +88,22 @@ The compact hardware/network TUIs use dedicated Foot client overrides instead of
 
 ### Scratchpads (`~/.local/bin/scratch-toggle`)
 Canonical dimensions: `1700x1050`, centered on display. Windows are **lazy-loaded on demand** on initial hotkey press to eliminate idle RAM waste:
-1. **Terminal Scratchpad:** `Alt + \`` or `Ctrl + Space` (Guarded: `SCRATCH_GAME_GUARD=1` silent no-op when game focused).
+1. **Terminal Scratchpad:** `Alt + \`` or `Ctrl + Space` (Guarded: `SCRATCH_GAME_GUARD=1` silent no-op when game focused). Its dedicated Foot override is 16 pt, slightly smaller than the global terminal so the large scratch window fits more output without changing other terminals.
 2. **Notes Scratchpad:** `Win + n` (Spawns/toggles Neovim on `~/notes.md`).
 3. **Spotify Scratchpad:** `Win + m` (Spawns/toggles Spotify window).
 4. **Video Player (mpv):** `Win + -` or `Win + _` (1280x720 floating scratchpad).
 5. **Desktop Commander Scratchpad:** `Win + Alt + D` (1500x950 floating monitor streaming live ChatGPT tool-call activity).
 
+### Session save/restore
+
+`~/.local/bin/sway-session-save` and `sway-session-restore` are one-shot helpers; there is no resident session daemon. Startup restore is launched once from `60-autostart.conf`, while the enabled `sway-session-save.service` saves on user-manager shutdown and the powermenu saves before explicit logout/reboot/shutdown.
+
+Foot client/server mode requires special cwd handling because all Foot surfaces report the shared server PID to Sway. The saver therefore derives a terminal window's cwd from the Fish/Pure title instead of `/proc/<foot-server-pid>/cwd`, and restore passes the directory explicitly with `footclient -D`. Legacy plain ws1 terminal snapshots containing the erroneous `/` cwd are migrated to `$HOME`; project/other-workspace terminal directories remain unchanged. Foot/Footclient are treated as multi-instance applications.
+
+`session.json` is replaced atomically only after the new snapshot has been fsynced. A validated current snapshot is atomically copied to `session.json.prev` and to a bounded history of the last 8 known-good snapshots under `~/.config/sway/session/backups/`; invalid snapshots are never promoted into backup slots. Runtime session files remain outside chezmoi. Detailed operation and recovery commands are in `~/.config/sway/SESSION.md` (source: `dot_config/sway/SESSION.md`).
+
 ### Cursor Controls (`toggle-cursor-theme` & `adjust-cursor-size`)
+* **Current verified size:** `24px` on 2026-11-01. At the current 1.30 output scale the previous 32px raster was visually oversized; 24px is the next native Phinger raster and is now synchronized across Sway, GTK/GSettings, Xresources, and the session environment.
 * **Theme Polarity Toggle:** `Alt + Shift + c` switches between `phinger-cursors-gruvbox-material` (dark) and `phinger-cursors-gruvbox-material-light` (light) while preserving the current size.
 * **Size Adjustment (one ladder step):**
   * `Alt + Shift + =` (or `Alt + Shift + plus`): next larger size

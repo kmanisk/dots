@@ -20,7 +20,7 @@ mode="${1:?usage: scratch-toggle <term|notes|spotify|dc>}"
 # notes and dc keep the larger shared size. Requires respawning the
 # footclient: hiding and re-showing does not reload the font.
 SCRATCH_FONT_SIZE="${SCRATCH_FONT_SIZE:-17}"
-SCRATCH_TERM_FONT_SIZE="${SCRATCH_TERM_FONT_SIZE:-16.5}"
+SCRATCH_TERM_FONT_SIZE="${SCRATCH_TERM_FONT_SIZE:-16}"
 SCRATCH_FONT="Iosevka Nerd Font Mono:size=${SCRATCH_FONT_SIZE}:style=Regular"
 SCRATCH_TERM_FONT="Iosevka Nerd Font Mono:size=${SCRATCH_TERM_FONT_SIZE}:style=Regular"
 

@@ -4,9 +4,9 @@ set -euo pipefail
 
 MAC="CC:04:2E:90:66:02"
 
-# If already connected, verify xremap and exit cleanly
+# If already connected, exit cleanly. xremap watches device changes itself,
+# and the udev keyboard rule is a second attachment backstop.
 if bluetoothctl info "$MAC" 2>/dev/null | grep -q "Connected: yes"; then
-    systemctl --user restart xremap.service >/dev/null 2>&1 || true
     exit 0
 fi
 
@@ -15,10 +15,6 @@ bluetoothctl unblock "$MAC" >/dev/null 2>&1 || true
 
 if timeout 6 bluetoothctl connect "$MAC"; then
     echo "Katana S K2 connected successfully."
-    # Ensure xremap is attached
-    sleep 0.5
-    systemctl --user restart xremap.service
-    echo "xremap service restarted."
 else
     echo "Connection attempt timed out. Ensure keyboard is powered on and tap a key to wake it from sleep."
     exit 1
