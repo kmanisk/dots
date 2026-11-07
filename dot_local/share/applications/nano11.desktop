@@ -1,0 +1,20 @@
+[Desktop Entry]
+Type=Application
+Name=Windows (Nano11)
+Comment=Open the Nano11 Windows desktop
+Exec=nano11 workspace
+Icon=distributor-logo-windows
+Terminal=false
+Categories=System;Emulator;
+Keywords=windows;nano11;qemu;vfio;vm;kvm;looking-glass;
+StartupNotify=false
+
+Actions=Start;Stop;
+
+[Desktop Action Start]
+Name=Start / Show Windows
+Exec=nano11 launch
+
+[Desktop Action Stop]
+Name=Stop Windows
+Exec=nano11 stop

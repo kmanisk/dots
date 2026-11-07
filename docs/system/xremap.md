@@ -17,11 +17,11 @@ Use this document as the single source of truth for keyboard layering, eliminati
   * Exec Command: `/usr/bin/xremap --ignore "Pulsefire" --watch=config,device --allow-launch true %h/.config/xremap/config.yml`
   * Flag `--allow-launch true` is required to execute external shell binaries/scripts directly on key combinations.
   * Environment Inherited: `WAYLAND_DISPLAY`, `SWAYSOCK`, `DISPLAY`.
-  * Katana reconnect ownership: BlueZ native reconnect policy handles the bonded/trusted BLE HID device. The former `bt-keyboard-reconnect.service` Python daemon was removed on 2026-11-01 because it duplicated BlueZ retry/scanning and sometimes collided with an already-pending BlueZ connection. `xremap --watch=device` plus `/etc/udev/rules.d/99-xremap-keyboard.rules` handle input attachment without a resident keyboard helper. `bt-katana` remains a one-shot manual/login/resume fallback and no longer restarts xremap unnecessarily.
+  * Katana reconnect ownership: `bt-keyboard-reconnect.service` runs a native C `sd-bus`/`sd-event` helper for BLE reconnect after extended keyboard sleep, resume, adapter power-on, and session unlock. The managed C source is `~/.local/bin/bt-keyboard-reconnect.c`; `~/.local/bin/bt-keyboard-reconnect` compiles it only when the source hash changes, then execs the cached native binary. `xremap --watch=config,device` plus `/etc/udev/rules.d/99-xremap-keyboard.rules` handle input attachment; the reconnect helper verifies the Katana node through `/proc/<pid>/fd` + sysfs and uses systemd user D-Bus to restart xremap only if attachment was missed. Live migration testing measured about 3.5 MiB RSS / 0.4 MiB PSS for the dormant native process and verified both disconnect/reconnect and the xremap fallback. `bt-katana` remains a one-shot manual/login fallback.
 
 ---
 
-## 2. Global Modmap (Dual-Role CapsLock & RightCtrl)
+## 2. Global Modmap (Dual-Role CapsLock & RightAlt)
 
 ```yaml
 modmap:
@@ -31,12 +31,12 @@ modmap:
         held: CapsLock               # Acts as custom virtual modifier layer
         alone: Esc                    # Instant Escape on tap (<= 200ms)
         alone_timeout_millis: 200
-      RightCtrl: RightMeta           # Remaps physical Right Ctrl to Super/Meta
+      RightAlt: RightMeta            # Remaps physical Right Alt to Super/Meta
 ```
 
 * **Tap CapsLock:** Instant `Escape` (ergonomic Vim Normal Mode exit without hand travel).
 * **Hold CapsLock:** Virtual modifier activating the **CapsLock Layer**.
-* **RightCtrl:** Becomes `RightMeta` (`Super`).
+* **RightAlt:** Becomes `RightMeta` (`Super`). Physical **Right Ctrl remains Right Ctrl** in the current live/source xremap mapping and is available as the Looking Glass escape key.
 
 ---
 
@@ -98,7 +98,23 @@ modmap:
 | `Caps + BackSpace` | `Super + BackSpace` | Two-handed graceful window close |
 | `Caps + Shift + q` | `Super + Shift + q` | Force kill window |
 | `Caps + Shift + BackSpace`| `Super + Shift + BackSpace` | Two-handed force kill window |
-| **`Caps + w`** | `launch: ["/home/onyx/.local/bin/rofi-pkill"]` | **Process Killer Menu** (Aggregator & Terminator; replaced `Win + Shift + e`) |
+| **`Caps + w`** | `launch: ["/home/onyx/.local/bin/rofi-pkill"]` | **Minimal Process Killer Menu** (Fuzzel Wayland dmenu; Enter = SIGTERM, Shift+Delete = SIGKILL; replaced legacy Rofi) |
+| **`Caps + Tab`** | `win-focus-toggle` (global xremap launch) | Switch to Windows/Looking Glass on workspace 5; press again to return to the last Linux workspace via Sway's `workspace back_and_forth`. No VM startup or guest key injection. |
+
+#### Windows/Linux workspace toggle (`Caps + Tab`)
+
+The chord is deliberately in the **Universal Hardware Controls** keymap, not the application-filtered CapsLock layer, so xremap handles it whether the focused app is Linux or Looking Glass. It invokes `~/.local/bin/win-focus-toggle` (chezmoi source: `dot_local/bin/executable_win-focus-toggle`). From any Linux workspace, it verifies X-Lite QEMU is running and a Looking Glass Sway window exists, then switches to workspace 5 and focuses that window. The existing Looking Glass `input:captureOnFocus=yes` handles guest capture. From workspace 5 it uses Sway's native `workspace back_and_forth` to return to the previously active Linux workspace, releasing focus from the client. With the VM stopped/missing, it only notifies; it **does not boot the VM**. No persistent state file, new daemon, Sway binding or Right Ctrl remap.
+
+The Sway IPC round-trip was live-tested **workspace 2 → workspace 5 (client focused) → workspace 2** with the same Windows QEMU PID and zero VM lifecycle changes (2026-11-07). The mapping validates with `xremap --validate-config` and xremap remains active with `--watch=config,device`; the literal physical Caps+Tab keypress is still a separate user acceptance check. Back up the source mapping before changing it because global chords also apply in games.
+
+#### Process Killer Architecture (`rofi-pkill`)
+- **Engine**: Native Wayland layer-shell picker via `fuzzel --dmenu --index` styled with active theme borders and Papirus icons.
+- **Entry Layout**: Clean single-line presentation (`Application Name — Window Title`) prioritizing active windows, followed by background workloads. Clutter (CPU%, RAM%, process counts, section dividers) is removed.
+- **Process Aggregation**: Automatically folds child helpers, renderers, and runners into their root applications (`brave`, `steam`, `windows`/qemu, `codex`, `foot`).
+- **Termination Controls**:
+  - `Enter` (code `0`): Polite graceful termination (`SIGTERM`).
+  - `Shift+Delete` (code `10` via Fuzzel `custom-1`): Force termination (`SIGKILL`).
+- **System Shields**: Strictly preserves core infrastructure (`sway`, `pipewire`, `wireplumber`, `dusky`, `xremap`, `xscroll`, `bt-keyboard-reconnect`, polkit, package tools, coding agents, and MCP servers).
 
 ### Universal Mouse Wheel Emulation (`xscroll`)
 | Chord | Action | Behavior |

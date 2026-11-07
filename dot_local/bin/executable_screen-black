@@ -43,6 +43,7 @@ if [ -f "$STATE_FILE" ] || [ "$IS_ON" = "false" ]; then
 else
     # --- SCREEN IS CURRENTLY ON: TURN OFF FOR OVERNIGHT SLEEP ---
     touch "$STATE_FILE"
+    "$HOME/.local/bin/media-idle-action" cancel >/dev/null 2>&1 || true
 
     # Turn display panel off immediately
     swaymsg "output * dpms off" 2>/dev/null || true

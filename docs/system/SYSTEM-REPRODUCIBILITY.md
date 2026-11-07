@@ -85,13 +85,13 @@ The repository uses declarative package lists under `packages/` managed by `run_
 | Manifest | Purpose | Provider / Source | Feature Flag |
 |---|---|---|---|
 | `common.txt` | Baseline terminal utilities (`git`, `ripgrep`, `btop`, `yazi`, `neovim`, `uv`, `age`) | Official (`pacman`) | Always |
-| `linux-core.txt` | Core system stack (`base-devel`, `btrfs-progs`, `snapper`, `ufw`, `bluez`, `thunar`) | Official (`pacman`) | Linux |
+| `linux-core.txt` | Core system stack (`base-devel`, `btrfs-progs`, `snapper`, `ufw`, `bluez`, `thunar`) plus KeePassXC and Syncthing | Official (`pacman`) | Linux |
 | `gaming.txt` | Gaming tools (`steam`, `gamescope`, `gamemode`, `mangohud`, `goverlay`) | Official (`pacman`) | `features.gaming = true` |
 | `nvidia.txt` | NVIDIA utilities and 32-bit Vulkan/OpenCL drivers | Official (`pacman`) | `gpu_strategy = "hybrid-optimus-d3cold"` |
 | `asus.txt` | ASUS hardware management tools (`asusctl`, `supergfxctl`) | Official (`pacman`) | `features.asus_ctl = true` |
 | `sway.txt` | Sway Wayland desktop stack, ImageMagick for curated wallpaper normalization, plus the Omarchy-compatible Nerd Font set (`JetBrainsMono`, Cascadia, Meslo, Fira Code, Victor Mono, Bitstream Vera Mono, Iosevka) | Official (`pacman` / `cachyos`) | `features.sway = true` |
 | `audio.txt` | PipeWire, WirePlumber, and neural RNNoise DSP stack | Official (`pacman`) | `providers.audio = "pipewire-standard"` |
-| `development.txt` | Runtimes and build accelerators (`nodejs`, `python`, `mold`, `ccache`) | Official (`pacman`) | `features.development = true` |
+| `development.txt` | Runtimes/build tooling plus native on-demand virtualization tools (`nodejs`, `python`, `mold`, `ccache`, `qemu-system-x86`, `swtpm`, `freerdp`) | Official (`pacman`) | `features.development = true` |
 | `aur-explicit.txt` | Explicit foreign/AUR packages (`antigravity-cli`, `bibata-cursor`, `xremap`, `vkbasalt`, `lib32-vkbasalt`) | AUR (`paru`) | AUR helper present |
 
 * On change to any manifest, chezmoi automatically calculates hashes, takes a pre-reconciliation Snapper snapshot if packages need installing, and executes non-conflicting package installation.
@@ -114,10 +114,12 @@ Managed and reconciled via `run_onchange_linux-20-reconcile-services.sh.tmpl`:
 
 ### User Units (Systemd User)
 * `xremap.service`: High-performance hardware keyboard remapping daemon running under user session.
+* `bt-keyboard-reconnect.service`: Native C `sd-bus`/`sd-event` Katana S K2 reconnect daemon; the managed launcher compiles the source only when its hash changes, then execs the cached binary.
 * `cliphist.service`: Wayland + XWayland persistent clipboard history watcher and auto-pruner (`cliphist-prune`).
 * `dusky-audio-dsp.service`: Real-time PipeWire RNNoise microphone filter and DSP studio daemon.
 * `sway-session-save.service`: Sway window state persistence on session shutdown.
 * `nightlight-auto.timer`: Automated wlsunset circadian color temperature shifting.
+* `syncthing.service`: Installed for private KeePassXC replication but intentionally disabled from `default.target`; `keepassxc-sync` starts it only for short pre/post sync windows.
 
 ---
 
@@ -155,7 +157,7 @@ The bootstrap script will:
 5. Pre-seed `~/.config/chezmoi/chezmoi.toml` with `asus-tuf-f16` and age encryption parameters.
 6. Verify that `~/.config/chezmoi/key.txt` exists before triggering `chezmoi init --apply`. If missing, it halts with a clear error prompt rather than crashing on decrypt.
 7. Execute package reconciliation (`pacman` for official, `paru` for AUR).
-8. Enable required system and user services. `run_onchange_linux-20-reconcile-services.sh.tmpl` currently restores the enabled state for user units including `foot-server.service` and `desktop-commander.service` (and `bt-autoconnect.service` only when that unit exists), rather than depending on ad-hoc Sway autostart commands.
+8. Enable required system and user services. `run_onchange_linux-20-reconcile-services.sh.tmpl` restores the enabled state for user units including `bt-keyboard-reconnect.service`, `foot-server.service`, and `desktop-commander.service`, rather than depending on ad-hoc Sway autostart commands.
 
 ### Step 4: Verification
 Verify that the deployed configuration matches the repository perfectly:

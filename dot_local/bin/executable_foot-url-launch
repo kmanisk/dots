@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# foot-url-launch - Smart URL and file opener for Foot terminal
+set -eo pipefail
+
+url="${1:-}"
+if [ -z "$url" ]; then
+    exit 0
+fi
+
+# 1. Handle Web URLs and mailto directly through xdg-open (Brave Origin)
+if [[ "$url" =~ ^(https?|mailto|ftp):// ]]; then
+    exec xdg-open "$url"
+fi
+
+# 2. Extract path and optional line number from file:// URLs or raw paths
+file_url="${url#file://}"
+clean_path="${file_url%%#*}"
+line_num=""
+
+re_line='#L([0-9]+)'
+re_colon=':([0-9]+)$'
+
+if [[ "$file_url" =~ $re_line ]]; then
+    line_num="${BASH_REMATCH[1]}"
+elif [[ "$file_url" =~ $re_colon ]]; then
+    line_num="${BASH_REMATCH[1]}"
+    clean_path="${clean_path%:$line_num}"
+fi
+
+# URL decode if needed (e.g. %20 -> space)
+if [[ "$clean_path" == *%* ]]; then
+    decoded_path=$(python3 -c "import urllib.parse, sys; print(urllib.parse.unquote(sys.argv[1]))" "$clean_path" 2>/dev/null || echo "$clean_path")
+else
+    decoded_path="$clean_path"
+fi
+
+# Expand ~
+if [[ "$decoded_path" == ~* ]]; then
+    decoded_path="${HOME}${decoded_path:1}"
+fi
+
+# 3. Directories -> Thunar
+if [ -d "$decoded_path" ]; then
+    exec thunar "$decoded_path"
+fi
+
+# 4. Existing files -> inspect mime type
+if [ -f "$decoded_path" ]; then
+    mime=$(xdg-mime query filetype "$decoded_path" 2>/dev/null || echo "text/plain")
+
+    # Graphical media formats
+    case "$mime" in
+        image/*|video/*|audio/*|application/pdf)
+            exec xdg-open "$decoded_path"
+            ;;
+    esac
+
+    # Text, code, config, script, markdown, JSON -> open in Foot terminal with Neovim
+    sock="${XDG_RUNTIME_DIR:-/run/user/$UID}/foot.sock"
+    if [ ! -S "$sock" ] && [ -n "${WAYLAND_DISPLAY:-}" ]; then
+        alt_sock="${XDG_RUNTIME_DIR:-/run/user/$UID}/foot-${WAYLAND_DISPLAY}.sock"
+        [ -S "$alt_sock" ] && sock="$alt_sock"
+    fi
+
+    if [ -n "$line_num" ]; then
+        editor_args=("+$line_num" "$decoded_path")
+    else
+        editor_args=("$decoded_path")
+    fi
+
+    if [ -S "$sock" ]; then
+        exec footclient -s "$sock" -E nvim "${editor_args[@]}"
+    else
+        exec foot nvim "${editor_args[@]}"
+    fi
+fi
+
+# 5. Fallback to standard xdg-open
+exec xdg-open "$url"

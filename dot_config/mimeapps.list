@@ -108,9 +108,10 @@ image/x-krita=ai.storyteller.photocraft.desktop
 image/openraster=ai.storyteller.photocraft.desktop
 image/x-paintnet=ai.storyteller.photocraft.desktop
 application/x-filmcraft=ai.storyteller.filmcraft.desktop
+application/vnd.android.package-archive=waydroid-apk-install.desktop
 
 [Added Associations]
-video/mp4=mpv.desktop;vlc.desktop;fr.handbrake.ghb.desktop;
+video/mp4=ai.storyteller.filmcraft.desktop;mpv.desktop;vlc.desktop;fr.handbrake.ghb.desktop;
 video/x-matroska=mpv.desktop;vlc.desktop;
 text/plain=nvim.desktop;org.gnome.TextEditor.desktop;
 application/json=nvim.desktop;org.gnome.TextEditor.desktop;

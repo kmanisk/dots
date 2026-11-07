@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# One clean Windows menu. Keep VM-specific hardware and safety policy in the
+# existing launchers; only the currently active VM is exposed here.
+set -euo pipefail
+
+export PATH="$HOME/.local/bin:$PATH"
+THEME="$HOME/.config/rofi/system-floating.rasi"
+SELF="$HOME/.local/bin/rofi-windows"
+LOG="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/windows-menu.log"
+
+ten_running() {
+    win10lab status 2>/dev/null | grep -q 'win10lab: running pid='
+}
+ten_paused() {
+    win10lab status 2>/dev/null | grep -q 'qemu_state=paused'
+}
+nano_running() {
+    nano11 status 2>/dev/null | grep -q 'nano11: native QEMU running'
+}
+backend() {
+    local ten=no nano=no
+    ten_running && ten=yes
+    nano_running && nano=yes
+    if [ "$ten" = yes ] && [ "$nano" = yes ]; then
+        echo conflict
+    elif [ "$nano" = yes ]; then
+        echo nano
+    else
+        # Default to X-Lite when both are stopped.
+        echo ten
+    fi
+}
+fps_enabled() {
+    [ "$(backend)" = ten ] &&
+        win10lab client-status 2>/dev/null | grep -q 'fps=yes'
+}
+row() {
+    printf '%s\0icon\x1f%s\n' "$1" "$2"
+}
+render_menu() {
+    [ -z "${ROFI_RETV+x}" ] || printf '\0prompt\x1fWindows\n'
+    if [ "$(backend)" = conflict ]; then
+        row "Windows unavailable" "dialog-warning"
+        return
+    fi
+    row "Open Windows" "windows"
+    if fps_enabled; then
+        row "Hide Windows FPS / UPS" "view-statistics"
+    else
+        row "Show Windows FPS / UPS" "view-statistics"
+    fi
+    row "Stop Windows" "system-shutdown"
+    row "Restart Windows" "view-refresh"
+}
+detach() {
+    nohup bash -lc "$1" >>"$LOG" 2>&1 </dev/null &
+}
+message() {
+    notify-send -a Windows "$1" "$2" 2>/dev/null || true
+}
+confirm_resume() {
+    # Never silently unpause a guest that was stopped for abnormal CPU load.
+    local answer selected="Resume Windows"
+    answer="$(printf '%s\n' 'Cancel' "$selected" |
+        fuzzel --dmenu --prompt 'Windows is paused > ' --lines 2 --minimal-lines || true)"
+    if [ "$answer" = "$selected" ]; then
+        detach 'if win10lab status | grep -q "qemu_state=paused"; then
+            win10lab monitor cont && win10lab workspace
+        fi'
+    fi
+}
+dispatch() {
+    local action="${1:-}" target
+    target="$(backend)"
+    if [ "$target" = conflict ]; then
+        message "Windows unavailable" "Both VM processes appear active. Inspect their ownership before proceeding."
+        return 1
+    fi
+    case "$action" in
+        "Open Windows")
+            if [ "$target" = nano ]; then
+                detach 'exec nano11 launch'
+            elif ten_paused; then
+                confirm_resume
+            else
+                detach 'exec win10lab workspace'
+            fi
+            ;;
+        "Show Windows FPS / UPS"|"Hide Windows FPS / UPS")
+            if [ "$target" = nano ]; then
+                message "Windows FPS / UPS" "In Looking Glass, use Right Ctrl + D to toggle FPS / UPS."
+            elif ten_paused; then
+                message "Windows paused" "Resume Windows before enabling the display overlay."
+            elif [ "$action" = "Show Windows FPS / UPS" ]; then
+                detach 'exec win10lab fps-on'
+            else
+                detach 'exec win10lab fps-off'
+            fi
+            ;;
+        "Stop Windows")
+            if [ "$target" = nano ]; then
+                detach 'nano11 stop && notify-send -a Windows "Windows stopped" "Guest resources released."'
+            else
+                detach 'win10lab stop && notify-send -a Windows "Windows stopped" "Guest resources released."'
+            fi
+            ;;
+        "Restart Windows")
+            if [ "$target" = nano ]; then
+                detach 'nano11 stop && nano11 launch'
+            else
+                # Graceful stop must succeed; never substitute a guest hard reset.
+                detach 'win10lab stop && win10lab workspace'
+            fi
+            ;;
+        "Windows unavailable")
+            message "Windows unavailable" "Inspect VM status and Intel VF ownership in the terminal."
+            ;;
+    esac
+}
+
+if [ -z "${ROFI_RETV+x}" ]; then
+    if command -v fuzzel >/dev/null 2>&1 && [ -n "${WAYLAND_DISPLAY:-}" ]; then
+        chosen="$(render_menu | fuzzel --dmenu --prompt 'Windows > ' --lines 4 \
+            --minimal-lines --icon-theme=Gruvbox-Dark \
+            --override=main.image-size-ratio=0.58 \
+            --no-exit-on-keyboard-focus-loss || true)"
+        [ -z "$chosen" ] || dispatch "$chosen"
+        exit 0
+    fi
+    exec rofi -show windows -modi "windows:$SELF" -theme "$THEME" -show-icons \
+        -theme-str 'configuration { show-icons: true; } element { children: [ element-icon, element-text ]; } element-icon { size: 26px; margin: 0px 12px 0px 0px; background-color: transparent; }'
+fi
+if [ "${ROFI_RETV:-0}" = 0 ]; then
+    render_menu
+    exit 0
+fi
+[ "$#" -eq 0 ] || dispatch "$1"

@@ -13,7 +13,7 @@ fi
 echo "Connecting to Katana S K2 ($MAC)..."
 bluetoothctl unblock "$MAC" >/dev/null 2>&1 || true
 
-if timeout 6 bluetoothctl connect "$MAC"; then
+if bluetoothctl connect "$MAC"; then
     echo "Katana S K2 connected successfully."
 else
     echo "Connection attempt timed out. Ensure keyboard is powered on and tap a key to wake it from sleep."

@@ -26,13 +26,14 @@ This skill is procedural guidance, not a current machine-state authority. Before
    - Must set `PROTON_ENABLE_NVAPI=0` to prevent memory alignment panics on Blackwell mobile silicon.
 4. **NVIDIA Offload:**
    - `__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optimus=NVIDIA_only`
-5. **Lossless Scaling (LSFG-VK / 2x Frame Gen) — [WORKING]:**
-   - Profile `Elden Ring` configured in `~/.config/lsfg-vk/conf.toml` with `multiplier = 2`, `pacing_mode = "vsync"`.
-   - Generates smooth 120 FPS target from 60 FPS base engine.
-   - Run via `eldenring-lsfg` inside `gamescope --mangoapp -W 1920 -H 1200 -w 1920 -h 1200 -f -r 165`.
+5. **Lossless Scaling (LSFG-VK / 4x Frame Gen) — [WORKING]:**
+   - Profile `Elden Ring` configured in `~/.config/lsfg-vk/conf.toml` with `multiplier = 4`, `flow_scale = 0.8`, `performance_mode = true`, `preserve_swapchain_image_count = false`, and `pacing_mode = "vsync"`.
+   - Keep MangoHud disabled. A visible-workspace A/B test on 2026-11-03 verified BORDERLESS + LSFG 4x renders correctly once the incompatible FasterRevival DLL is not injected.
+   - Run through the managed `eldenring-lsfg` -> `eldenring-launch-inner` path directly on Sway; do not add Gamescope to the current verified baseline.
 6. **Modding Architecture:**
-   - EldenModLoader (`dinput8.dll`) hooks via `WINEDLLOVERRIDES="dinput8=b"` to load `Game/mods/CameraFix.dll`, `erfps.dll`, etc.
-   - ModEngine 2 (`ModEngine2/ModEngine-2.1.0.0-win64`) dynamically injects modded game files.
+   - EldenModLoader (`dinput8.dll`) remains the bootstrap hook, but its managed `[loadorder]` is intentionally empty.
+   - ModEngine 2 loads RandomizerCrashFix, DelayedModLoader and MapForGoblins; DelayedModLoader loads CameraFix and PauseTheGame after startup.
+   - FasterRevival v1.0.0 is parked: controlled A/B testing reproduced the persistent black startup surface only when it was added to the otherwise working stack.
    - .NET 8.0 Desktop Runtime installed in prefix `2703476723` enables `EldenRingRandomizer.exe` and `FogMod.exe`.
 
 ## 7. Randomizer Integration Workflows

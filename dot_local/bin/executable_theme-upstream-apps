@@ -1,0 +1,263 @@
+#!/usr/bin/env python3
+"""Hydrate safe app-specific color profiles from an Omarchy GitHub repository.
+
+The helper is deliberately one-shot and daemonless. It fetches only the Git tree
+plus the small supported text files, parses color/profile data, and never imports
+fonts, geometry, keybinds, shell commands, or compositor configuration.
+"""
+from __future__ import annotations
+
+import fcntl
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from urllib.parse import urlparse
+
+sys.path.insert(0, os.path.expanduser("~/.local/lib"))
+from theme_engine.importer import build_authored_apps
+
+PROFILE_VERSION = 3
+THEME_CACHE = Path(os.path.expanduser("~/.cache/theme/themes"))
+PROFILE_ROOT = Path(os.path.expanduser("~/.local/share/theme/upstream-apps"))
+ACTIVE_THEME = Path(os.path.expanduser("~/.local/state/theme/name"))
+THEME_SET = Path(os.path.expanduser("~/.local/bin/theme-set"))
+
+
+def die(message: str, code: int = 1) -> None:
+    print(f"theme-upstream-apps: {message}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def normalized_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+
+
+def load_theme(requested: str) -> tuple[str, dict]:
+    exact = THEME_CACHE / f"{requested}.json"
+    if exact.is_file():
+        return requested, json.loads(exact.read_text(encoding="utf-8"))
+    needle = normalized_name(requested)
+    matches = []
+    for path in sorted(THEME_CACHE.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        aliases = {
+            normalized_name(path.stem),
+            normalized_name(str(data.get("name") or "")),
+            normalized_name(str(data.get("display_name") or "")),
+        }
+        if needle in aliases:
+            matches.append((path.stem, data))
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        die(f"ambiguous theme name: {requested}")
+    die(f"theme not found: {requested}")
+
+
+def repository_identity(theme: dict) -> tuple[str, str]:
+    source = theme.get("source") or {}
+    repository = str(source.get("repository") or "").rstrip("/")
+    parsed = urlparse(repository)
+    if parsed.scheme != "https" or parsed.hostname not in {"github.com", "www.github.com"}:
+        die("upstream app hydration supports HTTPS GitHub repositories only")
+    ref = str(source.get("commit") or source.get("branch") or "main")
+    return repository, ref
+
+
+def classify_paths(paths: list[str]) -> dict[str, list[str]]:
+    candidates = {key: [] for key in ("alacritty", "kitty", "ghostty", "btop", "cava", "mako", "browser", "icons")}
+    for path in paths:
+        rel = path.replace("\\", "/").lstrip("./")
+        low = rel.lower()
+        base = Path(low).name
+        if base.startswith("alacritty") and base.endswith((".toml", ".yml", ".yaml")):
+            candidates["alacritty"].append(rel)
+        elif base == "kitty.conf":
+            candidates["kitty"].append(rel)
+        elif base in {"ghostty.conf", "ghostty-theme"}:
+            candidates["ghostty"].append(rel)
+        elif base in {"btop.theme", "btop.conf"} or ("btop" in low and base.endswith((".theme", ".conf"))):
+            candidates["btop"].append(rel)
+        elif base in {"cava_theme", "cava.conf"} or ("cava" in low and base.endswith((".theme", ".conf"))):
+            candidates["cava"].append(rel)
+        elif base in {"mako.ini", "mako.conf"}:
+            candidates["mako"].append(rel)
+        elif base == "chromium.theme":
+            candidates["browser"].append(rel)
+        elif base == "icons.theme":
+            candidates["icons"].append(rel)
+    for key in candidates:
+        candidates[key].sort(key=lambda value: (value.count("/"), len(value), value.casefold()))
+    return candidates
+
+
+def profile_path(theme_name: str) -> Path:
+    return PROFILE_ROOT / f"{theme_name}.json"
+
+
+def embedded_profile_current(theme: dict) -> bool:
+    assets = theme.get("assets") or {}
+    return assets.get("upstream_apps_version") == PROFILE_VERSION
+
+
+def profile_current(theme_name: str, theme: dict) -> bool:
+    repository, ref = repository_identity(theme)
+    try:
+        data = json.loads(profile_path(theme_name).read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    return (
+        data.get("version") == PROFILE_VERSION
+        and str(data.get("repository") or "").rstrip("/") == repository
+        and str(data.get("ref") or "") == ref
+    )
+
+
+def hydrate(theme_name: str, theme: dict, force: bool = False) -> bool:
+    repository, ref = repository_identity(theme)
+    PROFILE_ROOT.mkdir(parents=True, exist_ok=True)
+    lock_path = PROFILE_ROOT / f".{theme_name}.lock"
+    with lock_path.open("a+", encoding="utf-8") as lock:
+        os.chmod(lock_path, 0o600)
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False
+
+        if not force and (embedded_profile_current(theme) or profile_current(theme_name, theme)):
+            return False
+
+        with tempfile.TemporaryDirectory(prefix=f"theme-apps-{theme_name}-") as tmp:
+            commands = [
+                ["git", "-C", tmp, "init", "-q"],
+                ["git", "-C", tmp, "remote", "add", "origin", repository],
+                ["git", "-C", tmp, "fetch", "--quiet", "--depth", "1", "--filter=blob:none", "origin", ref],
+            ]
+            for command in commands:
+                result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30, check=False)
+                if result.returncode != 0:
+                    detail = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
+                    die(f"repository fetch failed: {detail}")
+
+            listing = subprocess.run(
+                ["git", "-C", tmp, "ls-tree", "-r", "--name-only", "FETCH_HEAD"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            if listing.returncode != 0:
+                die(listing.stderr.strip() or "repository tree listing failed")
+            paths = [line.strip() for line in listing.stdout.splitlines() if line.strip()]
+            candidates = classify_paths(paths)
+
+            extracted = Path(tmp) / "files"
+            extracted.mkdir(parents=True, exist_ok=True)
+            selected_files = {}
+            for app, app_paths in candidates.items():
+                if not app_paths:
+                    continue
+                relative = app_paths[0]
+                output = subprocess.run(
+                    ["git", "-C", tmp, "show", f"FETCH_HEAD:{relative}"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=15,
+                    check=False,
+                )
+                if output.returncode != 0 or len(output.stdout) > 2 * 1024 * 1024:
+                    continue
+                destination = extracted / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(output.stdout)
+                selected_files[app] = relative
+
+            parsed_candidates = {key: ([value] if value else []) for key, value in selected_files.items()}
+            apps = build_authored_apps(str(extracted), parsed_candidates)
+
+        payload = {
+            "version": PROFILE_VERSION,
+            "theme": theme_name,
+            "repository": repository,
+            "ref": ref,
+            "files": selected_files,
+            "apps": apps,
+        }
+        destination = profile_path(theme_name)
+        rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+        old = destination.read_text(encoding="utf-8") if destination.is_file() else None
+        if old == rendered:
+            return False
+        fd, tmp_name = tempfile.mkstemp(prefix=f".{theme_name}-", suffix=".json", dir=PROFILE_ROOT)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(rendered)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp_name, destination)
+        finally:
+            try:
+                os.unlink(tmp_name)
+            except FileNotFoundError:
+                pass
+        return True
+
+
+def active_theme() -> str:
+    try:
+        return ACTIVE_THEME.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    if not args or args[0] in {"-h", "--help", "help"}:
+        print("Usage: theme-upstream-apps hydrate|refresh|status <theme>")
+        return 0 if args else 1
+    if len(args) < 2 or args[0] not in {"hydrate", "refresh", "status"}:
+        die("Usage: theme-upstream-apps hydrate|refresh|status <theme>")
+    command, requested = args[0], args[1]
+    theme_name, theme = load_theme(requested)
+    source = theme.get("source") or {}
+    if str(source.get("provider") or "").lower() != "omarchy" or not source.get("repository"):
+        return 0
+
+    if command == "status":
+        if embedded_profile_current(theme):
+            print("embedded")
+            print("apps=" + ",".join(sorted((theme.get("apps") or {}).keys())))
+            return 0
+        print("current" if profile_current(theme_name, theme) else "stale")
+        path = profile_path(theme_name)
+        if path.is_file():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            print("apps=" + ",".join(sorted((data.get("apps") or {}).keys())))
+        return 0
+
+    changed = hydrate(theme_name, theme, force=(command == "refresh"))
+    if changed and active_theme() == theme_name and THEME_SET.is_file() and os.access(THEME_SET, os.X_OK):
+        env = dict(os.environ)
+        env["THEME_UPSTREAM_REAPPLY"] = "1"
+        subprocess.run(
+            [str(THEME_SET), theme_name, "--no-nvim"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=env,
+            timeout=8,
+            check=False,
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

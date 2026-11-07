@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
-"""rofi-pkill: App & Process Killer for Sway/i3.
+"""rofi-pkill: Minimal App & Process Killer for Sway/Wayland via Fuzzel.
 
 Features:
-- Clear separation between Foreground Applications (active windows) and Background Services.
-- Strictly shields all critical system services (Dusky mic DSP, WirePlumber, PipeWire,
-  xremap, cliphist, Sway components, polkit, dbus, agents/MCP servers, etc.).
-- Groups child/helper processes into their parent application.
-- Supports graceful SIGTERM (Enter) and force SIGKILL (Alt+d / Shift+Delete).
+- Native Wayland Fuzzel interface with theme-synchronized styling and Papirus icons.
+- Clean, minimal single-line presentation: application name and optional window title.
+- Zero clutter: removes CPU%, RAM%, process counts, and static section dividers.
+- Active windowed applications prioritized at the top, followed by user background workloads.
+- Subprocesses and helpers folded into parent applications (Brave, Steam, QEMU/Windows, etc.).
+- Strictly shields critical system services (Dusky mic DSP, WirePlumber, PipeWire,
+  xremap, xscroll, sway components, bluetooth reconnect, polkit, agents, and MCP servers).
+- Supports graceful SIGTERM on Enter (code 0) and force SIGKILL on Shift+Delete (code 10).
 """
 import glob
-import html
 import json
 import os
 import re
 import signal
 import subprocess
 import sys
-
-THEME = os.path.expanduser("~/.config/rofi/clipboard-floating.rasi")
 
 # Strict regex matching protected process comm names (case-insensitive)
 PROTECTED_COMM = re.compile(
@@ -26,20 +26,25 @@ PROTECTED_COMM = re.compile(
     r"systemd.*|sd-pam|\(sd-pam\)|dbus.*|seatd|udevd?|"
     # Compositor, window manager & bar
     r"sway(bg|idle|lock|bar|msg|nag|nc.*)?|waybar|mako|dunst|foot|Xwayland|"
-    # Key remapping
-    r"xremap.*|"
+    # Key remapping & input daemons
+    r"xremap.*|xscroll.*|"
     # Audio stack & headless mic suppression
     r"pipewire.*|wireplumber|dusky.*|rnnoise.*|"
+    # Bluetooth daemons & reconnect helpers
+    r"bluetooth.*|wpa_supplicant|iwd|NetworkManager|bt-keyboard-rec.*|bt-auto.*|"
     # Clipboard & screen color
     r"wl-paste|cliphist.*|clipnotify|wl-gammarelay.*|wl-copy|"
     # Security, auth, portals & virtual filesystem
     r"polkit.*|gnome-keyring.*|at-spi.*|xdg-.*|dconf.*|gvfs.*|tumbler.*|"
     # Power & hardware switching
     r"power-profiles.*|supergfx.*|ananicy.*|gamemode.*|rtkit.*|"
-    # Networking & Bluetooth
-    r"bluetooth.*|wpa_supplicant|iwd|NetworkManager|"
+    # Package management & system integrity
+    r"pacman|makepkg|paru|yay|snapper.*|btrfs.*|"
     # Interactive shells & tool runners
-    r"fish|bash|zsh|sh|dash|ps|grep|rofi|awk|sed|sleep|cat|"
+    r"fish|bash|zsh|sh|dash|ps|grep|rofi|fuzzel|awk|sed|sleep|cat|chezmoi|"
+    r"timeout|flock|ionice|nice|xargs|chpst|"
+    # Containers & namespace supervisors
+    r"conmon|catatonit|tini|"
     # AI Coding Agents, IDE tooling & MCP servers
     r"agy|opencode|gemini|antigravity|"
     r"node-MainThread|node-mainthread"
@@ -53,6 +58,7 @@ PROTECTED_ARGS = [
         r"\bdusky",
         r"\bcliphist",
         r"\bxremap\b",
+        r"\bxscroll\b",
         r"\bpipewire\b",
         r"\bwireplumber\b",
         r"\bmcp\b",
@@ -68,6 +74,7 @@ PROTECTED_ARGS = [
         r"swaybar-status",
         r"game-workspace-daemon",
         r"bt-auto-trust",
+        r"bt-keyboard-reconnect",
         r"wl-gammarelay",
         r"gnome-keyring",
         r"color-scheme-mcp",
@@ -83,10 +90,12 @@ PROTECTED_UNITS = [
     "dusky-audio-dsp",
     "cliphist",
     "xremap",
+    "xscroll",
     "pipewire",
     "wireplumber",
     "wl-gammarelay",
     "bt-auto-trust",
+    "bt-keyboard-reconnect",
     "dconf",
     "gvfs-daemon",
     "gnome-keyring",
@@ -98,6 +107,7 @@ ALIASES = [
     (re.compile(r"^steamwebhelper|^steam$|pressure-vessel|bwrap|steam-runtime|reaper|srt-.*|pv-.*", re.I), "steam"),
     (re.compile(r"^brave.*|^chrome.*zygote|^chrome_crashpad", re.I), "brave"),
     (re.compile(r"^firefox.*|Isolated Web Co", re.I), "firefox"),
+    (re.compile(r"^foot(client)?$", re.I), "footclient"),
     (re.compile(r"^cs2(\.sh)?$", re.I), "cs2"),
     (re.compile(r"^kitten$", re.I), "kitty"),
     (re.compile(r"^vesktop$", re.I), "vesktop"),
@@ -107,7 +117,105 @@ ALIASES = [
     (re.compile(r"gamescope.*|gamescopereaper", re.I), "gamescope"),
     (re.compile(r"MangoHud|mangohud", re.I), "mangohud"),
     (re.compile(r"wineserver|wine.*preloader|.*\.exe$", re.I), "steam"),
+    (re.compile(r"^codex.*", re.I), "codex"),
+    (re.compile(r"qemu.*|pasta.*|passt.*|virgl_render.*|swtpm|smbd.*|wsddn|websocketd|nginx", re.I), "windows"),
 ]
+
+# Well-known display labels and icon fallback chains
+KNOWN_APPS = {
+    "brave": ("Brave", "brave-origin,brave-browser,brave"),
+    "brave-origin": ("Brave", "brave-origin,brave-browser,brave"),
+    "foot": ("Foot", "foot,utilities-terminal"),
+    "footclient": ("Foot", "foot,utilities-terminal"),
+    "scratch-term": ("Scratch Terminal", "foot,utilities-terminal"),
+    "scratch-files": ("Thunar", "org.xfce.thunar,system-file-manager"),
+    "thunar": ("Thunar", "org.xfce.thunar,system-file-manager"),
+    "freerdp": ("FreeRDP", "org.remmina.Remmina,network-server"),
+    "com.freerdp.client.sdl3": ("FreeRDP", "org.remmina.Remmina,network-server"),
+    "windows": ("Windows VM", "qemu,computer,virtualbox"),
+    "qemu-system-x86_64": ("Windows VM", "qemu,computer,virtualbox"),
+    "codex": ("Codex", "code,com.visualstudio.code,text-editor"),
+    "btop": ("btop", "utilities-system-monitor,system-run"),
+    "rill": ("Rill", "download,application-x-executable"),
+    "npm": ("npm", "application-x-executable,system-run"),
+    "steam": ("Steam", "steam"),
+    "vesktop": ("Vesktop", "vesktop,discord"),
+    "kitty": ("kitty", "kitty,utilities-terminal"),
+    "alacritty": ("Alacritty", "alacritty,utilities-terminal"),
+    "zed": ("Zed", "zed,text-editor"),
+    "craft-anything": ("Craft Anything", "ai.storyteller.craft-anything"),
+    "ai.storyteller.craft-anything": ("Craft Anything", "ai.storyteller.craft-anything"),
+}
+
+
+def build_desktop_index():
+    """Index installed .desktop files for application display names and icons."""
+    idx = {}
+    patterns = [
+        "/usr/share/applications/*.desktop",
+        os.path.expanduser("~/.local/share/applications/*.desktop"),
+    ]
+    for pattern in patterns:
+        for path in glob.glob(pattern):
+            try:
+                with open(path, errors="ignore") as f:
+                    name, icon = "", ""
+                    for line in f:
+                        if line.startswith("Name=") and not name:
+                            name = line[5:].strip()
+                        elif line.startswith("Icon=") and not icon:
+                            icon = line[5:].strip()
+                        elif line.startswith("[") and line.strip() != "[Desktop Entry]":
+                            break
+                    base = os.path.splitext(os.path.basename(path))[0].lower()
+                    if name:
+                        idx[base] = (name, icon)
+            except Exception:
+                pass
+    return idx
+
+
+def resolve_meta(key, desktop_idx):
+    """Resolve (display_name, icon_chain) for a given process or app key."""
+    k = key.lower()
+    if k in KNOWN_APPS:
+        return KNOWN_APPS[k]
+    if k in desktop_idx:
+        name, icon = desktop_idx[k]
+        return (name, f"{icon},{k},application-x-executable")
+    simple = k.split(".")[-1]
+    if simple in KNOWN_APPS:
+        return KNOWN_APPS[simple]
+    if simple in desktop_idx:
+        name, icon = desktop_idx[simple]
+        return (name, f"{icon},{simple},application-x-executable")
+    return (key, f"{k},application-x-executable,system-run")
+
+
+def clean_title(title, app_label, key):
+    """Return a clean window title, stripped of browser brands and redundant prefixes."""
+    t = (title or "").strip()
+    t = re.sub(
+        r"([\s\-|–—]+(YouTube|Brave Origin|Brave|Firefox|Google Chrome|Chromium))+$",
+        "",
+        t,
+        flags=re.I,
+    )
+    t = t.strip()
+    if not t or t.lower() in (
+        app_label.lower(),
+        key.lower(),
+        "scratch-term",
+        "scratch-files",
+        "footclient",
+        "terminal",
+    ):
+        return ""
+    if t.lower().startswith(app_label.lower() + ":"):
+        t = t[len(app_label) + 1:].strip()
+    elif t.lower().startswith(app_label.lower() + " -"):
+        t = t[len(app_label) + 2:].strip()
+    return t[:64]
 
 
 def ensure_env():
@@ -170,7 +278,7 @@ def ps_table():
 
 
 def is_protected(pid, comm, args):
-    if pid == os.getpid() or comm in ("rofi-pkill", "rofi") or "rofi-pkill" in args:
+    if pid == os.getpid() or comm in ("rofi-pkill", "rofi", "fuzzel") or "rofi-pkill" in args:
         return True
     if PROTECTED_COMM.match(comm):
         return True
@@ -206,8 +314,8 @@ def collect():
                 g = fg_groups.setdefault(name, {"pids": {}, "wins": 0, "titles": []})
                 g["wins"] += 1
                 t = str(props.get("title") or node.get("name") or "")
-                if t and len(g["titles"]) < 2:
-                    g["titles"].append(t[:48])
+                if t and t not in g["titles"] and len(g["titles"]) < 2:
+                    g["titles"].append(t[:140])
                 if pid and pid in pst:
                     g["pids"][pid] = pst[pid][:2]
                     fg_pids.add(pid)
@@ -216,7 +324,7 @@ def collect():
 
     walk(tree)
 
-    # Fold related child processes into foreground apps
+    # Fold related child/helper processes into foreground apps
     for pid, (cpu, mem, comm, args) in pst.items():
         if pid in fg_pids:
             continue
@@ -228,13 +336,12 @@ def collect():
                     fg_pids.add(pid)
                     break
 
-    # Non-windowed user processes (Background Services)
+    # Non-windowed user processes (Background Services & Workloads)
     for pid, (cpu, mem, comm, args) in pst.items():
         if pid in fg_pids:
             continue
         if is_protected(pid, comm, args):
             continue
-        # Fold into known background apps (like steam without open windows)
         blob = f"{comm} {args}".lower()
         matched_target = None
         for rx, target in ALIASES:
@@ -242,6 +349,10 @@ def collect():
                 matched_target = target
                 break
         name = matched_target if matched_target else comm.lower()
+        if matched_target and matched_target in fg_groups:
+            fg_groups[matched_target]["pids"][pid] = (cpu, mem)
+            fg_pids.add(pid)
+            continue
         g = bg_groups.setdefault(name, {"pids": {}, "wins": 0, "titles": []})
         g["pids"][pid] = (cpu, mem)
         if args and not g["titles"]:
@@ -250,46 +361,32 @@ def collect():
     return fg_groups, bg_groups
 
 
-def build_rows(fg, bg):
-    # Returns list of (is_header, group_name, group_data, markup)
-    entries = []
+def build_rows(fg, bg, desktop_idx):
+    """Format clean entries for Fuzzel dmenu: (display_label, icon_string, group_name, group_data)."""
+    items = []
 
-    # 1. FOREGROUND APPLICATIONS
-    if fg:
-        entries.append((True, "", None, '<span alpha="45%" weight="bold">─── FOREGROUND APPLICATIONS ──────────────────────────</span>'))
-        fg_list = []
-        for name, g in fg.items():
-            if not g["pids"]:
-                continue
-            cpu = sum(c for c, _ in g["pids"].values())
-            mem = sum(m for _, m in g["pids"].values())
-            fg_list.append((mem, cpu, name, g))
-        for mem, cpu, name, g in sorted(fg_list, reverse=True):
-            n = len(g["pids"])
-            det = f"{n} procs" + (f", {g['wins']} wins" if g["wins"] else "")
-            titles = (" — " + " / ".join(g["titles"])) if g["titles"] else ""
-            rest = html.escape(f"({det}) │ CPU {cpu:4.1f}% │ RAM {mem:4.1f}%{titles}")
-            markup = f"<b>[APP]  {html.escape(name)}</b>\t{rest}"
-            entries.append((False, name, g, markup))
+    # 1. Foreground windowed apps (sorted by memory usage)
+    for name, g in sorted(fg.items(), key=lambda kv: sum(m for _, m in kv[1]["pids"].values()), reverse=True):
+        app_label, icons = resolve_meta(name, desktop_idx)
+        title = clean_title(g["titles"][0] if g["titles"] else "", app_label, name)
+        if g["wins"] > 1 and title:
+            disp = f"{app_label} ({g['wins']}) — {title}"
+        elif g["wins"] > 1:
+            disp = f"{app_label} ({g['wins']} windows)"
+        elif title:
+            disp = f"{app_label} — {title}"
+        else:
+            disp = app_label
+        items.append((disp, icons, name, g))
 
-    # 2. BACKGROUND SERVICES
-    if bg:
-        entries.append((True, "", None, '<span alpha="45%" weight="bold">─── BACKGROUND SERVICES ──────────────────────────────</span>'))
-        bg_list = []
-        for name, g in bg.items():
-            if not g["pids"]:
-                continue
-            cpu = sum(c for c, _ in g["pids"].values())
-            mem = sum(m for _, m in g["pids"].values())
-            bg_list.append((mem, cpu, name, g))
-        for mem, cpu, name, g in sorted(bg_list, reverse=True):
-            n = len(g["pids"])
-            titles = (" — " + " / ".join(g["titles"])) if g["titles"] else ""
-            rest = html.escape(f"({n} procs) │ CPU {cpu:4.1f}% │ RAM {mem:4.1f}%{titles}")
-            markup = f'<span alpha="75%">[BG]   {html.escape(name)}\t{rest}</span>'
-            entries.append((False, name, g, markup))
+    # 2. Background user processes (avoiding duplicate names with foreground apps)
+    for name, g in sorted(bg.items(), key=lambda kv: sum(m for _, m in kv[1]["pids"].values()), reverse=True):
+        if name in fg:
+            continue
+        app_label, icons = resolve_meta(name, desktop_idx)
+        items.append((app_label, icons, name, g))
 
-    return entries
+    return items
 
 
 def notify(title, body):
@@ -307,12 +404,13 @@ def notify(title, body):
         pass
 
 
-def kill_group(name, group_data, force):
+def kill_group(label, name, group_data, force):
     if not group_data:
         return
     sig = signal.SIGKILL if force else signal.SIGTERM
     done, protected = 0, 0
-    for pid in list(group_data["pids"]):
+    pids = list(group_data.get("pids", {}).keys())
+    for pid in sorted(pids):
         try:
             comm = ""
             try:
@@ -328,63 +426,65 @@ def kill_group(name, group_data, force):
         except (ProcessLookupError, PermissionError):
             continue
     what = "Force Killed (SIGKILL -9)" if force else "Terminated (SIGTERM)"
+    display_target = label.split(" — ")[0] if " — " in label else label
     notify(
         "Process Killer",
-        f"{what} → {done} procs of {name}"
+        f"{what} → {done} procs of {display_target}"
         + (f" ({protected} protected skipped)" if protected else ""),
     )
 
 
 def main():
     ensure_env()
+    desktop_idx = build_desktop_index()
+    fg, bg = collect()
+    items = build_rows(fg, bg, desktop_idx)
+
     if os.environ.get("ROFI_PKILL_TEST") == "1":
-        fg, bg = collect()
-        for is_hdr, key, _, markup in build_rows(fg, bg)[:20]:
-            print(f"{'HDR' if is_hdr else 'ITEM'}\t{key}\t{markup}")
+        for idx, (disp, icons, name, g) in enumerate(items):
+            print(f"[{idx:02d}] {disp:36} | icon={icons} | procs={len(g['pids'])}")
         return 0
 
-    while True:
-        fg, bg = collect()
-        entries = build_rows(fg, bg)
-        if not entries:
-            notify("Process Killer", "No killable processes found")
-            return 0
-
-        menu_text = "\n".join(markup for _, _, _, markup in entries)
-        try:
-            p = subprocess.run(
-                [
-                    "rofi", "-dmenu", "-i", "-markup-rows", "-format", "i",
-                    "-sort", "-sorting-method", "fzf", "-matching", "fuzzy",
-                    "-p", "Kill App",
-                    "-kb-delete-entry", "", "-kb-custom-1", "Alt+d,Shift+Delete",
-                    "-theme", THEME,
-                ],
-                input=menu_text.encode(),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                timeout=300,
-            )
-        except Exception:
-            return 0
-
-        # Non-zero returncode and not custom-1 (exit code 10)
-        if p.returncode not in (0, 10) or not p.stdout.strip():
-            return 0
-
-        try:
-            idx = int(p.stdout.decode(errors="replace").strip())
-            is_header, name, group_data, _ = entries[idx]
-        except (ValueError, IndexError):
-            return 0
-
-        # If user selected a section divider, safely ignore and re-show
-        if is_header or not name or not group_data:
-            continue
-
-        kill_group(name, group_data, force=(p.returncode == 10))
+    if not items:
+        notify("Process Killer", "No killable processes found")
         return 0
 
+    menu_lines = [f"{disp}\x00icon\x1f{icons}" for disp, icons, _, _ in items]
+    menu_text = "\n".join(menu_lines) + "\n"
+
+    try:
+        p = subprocess.run(
+            [
+                "fuzzel",
+                "--dmenu",
+                "--index",
+                "--lines=10",
+                "--minimal-lines",
+                "--no-run-if-empty",
+                "--no-exit-on-keyboard-focus-loss",
+                "--override=main.image-size-ratio=0",
+                "--override=key-bindings.expunge=none",
+                "--override=key-bindings.custom-1=Shift+Delete",
+            ],
+            input=menu_text.encode("utf-8"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=300,
+        )
+    except Exception:
+        return 0
+
+    # 0 = normal Enter (SIGTERM), 10 = custom-1 / Shift+Delete (SIGKILL)
+    if p.returncode not in (0, 10) or not p.stdout.strip():
+        return 0
+
+    try:
+        idx = int(p.stdout.decode(errors="replace").strip())
+        disp, icons, name, group_data = items[idx]
+    except (ValueError, IndexError):
+        return 0
+
+    kill_group(disp, name, group_data, force=(p.returncode == 10))
     return 0
 
 

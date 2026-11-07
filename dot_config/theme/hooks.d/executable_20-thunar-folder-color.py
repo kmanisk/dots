@@ -8,10 +8,13 @@ Execution time: ~30-50ms on change, <1ms when cached. Zero resident processes / 
 import os
 import sys
 import re
+import fcntl
 
 THEME_STATE_DIR = os.path.expanduser("~/.local/state/theme")
 COLORS_SH = os.path.join(THEME_STATE_DIR, "colors.sh")
 STATE_ACCENT_FILE = os.path.join(THEME_STATE_DIR, "folder_accent")
+STATE_NAME_FILE = os.path.join(THEME_STATE_DIR, "name")
+LOCK_FILE = os.path.join(THEME_STATE_DIR, ".folder-icon.lock")
 ICON_THEME_DIR = os.path.expanduser("~/.local/share/icons/Gruvbox-Plus-Dark")
 
 STRAIGHT_FOLDER_BODY = """  <!-- Back flap -->
@@ -74,107 +77,151 @@ def get_target_accent():
             pass
     return None
 
+def get_current_theme():
+    try:
+        with open(STATE_NAME_FILE, "r", encoding="utf-8") as handle:
+            return handle.read().strip()
+    except OSError:
+        return ""
+
+
+def still_current(expected_theme, expected_accent):
+    current_accent = get_target_accent()
+    return (
+        get_current_theme() == expected_theme
+        and isinstance(current_accent, str)
+        and current_accent.lower() == expected_accent.lower()
+    )
+
+
 def main():
+    expected_theme = sys.argv[1] if len(sys.argv) > 1 else get_current_theme()
     target_accent = get_target_accent()
     if not target_accent or not target_accent.startswith("#"):
         return 0
 
-    # Avoid redundant I/O if the accent is already applied
-    if os.path.exists(STATE_ACCENT_FILE):
-        try:
-            with open(STATE_ACCENT_FILE, "r", encoding="utf-8") as f:
-                current_accent = f.read().strip()
-                if current_accent.lower() == target_accent.lower():
-                    return 0
-        except Exception:
-            pass
+    os.makedirs(THEME_STATE_DIR, exist_ok=True)
+    with open(LOCK_FILE, "a+", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        if not still_current(expected_theme, target_accent):
+            return 0
 
-    pattern = re.compile(r'(\.ColorScheme-Highlight\s*\{\s*color:\s*)[^;]+(;)')
-    updated = False
-
-    scalable_dir = os.path.join(ICON_THEME_DIR, "places/scalable")
-    if os.path.isdir(scalable_dir):
-        for fname in os.listdir(scalable_dir):
-            if not fname.endswith(".svg"):
-                continue
-            fpath = os.path.join(scalable_dir, fname)
-            if os.path.islink(fpath):
-                continue
-
+        # Avoid redundant I/O if the accent is already applied.
+        if os.path.exists(STATE_ACCENT_FILE):
             try:
-                with open(fpath, "r", encoding="utf-8", errors="ignore") as fp:
-                    content = fp.read()
-
-                # Enforce straight geometric edges if file still has rounded curves
-                if "m53 71c-36.338" in content:
-                    defs_m = re.search(r'(<defs>.*?</defs>)', content, re.DOTALL)
-                    defs = defs_m.group(1) if defs_m else f'<defs><style id="current-color-scheme" type="text/css">.ColorScheme-Text {{ color:#282828; }} .ColorScheme-Highlight {{ color:{target_accent}; }}</style></defs>'
-                    is_open = fname.endswith("-open.svg") or "-drag-accept" in fname or "-visiting" in fname
-                    body = STRAIGHT_OPEN_FOLDER_BODY if is_open else STRAIGHT_FOLDER_BODY
-                    parts = content.split('<path ')
-                    emblem_start = 7 if is_open else 6
-                    emblem_paths = ['<path ' + part for part in parts[emblem_start:]]
-                    emblem_content = ''.join(emblem_paths).replace('</svg>', '').strip()
-                    if emblem_content:
-                        content = f'<svg width="256" height="256" version="1.1" xmlns="http://www.w3.org/2000/svg">\n  {defs}\n{body}\n  {emblem_content}\n</svg>\n'
-                    else:
-                        content = f'<svg width="256" height="256" version="1.1" xmlns="http://www.w3.org/2000/svg">\n  {defs}\n{body}\n</svg>\n'
-                    updated = True
-
-                elif fname == "user-desktop.svg" and "m16.833 39.881" in content:
-                    defs_m = re.search(r'(<defs>.*?</defs>)', content, re.DOTALL)
-                    defs = defs_m.group(1) if defs_m else f'<defs><style id="current-color-scheme" type="text/css">.ColorScheme-Text {{ color:#282828; }} .ColorScheme-Highlight {{ color:{target_accent}; }}</style></defs>'
-                    content = f'<svg width="256" height="256" version="1.1" xmlns="http://www.w3.org/2000/svg">\n  {defs}\n{STRAIGHT_DESKTOP_BODY}\n</svg>\n'
-                    updated = True
-
-                # Update accent color
-                if ".ColorScheme-Highlight" in content:
-                    new_content = pattern.sub(r'\g<1>' + target_accent + r'\2', content)
-                    if new_content != content:
-                        content = new_content
-                        updated = True
-
-                with open(fpath, "w", encoding="utf-8") as fp:
-                    fp.write(content)
+                with open(STATE_ACCENT_FILE, "r", encoding="utf-8") as f:
+                    current_accent = f.read().strip()
+                    if current_accent.lower() == target_accent.lower():
+                        return 0
             except Exception:
                 pass
 
-    # 16px places
-    places16_dir = os.path.join(ICON_THEME_DIR, "places/16")
-    if os.path.isdir(places16_dir):
-        for fname in os.listdir(places16_dir):
-            if fname.endswith(".svg"):
-                fpath = os.path.join(places16_dir, fname)
+        pattern = re.compile(r'(\.ColorScheme-Highlight\s*\{\s*color:\s*)[^;]+(;)')
+        updated = False
+
+        scalable_dir = os.path.join(ICON_THEME_DIR, "places/scalable")
+        if os.path.isdir(scalable_dir):
+            for index, fname in enumerate(os.listdir(scalable_dir)):
+                if index % 64 == 0 and not still_current(expected_theme, target_accent):
+                    return 0
+                if not fname.endswith(".svg"):
+                    continue
+                fpath = os.path.join(scalable_dir, fname)
+                if os.path.islink(fpath):
+                    continue
+
+                try:
+                    with open(fpath, "r", encoding="utf-8", errors="ignore") as fp:
+                        content = fp.read()
+                    file_changed = False
+
+                    # Enforce straight geometric edges if file still has rounded curves.
+                    if "m53 71c-36.338" in content:
+                        defs_m = re.search(r'(<defs>.*?</defs>)', content, re.DOTALL)
+                        defs = defs_m.group(1) if defs_m else f'<defs><style id="current-color-scheme" type="text/css">.ColorScheme-Text {{ color:#282828; }} .ColorScheme-Highlight {{ color:{target_accent}; }}</style></defs>'
+                        is_open = fname.endswith("-open.svg") or "-drag-accept" in fname or "-visiting" in fname
+                        body = STRAIGHT_OPEN_FOLDER_BODY if is_open else STRAIGHT_FOLDER_BODY
+                        parts = content.split('<path ')
+                        emblem_start = 7 if is_open else 6
+                        emblem_paths = ['<path ' + part for part in parts[emblem_start:]]
+                        emblem_content = ''.join(emblem_paths).replace('</svg>', '').strip()
+                        if emblem_content:
+                            content = f'<svg width="256" height="256" version="1.1" xmlns="http://www.w3.org/2000/svg">\n  {defs}\n{body}\n  {emblem_content}\n</svg>\n'
+                        else:
+                            content = f'<svg width="256" height="256" version="1.1" xmlns="http://www.w3.org/2000/svg">\n  {defs}\n{body}\n</svg>\n'
+                        file_changed = True
+
+                    elif fname == "user-desktop.svg" and "m16.833 39.881" in content:
+                        defs_m = re.search(r'(<defs>.*?</defs>)', content, re.DOTALL)
+                        defs = defs_m.group(1) if defs_m else f'<defs><style id="current-color-scheme" type="text/css">.ColorScheme-Text {{ color:#282828; }} .ColorScheme-Highlight {{ color:{target_accent}; }}</style></defs>'
+                        content = f'<svg width="256" height="256" version="1.1" xmlns="http://www.w3.org/2000/svg">\n  {defs}\n{STRAIGHT_DESKTOP_BODY}\n</svg>\n'
+                        file_changed = True
+
+                    if ".ColorScheme-Highlight" in content:
+                        new_content = pattern.sub(r'\g<1>' + target_accent + r'\2', content)
+                        if new_content != content:
+                            content = new_content
+                            file_changed = True
+
+                    if file_changed:
+                        with open(fpath, "w", encoding="utf-8") as fp:
+                            fp.write(content)
+                        updated = True
+                except Exception:
+                    pass
+
+        places_base = os.path.join(ICON_THEME_DIR, "places")
+        icon_sizes = ["16", "22", "24", "32", "48"]
+        for size_dir_name in icon_sizes:
+            s_dir = os.path.join(places_base, size_dir_name)
+            if not os.path.isdir(s_dir):
+                continue
+            for index, fname in enumerate(os.listdir(s_dir)):
+                if index % 64 == 0 and not still_current(expected_theme, target_accent):
+                    return 0
+                if not fname.endswith(".svg"):
+                    continue
+                fpath = os.path.join(s_dir, fname)
                 if os.path.islink(fpath):
                     continue
                 try:
                     with open(fpath, "r", encoding="utf-8", errors="ignore") as fp:
                         content = fp.read()
+                    file_changed = False
+                    if 'class="ColorScheme-Text"' in content and (fname.startswith("folder") or fname == "inode-directory.svg"):
+                        content = content.replace('class="ColorScheme-Text"', 'class="ColorScheme-Highlight"')
+                        file_changed = True
                     if ".ColorScheme-Highlight" in content:
                         new_content = pattern.sub(r'\g<1>' + target_accent + r'\2', content)
                         if new_content != content:
-                            with open(fpath, "w", encoding="utf-8") as fp:
-                                fp.write(new_content)
-                            updated = True
+                            content = new_content
+                            file_changed = True
+                    if file_changed:
+                        with open(fpath, "w", encoding="utf-8") as fp:
+                            fp.write(content)
+                        updated = True
                 except Exception:
                     pass
 
-    # Save state
-    try:
-        with open(STATE_ACCENT_FILE, "w", encoding="utf-8") as f:
-            f.write(target_accent + "\n")
-    except Exception:
-        pass
+        # A newer theme may have taken over while the icon tree was scanned.
+        # Leave state unstamped so its queued worker performs the final convergence.
+        if not still_current(expected_theme, target_accent):
+            return 0
 
-    # Touch icon directory to notify GTK file managers
-    if updated and os.path.exists(ICON_THEME_DIR):
         try:
-            os.utime(ICON_THEME_DIR, None)
-            cache_file = os.path.join(ICON_THEME_DIR, "icon-theme.cache")
-            if os.path.exists(cache_file):
-                os.utime(cache_file, None)
+            with open(STATE_ACCENT_FILE, "w", encoding="utf-8") as f:
+                f.write(target_accent + "\n")
         except Exception:
             pass
+
+        if updated and os.path.exists(ICON_THEME_DIR):
+            try:
+                os.utime(ICON_THEME_DIR, None)
+                cache_file = os.path.join(ICON_THEME_DIR, "icon-theme.cache")
+                if os.path.exists(cache_file):
+                    os.utime(cache_file, None)
+            except Exception:
+                pass
 
     return 0
 

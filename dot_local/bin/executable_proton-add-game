@@ -1,0 +1,240 @@
+#!/usr/bin/env bash
+# proton-add-game: Automatically configure a Windows game executable for Proton,
+# generate an optimized standalone runner script, and register it in the Alt+G menu.
+set -euo pipefail
+
+usage() {
+    cat << 'EOF'
+Usage: proton-add-game <path/to/folder-or-exe> [Optional Game Title]
+
+Examples:
+  proton-add-game "/mnt/Games/NonSteamGames/Hades II" "Hades II"
+  proton-add-game "/mnt/Games/NonSteamGames/Lies of P/LiesofP.exe"
+  proton-add-game "/mnt/Games/NonSteamGames/Silksong"
+EOF
+    exit 1
+}
+
+if [ $# -lt 1 ]; then
+    usage
+fi
+
+INPUT_PATH="$(realpath "$1" 2>/dev/null || true)"
+if [ -z "$INPUT_PATH" ] || [ ! -e "$INPUT_PATH" ]; then
+    echo "Error: Path does not exist: $1" >&2
+    exit 1
+fi
+
+TARGET_EXE=""
+GAME_DIR=""
+
+if [ -f "$INPUT_PATH" ]; then
+    case "$INPUT_PATH" in
+        *.exe|*.EXE)
+            TARGET_EXE="$INPUT_PATH"
+            GAME_DIR="$(dirname "$INPUT_PATH")"
+            ;;
+        *)
+            echo "Error: Specified file is not a .exe: $INPUT_PATH" >&2
+            exit 1
+            ;;
+    esac
+elif [ -d "$INPUT_PATH" ]; then
+    GAME_DIR="$INPUT_PATH"
+
+    # Search for candidate executables, excluding known installer/crash/redist binaries
+    mapfile -t CANDIDATES < <(find "$GAME_DIR" -maxdepth 3 -type f \( -iname "*.exe" \) 2>/dev/null | \
+        grep -vEi "crash|unins|setup|redist|vcredist|dxsetup|dotnet|update|patch|report|unitycrashhandler" || true)
+
+    if [ ${#CANDIDATES[@]} -eq 0 ]; then
+        # Fallback to any .exe if none survived filtering
+        mapfile -t CANDIDATES < <(find "$GAME_DIR" -maxdepth 3 -type f \( -iname "*.exe" \) 2>/dev/null || true)
+    fi
+
+    if [ ${#CANDIDATES[@]} -eq 0 ]; then
+        echo "Error: No .exe executables found in $GAME_DIR" >&2
+        exit 1
+    elif [ ${#CANDIDATES[@]} -eq 1 ]; then
+        TARGET_EXE="${CANDIDATES[0]}"
+    else
+        echo "Multiple executables detected in $GAME_DIR:"
+        for i in "${!CANDIDATES[@]}"; do
+            echo "  [$((i + 1))] ${CANDIDATES[$i]}"
+        done
+        read -r -p "Select executable [1-${#CANDIDATES[@]}] (default 1): " CHOICE
+        CHOICE="${CHOICE:-1}"
+        INDEX=$((CHOICE - 1))
+        if [ "$INDEX" -ge 0 ] && [ "$INDEX" -lt "${#CANDIDATES[@]}" ]; then
+            TARGET_EXE="${CANDIDATES[$INDEX]}"
+        else
+            TARGET_EXE="${CANDIDATES[0]}"
+        fi
+    fi
+fi
+
+if [ -z "$TARGET_EXE" ] || [ ! -f "$TARGET_EXE" ]; then
+    echo "Error: Failed to determine target executable." >&2
+    exit 1
+fi
+
+# Determine Game Title
+if [ $# -ge 2 ] && [ -n "$2" ]; then
+    GAME_TITLE="$2"
+else
+    # Infer title from folder name or exe name
+    DIR_NAME="$(basename "$(dirname "$TARGET_EXE")")"
+    case "$DIR_NAME" in
+        bin|Bin|bin64|Bin64|Win64|x64|Shipping)
+            DIR_NAME="$(basename "$(dirname "$(dirname "$TARGET_EXE")")")"
+            ;;
+    esac
+    if [ -n "$DIR_NAME" ] && [ "$DIR_NAME" != "/" ] && [ "$DIR_NAME" != "." ]; then
+        RAW_TITLE="$DIR_NAME"
+    else
+        RAW_TITLE="$(basename "$TARGET_EXE" | sed -E 's/\.exe$//I')"
+    fi
+    GAME_TITLE="$(echo "$RAW_TITLE" | tr '_-' ' ' | sed -E 's/ +/ /g')"
+fi
+
+# Slug for prefixes and scripts
+SLUG="$(echo "$GAME_TITLE" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g' | sed -E 's/^-+|-+$//g')"
+if [ -z "$SLUG" ]; then
+    SLUG="$(basename "$TARGET_EXE" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g' | sed -E 's/^-+|-+$//g')"
+fi
+
+RUNNER_BIN="$HOME/.local/bin/$SLUG-run"
+COMPAT_DIR="$HOME/.local/share/Steam/steamapps/compatdata/$SLUG"
+mkdir -p "$COMPAT_DIR"
+mkdir -p "$HOME/.config/rofi"
+mkdir -p "$HOME/.local/bin"
+
+# Select Proton runner
+PROTON_BIN=""
+if [ -f "$HOME/.local/share/Steam/compatibilitytools.d/GE-Proton11-7-x86_64/proton" ]; then
+    PROTON_BIN="$HOME/.local/share/Steam/compatibilitytools.d/GE-Proton11-7-x86_64/proton"
+elif [ -f "$HOME/.local/share/Steam/compatibilitytools.d/proton-cachyos-slr/proton" ]; then
+    PROTON_BIN="$HOME/.local/share/Steam/compatibilitytools.d/proton-cachyos-slr/proton"
+elif [ -f "$HOME/.local/share/Steam/steamapps/common/Proton - Experimental/proton" ]; then
+    PROTON_BIN="$HOME/.local/share/Steam/steamapps/common/Proton - Experimental/proton"
+else
+    PROTON_BIN="$(find "$HOME/.local/share/Steam/compatibilitytools.d" -name "proton" -type f 2>/dev/null | head -n 1 || true)"
+fi
+
+if [ -z "$PROTON_BIN" ] || [ ! -x "$PROTON_BIN" ]; then
+    echo "Error: No Proton executable found under ~/.local/share/Steam." >&2
+    exit 1
+fi
+
+# Generate self-contained runner script
+cat > "$RUNNER_BIN" << EOF
+#!/usr/bin/env bash
+# $SLUG-run: Auto-generated Proton launcher for $GAME_TITLE
+set -e
+
+export SteamAppId="$SLUG"
+export SteamGameId="$SLUG"
+export STEAM_COMPAT_CLIENT_INSTALL_PATH="\$HOME/.local/share/Steam"
+export STEAM_COMPAT_DATA_PATH="$COMPAT_DIR"
+mkdir -p "\$STEAM_COMPAT_DATA_PATH"
+
+# Dual-GPU offload configuration (NVIDIA RTX 5050 Mobile / Intel iGPU)
+if [ -z "\$GPU_MODE" ]; then
+    if [ -r "\${XDG_RUNTIME_DIR:-/run/user/\$UID}/gpu_mode" ]; then
+        read -r GPU_MODE < "\${XDG_RUNTIME_DIR:-/run/user/\$UID}/gpu_mode"
+    else
+        GPU_MODE="\$(supergfxctl -g 2>/dev/null || true)"
+    fi
+fi
+
+case "\$GPU_MODE" in
+    Hybrid)
+        export __NV_PRIME_RENDER_OFFLOAD=1
+        export __GLX_VENDOR_LIBRARY_NAME=nvidia
+        export __VK_LAYER_NV_optimus=NVIDIA_only
+        export LIBVA_DRIVER_NAME=iHD
+        ;;
+    AsusMuxDgpu)
+        unset __NV_PRIME_RENDER_OFFLOAD
+        unset __GLX_VENDOR_LIBRARY_NAME
+        export __VK_LAYER_NV_optimus=NVIDIA_only
+        export LIBVA_DRIVER_NAME=nvidia
+        ;;
+    *)
+        export __NV_PRIME_RENDER_OFFLOAD=1
+        export __GLX_VENDOR_LIBRARY_NAME=nvidia
+        export __VK_LAYER_NV_optimus=NVIDIA_only
+        ;;
+esac
+
+# Audio: follow system default output
+unset PIPEWIRE_NODE
+unset PULSE_SINK
+
+# Performance optimizations for RTX 50-series
+export VKD3D_CONFIG="no_upload_hvv,force_host_cached"
+export PROTON_ENABLE_NVAPI=1
+export MANGOHUD=1
+
+TARGET_EXE="$TARGET_EXE"
+EXE_DIR="\$(dirname "\$TARGET_EXE")"
+EXE_BASENAME="\$(basename "\$TARGET_EXE")"
+
+# Single-instance guard
+if pgrep -f "\$EXE_BASENAME" >/dev/null 2>&1; then
+    notify-send -i input-gaming "$GAME_TITLE" "Already running - switching to Workspace 4..." 2>/dev/null || true
+    if [ -n "\$SWAYSOCK" ] || [ -n "\$WAYLAND_DISPLAY" ]; then
+        swaymsg "workspace number 4" >/dev/null 2>&1 || true
+    fi
+    exit 0
+fi
+
+# Asus Performance power profile
+asusctl profile set Performance >/dev/null 2>&1 || true
+trap 'asusctl profile set Balanced >/dev/null 2>&1 || true' EXIT INT TERM
+trap '' HUP
+
+# Sway workspace 4 auto-focus
+notify-send -i input-gaming "$GAME_TITLE" "Launching with Proton..." 2>/dev/null || true
+if [ -n "\$SWAYSOCK" ] || [ -n "\$WAYLAND_DISPLAY" ]; then
+    swaymsg "workspace number 4" >/dev/null 2>&1 || true
+fi
+
+cd "\$EXE_DIR"
+exec "$PROTON_BIN" run "\$TARGET_EXE" "\$@"
+EOF
+
+chmod +x "$RUNNER_BIN"
+
+# Register in custom games list for rofi-games (~/.config/rofi/custom-games.list)
+REG_FILE="$HOME/.config/rofi/custom-games.list"
+touch "$REG_FILE"
+TMP_REG="$(mktemp)"
+grep -v "^$GAME_TITLE|" "$REG_FILE" > "$TMP_REG" 2>/dev/null || true
+echo "$GAME_TITLE|$RUNNER_BIN" >> "$TMP_REG"
+mv -f "$TMP_REG" "$REG_FILE"
+
+# Create desktop entry
+DESKTOP_DIR="$HOME/.local/share/applications"
+mkdir -p "$DESKTOP_DIR"
+cat > "$DESKTOP_DIR/proton-$SLUG.desktop" << EOF
+[Desktop Entry]
+Name=$GAME_TITLE
+Comment=Launch $GAME_TITLE via Proton
+Exec=$RUNNER_BIN
+Icon=input-gaming
+Terminal=false
+Type=Application
+Categories=Game;
+EOF
+
+echo "=========================================================="
+echo "Game successfully configured for Proton!"
+echo "  Title:       $GAME_TITLE"
+echo "  Target EXE:  $TARGET_EXE"
+echo "  Proton:      $PROTON_BIN"
+echo "  Prefix:      $COMPAT_DIR"
+echo "  Runner:      $RUNNER_BIN"
+echo "  Alt+G Menu:  Registered in rofi-games ($GAME_TITLE)"
+echo "  MangoHud:    Enabled (Alt+3 toggles in-game)"
+echo "  Workspace:   Auto-focuses Workspace 4 on launch"
+echo "=========================================================="

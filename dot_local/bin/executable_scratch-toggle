@@ -23,6 +23,7 @@ SCRATCH_FONT_SIZE="${SCRATCH_FONT_SIZE:-17}"
 SCRATCH_TERM_FONT_SIZE="${SCRATCH_TERM_FONT_SIZE:-16}"
 SCRATCH_FONT="Iosevka Nerd Font Mono:size=${SCRATCH_FONT_SIZE}:style=Regular"
 SCRATCH_TERM_FONT="Iosevka Nerd Font Mono:size=${SCRATCH_TERM_FONT_SIZE}:style=Regular"
+SCRATCH_SCALE_PCT="${SCRATCH_SCALE_PCT:-90}"
 
 case "$mode" in
     # CANONICAL SCRATCHPAD GEOMETRY (single source of truth).
@@ -44,6 +45,11 @@ case "$mode" in
         spawn="footclient --app-id=scratch-notes --title=scratch-notes -o font=\"${SCRATCH_FONT}\" -o selection-target=both -o mouse-bindings.primary-paste=none -o mouse-bindings.clipboard-paste=BTN_MIDDLE -o mouse-bindings.font-increase=none -o mouse-bindings.font-decrease=none -o mouse-bindings.scrollback-up-mouse=\"BTN_WHEEL_BACK Control+Mod1+BTN_WHEEL_BACK Mod1+Control+BTN_WHEEL_BACK Control+BTN_WHEEL_BACK Mod1+BTN_WHEEL_BACK Mod4+BTN_WHEEL_BACK Control+Mod4+BTN_WHEEL_BACK\" -o mouse-bindings.scrollback-down-mouse=\"BTN_WHEEL_FORWARD Control+Mod1+BTN_WHEEL_FORWARD Mod1+Control+BTN_WHEEL_FORWARD Control+BTN_WHEEL_FORWARD Mod1+BTN_WHEEL_FORWARD Mod4+BTN_WHEEL_FORWARD Control+Mod4+BTN_WHEEL_FORWARD\" -o locked-title=yes -o include=${HOME}/.config/foot/foot-colors.ini nvim $HOME/notes.md 2>>/tmp/scratch-notes-err.log"
         geom="1700 1050"
         ;;
+    files|file|thunar)
+        instance="scratch-files"
+        spawn="thunar --name scratch-files ${HOME} 2>>/tmp/scratch-files-err.log"
+        geom="1180 720"
+        ;;
     spotify)
         instance="spotify"
         spawn="spotify"
@@ -57,7 +63,8 @@ esac
 
 # Scale-aware geometry: Sway reports logical pixels after output scale, so a
 # fixed 1700x1050 overflows a 1476x923 desktop at 1.30x. Cap the scratchpad to
-# 90% of the active output so it always fits and stays centered.
+# SCRATCH_SCALE_PCT (default 90%) of the active output so it stays centered and
+# provides full horizontal width for multi-column TUIs (btop memory/disks).
 if command -v swaymsg >/dev/null 2>&1; then
     out_size=$(swaymsg -t get_outputs -r 2>/dev/null | python3 -c '
 import json, sys
@@ -74,8 +81,8 @@ if w > 0 and h > 0:
 ' 2>/dev/null)
     if [ -n "$out_size" ]; then
         set -- $out_size
-        max_w=$(( $1 * 90 / 100 ))
-        max_h=$(( $2 * 90 / 100 ))
+        max_w=$(( $1 * SCRATCH_SCALE_PCT / 100 ))
+        max_h=$(( $2 * SCRATCH_SCALE_PCT / 100 ))
         want_w=${geom% *}
         want_h=${geom#* }
         [ "$want_w" -gt "$max_w" ] && want_w=$max_w
@@ -161,7 +168,10 @@ def walk(n, in_scratch):
     
     if cur_inst == inst or app_id == inst or cls.lower() == inst.lower():
         is_hidden = in_scratch or (n.get("scratchpad_state") not in (None, "none") and not n.get("visible", False))
-        result[0] = "hidden" if is_hidden else "visible"
+        if n.get("focused"):
+            result[0] = "focused"
+        else:
+            result[0] = "hidden" if is_hidden else "visible"
         return
     for c in n.get("nodes", []) + n.get("floating_nodes", []):
         walk(c, in_scratch)
@@ -173,7 +183,7 @@ print(result[0])
 
 show_it() {
     cur_state="$(win_state)"
-    if [ "$cur_state" = "visible" ]; then
+    if [ "$cur_state" = "focused" ]; then
         if [ "$IPC_CMD" = "swaymsg" ]; then
             swaymsg "[app_id=\"$instance\"] move scratchpad" >/dev/null 2>&1 || \
             swaymsg "[class=\"(?i)$instance\"] move scratchpad" >/dev/null 2>&1 || \
@@ -189,11 +199,16 @@ show_it() {
         swaymsg "[app_id=\"$instance\"] scratchpad show" >/dev/null 2>&1 || \
         swaymsg "[class=\"(?i)$instance\"] scratchpad show" >/dev/null 2>&1 || \
         swaymsg "[instance=\"$instance\"] scratchpad show" >/dev/null 2>&1
-        # Enforce border pixel 2 and geometry on show
+        # Enforce border pixel 2, geometry, and focus on show. For Thunar, only resize the main window, leaving child dialogs at native size.
         # shellcheck disable=SC2086
-        swaymsg "[app_id=\"$instance\"] border pixel 2, resize set $geom, move position center" >/dev/null 2>&1 || \
-        swaymsg "[class=\"(?i)$instance\"] border pixel 2, resize set $geom, move position center" >/dev/null 2>&1 || \
-        swaymsg "[instance=\"$instance\"] border pixel 2, resize set $geom, move position center" >/dev/null 2>&1
+        if [ "$instance" = "scratch-files" ]; then
+            swaymsg "[app_id=\"$instance\" title=\" - Thunar$\"] border pixel 2, resize set $geom, move position center, focus" >/dev/null 2>&1 || \
+            swaymsg "[instance=\"$instance\" title=\" - Thunar$\"] border pixel 2, resize set $geom, move position center, focus" >/dev/null 2>&1
+        else
+            swaymsg "[app_id=\"$instance\"] border pixel 2, resize set $geom, move position center, focus" >/dev/null 2>&1 || \
+            swaymsg "[class=\"(?i)$instance\"] border pixel 2, resize set $geom, move position center, focus" >/dev/null 2>&1 || \
+            swaymsg "[instance=\"$instance\"] border pixel 2, resize set $geom, move position center, focus" >/dev/null 2>&1
+        fi
     else
         i3-msg "[instance=\"$instance\"] scratchpad show" >/dev/null 2>&1 || \
         i3-msg "[class=\"(?i)$instance\"] scratchpad show" >/dev/null 2>&1
@@ -209,6 +224,12 @@ app_running() {
     for pid in $(pgrep -x footclient 2>/dev/null); do
         tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null \
             | grep -qx -- "--app-id=$instance" && return 0
+    done
+    for pid in $(pgrep -x thunar 2>/dev/null); do
+        tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null \
+            | grep -qx -- "--name=$instance" && return 0
+        tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null \
+            | grep -q -- "$instance" && return 0
     done
     return 1
 }

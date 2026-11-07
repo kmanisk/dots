@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# waydroid-apk-install — install APK package(s) directly into Waydroid container
+# Usage:
+#   waydroid-apk-install /path/to/app.apk
+# ==============================================================================
+set -euo pipefail
+
+export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-1}"
+export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
+
+if [[ $# -eq 0 || "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    echo "Usage: $(basename "$0") <package.apk> [package2.apk...]"
+    exit 0
+fi
+
+notify() {
+    local urgency="${1:-normal}"
+    local title="$2"
+    local msg="$3"
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send -a "Waydroid" -i waydroid -u "$urgency" "$title" "$msg" || true
+    fi
+}
+
+# 1. Ensure Waydroid container daemon is running
+if ! systemctl is-active -q waydroid-container.service 2>/dev/null; then
+    notify "normal" "Waydroid" "Starting container daemon..."
+    sudo systemctl start waydroid-container.service
+    sleep 2
+fi
+
+# 2. Ensure Waydroid user session is running
+if ! waydroid status 2>/dev/null | grep -q 'Session:.*RUNNING'; then
+    notify "normal" "Waydroid" "Starting Waydroid session..."
+    setsid -f waydroid session start >/dev/null 2>&1 < /dev/null
+
+    for _ in $(seq 1 30); do
+        waydroid status 2>/dev/null | grep -q 'Session:.*RUNNING' && break
+        sleep 1
+    done
+
+    if ! waydroid status 2>/dev/null | grep -q 'Session:.*RUNNING'; then
+        notify "critical" "Waydroid Error" "Waydroid session failed to start."
+        exit 1
+    fi
+fi
+
+# 3. Wait for client bridge to be ready
+for _ in $(seq 1 30); do
+    if timeout 1 waydroid app list >/dev/null 2>&1; then
+        break
+    fi
+    sleep 1
+done
+
+exit_code=0
+for apk in "$@"; do
+    if [[ ! -f "$apk" ]]; then
+        notify "critical" "Waydroid Error" "File not found: $(basename "$apk")"
+        exit_code=1
+        continue
+    fi
+
+    pkg_name="$(basename "$apk")"
+    notify "normal" "Waydroid" "Installing $pkg_name..."
+
+    # Run installation and capture output
+    if out="$(waydroid app install "$apk" 2>&1)"; then
+        if echo "$out" | grep -qi "session is stopped"; then
+            notify "critical" "Waydroid Error" "Failed to install $pkg_name: session stopped."
+            exit_code=1
+        else
+            notify "normal" "Waydroid" "Successfully installed $pkg_name!"
+        fi
+    else
+        notify "critical" "Waydroid Error" "Failed to install $pkg_name:\n$out"
+        exit_code=1
+    fi
+done
+
+exit "$exit_code"

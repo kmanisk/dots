@@ -18,7 +18,7 @@ o.number = true
 o.relativenumber = true
 o.cursorline = true
 o.termguicolors = true
-o.background = "dark"
+-- Theme polarity is owned by Base46/theme-set; do not force 'background' here.
 o.mouse = "a"
 
 -- Search

@@ -20,7 +20,6 @@ sudo
 udiskie
 gvfs
 gvfs-mtp
-gvfs-gphoto2
 thunar
 thunar-volman
 android-udev
@@ -34,3 +33,5 @@ intel-media-driver
 vpl-gpu-rt
 vulkan-icd-loader
 vulkan-intel
+keepassxc
+syncthing

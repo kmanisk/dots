@@ -5,6 +5,12 @@
 
 ---
 
+### Curated solid-color palette collection (2026-11-07)
+
+Twelve additional popular/familiar Base16 palette variants were imported as standalone **custom** themes; no wallpaper files are needed or downloaded. They use `assets.background_mode="solid"`, which deliberately bypasses the normal wallpaper-donor resolution and uses the theme's own Sway solid background. The new catalog has **339** visible picker themes; the 2026-11-01 counts below are retained as historical baseline measurements. See [`curated-solid-palettes.md`](curated-solid-palettes.md) for the exact IDs, upstream revision, tests, and removal procedure.
+
+---
+
 ## 1. System Philosophy & Invariants
 
 The theme engine bridges Omarchy community themes, Base46/NvChad palettes, and desktop applications into a unified, high-performance orchestration system designed specifically for minimal Linux workstations.
@@ -23,7 +29,7 @@ The theme engine bridges Omarchy community themes, Base46/NvChad palettes, and d
    - Atomic promotion via `os.replace`. If any render fails or is zero-sized, zero live files are modified.
 4. **Disk Space Discipline & Ephemeral Sandboxing:**
    - Git repository imports clone shallowly (`--depth 1 --quiet`) into a temporary PID-isolated sandbox (`~/.cache/theme/import-tmp/{owner}_{repo}_{pid}`).
-   - Immediately after passive data extraction, the entire cloned directory is **unconditionally deleted** via `finally: shutil.rmtree(clone_dir)`, preventing any disk bloat.
+   - Palette/config data is parsed passively; selected repository wallpapers are copied into the persistent `~/.local/share/theme/wallpapers/upstream/<theme>/` cache, then the cloned repository is **unconditionally deleted** via `finally: shutil.rmtree(clone_dir)`.
 5. **Sway / Wayland Environment Authority:**
    - Third-party themes targeting Hyprland/Hyprlock are sanitized: foreign window manager configs (`hyprland.conf`, `hyprlock.conf`, `hypridle.conf`) and arbitrary scripts (`*.sh`, binaries) are strictly ignored and never executed.
 6. **Hardware Display Saturation Authority (`apply-vibrance`):**
@@ -73,6 +79,7 @@ ATOMIC PROMOTION (os.replace)
 ```
 
 `theme-sync` uses deterministic JSON ordering plus atomic write-if-changed semantics. It prunes generated cache/preview/NvChad artifacts whose source themes disappeared, preserves hand-written Neovim themes, and runs the conservative duplicate policy before exposing the picker catalog. `~/.cache/theme/dedup.json` records every suppressed entry and its canonical survivor.
+It also emits `~/.cache/theme/picker-index.json`, a compact 327-entry row index containing only theme ID, swatches, and search metadata. Normal `rofi-theme` startup reads this single file and the active palette; it does not perform source freshness scans or automatic full sync. Missing cache remains a recovery case, while imports/deletes synchronize explicitly and Ctrl+R remains the user-requested refresh path.
 
 ---
 
@@ -163,19 +170,30 @@ Readability adjustments are lightness-only, so hue and saturation remain theme-s
 
 ## 4. Universal Application Coverage & Hot-Reload Mechanics
 
-The engine does not require theme repositories to provide application-specific files. It compiles native configurations from templates for all supported tools:
+The engine does not require theme repositories to provide application-specific files. Generated templates remain the universal fallback, but Omarchy repositories now have **author-app-profile precedence**: when a selected repository ships a recognized application theme, the importer preserves its safe color/profile data and `theme-set` uses those app-specific colors before synthesized values. It never imports third-party fonts, geometry, keybindings, commands, Hyprland configuration, or plugin/dependency declarations.
+
+Fresh imports embed these profiles in canonical Schema 1 JSON (`assets.upstream_apps_version = 3`). Older Omarchy imports self-heal through the daemonless `theme-upstream-apps hydrate <theme>` helper: a blobless Git tree scan fetches only the small supported text files into `~/.local/share/theme/upstream-apps/<theme>.json`, outside the theme-switch critical path, and conditionally reapplies only if that theme is still active. Generated fallback remains immediate while this happens.
+
+Supported authored runtime profiles are Alacritty, Kitty, btop, Cava, and Mako. Foot is the primary terminal adapter: when an Omarchy repository ships Alacritty and/or Kitty colors, `theme-set` translates them directly into Foot with `alacritty.toml` first, Kitty filling missing roles, and normalized generated colors as the per-value fallback. This preserves the author's background/foreground, cursor, selection, and ANSI 0-15 colors while keeping all Foot behavior local. Ghostty, Chromium frame color, and requested icon-theme metadata are also parsed/recorded for provenance, but are not forced when the local runtime has no safe adapter or required asset; for example a missing upstream-requested icon theme never replaces the installed workstation icon theme. Neovim continues to use the validated generated Base46 palette rather than executing untrusted upstream Lua.
+
+The application targets are:
 
 | Application | Configuration Target | Hot-Reload Mechanism | Latency |
 | :--- | :--- | :--- | :--- |
 | **Zed Editor** | `~/.config/zed/themes/nvchad-system.json` | `os.utime` touch on `settings.json` (inotify) | ~1ms |
 | **Sway WM** | `client.*` borders & bar blocks | Batched `swaymsg` IPC commands | ~8ms |
 | **Alacritty** | `~/.local/state/theme/alacritty.toml` | Inotify file watch on symlink target | Instant |
+| **Kitty** | `~/.config/kitty/kitty-colors.conf` | Native config reload signal from `theme-set` | Instant |
+| **Foot** | `~/.config/foot/foot-colors.ini` | Author Alacritty/Kitty palette -> Foot conversion + targeted OSC hot reload | Instant |
 | **Cava** | `~/.config/cava/config` (`[color]` section) | `SIGUSR2` POSIX signal to running PIDs | ~2ms |
 | **btop** | `~/.config/btop/themes/nvchad.theme` | `SIGUSR2` POSIX signal to running PIDs | ~2ms |
 | **Neovim** | Highlights via NvChad Base46 | Verified Unix Domain Socket RPC (`nvim --server ...`), with normal-startup headless cache repair when no live socket succeeds | Bounded |
+
 | **Yazi** | `~/.config/yazi/theme.toml` | Data Distribution Service (`ya emit-to 0 app:theme`) | ~4ms |
 | **Mako / Dunst** | `~/.config/mako/config` | `makoctl reload` / `dunstctl reload` | ~5ms |
 | **GTK 3 / 4** | `~/.config/gtk-3.0/gtk.css` | GSettings D-Bus broadcast | ~10ms |
+
+Neovim presentation follows theme polarity rather than hardcoded editor state. Dark themes keep the existing transparent-terminal presentation, while light themes force Base46 `transparency = false` so `Normal` receives the theme's light background instead of exposing an older/darker terminal surface. `lua/options.lua` does not force `background=dark`; Base46's compiled `defaults` cache owns that option. `theme-set` applies the same polarity through live NvChad RPC and headless cache refresh, so dark/light switches do not require restarting Neovim.
 
 ### Zed Editor Theming Mechanics:
 - Zed is configured in [`~/.config/zed/settings.json`](file:///home/onyx/.config/zed/settings.json) to use the custom theme `"NvChad System"`:
@@ -190,8 +208,8 @@ The engine does not require theme repositories to provide application-specific f
 - It executes `os.utime("~/.config/zed/settings.json", None)`. Zed's internal filesystem watcher instantly reloads the editor's window and syntax highlights live without closing or restarting tabs.
 
 ### Cava Audio Visualizer Mechanics:
-- **No Rainbow Spectrum**: Eliminates artificial multi-color rainbow gradients across the bars.
-- **Prominent Accent Theming (`gradient = 0`)**: The entire visualizer is rendered in the theme's signature accent color (`foreground = '{{accent}}'`), with `background = 'default'` ensuring the terminal's native transparency and background shine through cleanly.
+- **Author profile first:** if an Omarchy repository ships `cava_theme`/`cava.conf`, its validated ordered gradient colors, gradient count, foreground, and background are preserved. Aetheria is the regression reference: its original 8-color gradient is rendered exactly.
+- **Generated fallback:** when no upstream Cava profile exists, the visualizer keeps the previous clean single-accent behavior (`gradient = 0`, `background = 'default'`). Cobalt2 currently follows this fallback because its repository does not ship a Cava file.
 - The `[color]` block in `~/.config/cava/config` is atomically updated while preserving all user audio, PipeWire input, and monstercat smoothing settings, followed by a `SIGUSR2` signal for instant live reload.
 
 ---
@@ -209,26 +227,31 @@ The importer dynamically parses community repositories without imposing rigid di
 4. **Alacritty:** `alacritty.toml` / `alacritty.yml` (ANSI 0–15, cursor, and primary colors).
 5. **Kitty:** `kitty.conf` (color0–15, cursor, and selection background).
 6. **Ghostty:** `ghostty.conf` / `ghostty-theme`.
-7. **Btop:** `btop.theme` (main_bg, title accent, selected_bg).
+7. **Btop:** `btop.theme` (complete safe `theme[...]` color map, including graph gradients).
+
+For Omarchy repositories, recognized application files are also retained as structured `apps.*` profiles: Alacritty ANSI/cursor/selection colors, Kitty ANSI plus tabs/borders/marks, Ghostty palette metadata, btop's authored graph/box colors, Cava gradients, unambiguous Mako colors, Chromium frame color, and requested icon-theme name. This is data parsing only; executable/configuration behavior is not copied from the repository.
 
 ### Cross-Source Semantic Enrichment and Gallery Reconciliation:
-When an author distributes a theme without a master `colors.toml`, the engine extracts the strongest available terminal/TUI palette and cross-enriches missing cursor, selection, foreground, accent, wallpaper, and preview data. When `colors.toml` exists, its semantic background/foreground levels, accent, selection, muted color, and `active_border_color` take precedence. Temporary clones are wiped immediately after passive parsing.
+When an author distributes a theme without a master `colors.toml`, the engine extracts the strongest available terminal/TUI palette and cross-enriches missing cursor, selection, foreground, accent, wallpaper, and preview data. When `colors.toml` exists, its semantic background/foreground levels, accent, selection, muted color, and `active_border_color` take precedence. Wallpaper discovery treats conventional `backgrounds/`, `wallpapers/`, and `bg/` paths as authoritative and preserves every image in those sets with no numeric cap. Non-UI images elsewhere in the repository are considered only when no conventional wallpaper path exists, so lock-screen/README/support artwork is never mixed into a valid background set. All selected images are preserved locally before the temporary clone is removed.
 
 `omarchy-import --catalog` prefers Omarchy's published validated registry catalog and checks out each registry-pinned commit when that endpoint is reachable. If the registry CDN is unavailable, it falls back to the current `omarchy.org/themes` gallery and repository HEAD, then to legacy endpoints only as a last resort. The importer canonicalizes one local JSON file per repository, removes imports no longer listed, and mirrors the resulting imported directory back into chezmoi. A dead catalog link is reported as unreachable and is not silently replaced by a third-party mirror. During the 2026-11-01 live reconciliation the registry hostname did not resolve from this machine, so the gallery fallback was used: 233 entries were listed, 232 were reachable/imported, and `ankur311sudo/gruvu` returned repository-not-found.
 
 ### Centralized Theme Wallpaper Library
 
-Every exposed theme now has a curated local wallpaper mapping. The persistent root is `~/.local/share/theme/wallpapers/`: shared curated assets live under `assets/`, preserved Omarchy/repository backgrounds live under `upstream/`, and `manifest.json` records source provenance plus theme-to-asset mappings. The former `~/.cache/theme/wallpapers/` tree was migrated into this central root and is no longer the active storage path.
+The persistent wallpaper root is `~/.local/share/theme/wallpapers/`: shared matched assets live under `assets/`, repository-authored Omarchy backgrounds live under `upstream/<theme>/`, and `manifest.json` records provenance plus shared-library mappings. The former `~/.cache/theme/wallpapers/` tree is no longer active.
 
-`theme-wallpaper-library` is the explicit one-shot maintenance command. Wallhaven color buckets are used only to discover a conservative vetted source pool; after the images are local, assignment is based on the actual image pixels. A small ImageMagick histogram records dominant/chromatic colors, mean luminance, and mean saturation, and every theme is scored globally using its accent, authored Base16 hues, background luminance, and saturation. Choice #1 is the absolute best visual match; choices #2/#3 stay among the strongest visual candidates with a reuse penalty to avoid repetitive mappings. The verified 327-theme fleet uses all 63 curated assets, with 48 distinct first-choice assets and a maximum all-slot reuse of 35.
+Wallpaper source precedence is repository- and semantic-scoped. Repository-backed Omarchy themes (community imports plus official built-ins that point at GitHub) use **only images shipped by their own theme scope**. For standalone repositories that is normally the repository's `backgrounds/`/`wallpapers/` directory; for shared monorepos such as `omacom/omarchy`, discovery version 3 restricts the set to the canonical root declared by that built-in theme (for example `themes/everforest/backgrounds/`), never sibling theme directories. Non-Omarchy palettes never use the global Wallhaven mapping at runtime. `theme_engine.wallpaper_policy` resolves exact normalized name/display matches and explicit aliases from `~/.config/theme/wallpaper-aliases.json` first; if neither exists, `~/.config/theme/wallpaper-preferences.json` classifies the palette into artistic oil/illustration, light artistic, natural art, terminal technical, blueprint technical, or synth technical and chooses only from a curated Omarchy donor pool. Donor ranking keeps light/dark polarity, scores actual theme palette colors, and uses the configured artistic preference only as a ranking bias. The selected palette/theme never changes; only wallpaper ownership is borrowed. Import/update preserves every relevant deterministic repository image it discovers with no numeric count cap. If first use finds the resolved Omarchy repository uncached, or finds a legacy manifest without repository discovery version 3, `theme-set` starts one detached `theme-wallpaper hydrate <theme>` job; network I/O stays outside the theme-switch critical path. Legacy five-item caches are re-discovered from a blobless Git tree, existing matching files are reused, and only newly discovered backgrounds are downloaded. A completed wallpaper is applied only if that theme is still active. Solid `Sway` background remains the permanent fallback only when no usable donor exists.
 
-Automated selection is deliberately conservative about generative-AI provenance: General/SFW results only, at least 1920x1200, 16:9 or 16:10, favorites-first, explicit `AI art` search exclusion, full metadata rejection for known AI tags/source domains, and an upload cutoff before 2022-01-01. Metadata cannot mathematically prove authorship, so newer images are never selected automatically; they require manual review. Curated files are normalized to WebP quality 92 at up to 2560x1600 without upscaling. The 2026-11-01 verified pool contains uploads from 2014 through 2021 only, with a minimum local size of 1920x1200.
+`theme-wallpaper-library` remains an explicit one-shot maintenance/audit command for the historical shared matched pool. Its 327-theme Wallhaven mapping and 63 local assets can remain in `manifest.json`/`assets/` for provenance and experiments, but neither `theme-set` nor `theme-wallpaper` reads those mappings as a runtime wallpaper source.
 
-Ordinary `theme-set` remains network-free. `theme-wallpaper next|prev|random|set` uses already-local curated assets and persists the chosen file through `~/.config/current_wallpaper`; repository wallpapers in `upstream/` remain a compatibility fallback. Source/provenance metadata is managed in chezmoi while image binaries remain local data outside Git. Full policy, storage, recovery, and rebuild details are in [`wallpaper-library.md`](wallpaper-library.md).
+Automated shared-library selection remains conservative about generative-AI provenance: General/SFW results only, at least 1920x1200, 16:9 or 16:10, favorites-first, explicit `AI art` search exclusion, metadata rejection for known AI tags/source domains, and an upload cutoff before 2022-01-01. Repository-authored Omarchy images are trusted as part of the selected upstream theme repository rather than replaced by unrelated palette matches.
+
+`theme-wallpaper next|prev|random|set` persists the selected file through `~/.config/current_wallpaper`. Image binaries remain local data outside Git; source/provenance and candidate paths remain in chezmoi. Full policy, storage, recovery, and rebuild details are in [`wallpaper-library.md`](wallpaper-library.md).
 
 Sway controls remain daemonless:
-- `Win + Shift + W`, `Alt + Shift + W`, or `Win + Ctrl + W`: next mapped wallpaper for the active theme.
-- `Win + Ctrl + Shift + W`: previous mapped wallpaper.
+- `Alt + Shift + M` or `Ctrl + Shift + M`: open the theme picker.
+- `Win + Shift + W` or `Win + Ctrl + W`: next wallpaper from the active theme's allowed source set.
+- `Win + Ctrl + Shift + W`: previous wallpaper.
 - The retired `ds3-wallpaper` helper is not used by the theme system; the old static DS3 image pack may remain on disk as ordinary images.
 
 ---
@@ -247,9 +270,11 @@ theme-set tokyonight
 theme-set forest-green
 
 # Launch the interactive Rofi theme picker (Native Script Mode)
-# Enter performs read-only preflight, then a synchronous verified apply; failures stay visible.
-# A stale cache is synchronized before rows are exposed, so selection cannot race cache replacement.
+# Menu rows come from ~/.cache/theme/picker-index.json, so normal open never scans sources or reparses 327 JSON files.
+# Enter closes immediately and queues the validated theme-set transaction; Ctrl+R is the explicit cache refresh.
 rofi-theme                          # Keys: Enter (Apply), Ctrl+D (Delete), Ctrl+R (Sync), Ctrl+I (Info)
+
+Launcher UI outside the theme picker remains source-owned as well. The Alt+g Fuzzel game menu in `~/.local/bin/rofi-games` uses descriptive labels only; its Elden Ring row currently advertises the verified `LSFG 2x (stable)` profile and dispatches to `eldenring-lsfg`. Similarly, the `Caps + w` process killer menu in `~/.local/bin/rofi-pkill` uses native Wayland Fuzzel dmenu mode styled with the active theme border and Papirus icons, displaying clean single-line entries (`Application Name — Window Title`) with zero metric or divider bloat.
 
 # List themes (clean output for scripts and piping)
 theme-ls                            # Print all theme names (1 per line)
@@ -277,20 +302,19 @@ theme-wallpaper next
 theme-wallpaper prev
 theme-wallpaper random
 
-# Inspect a theme's curated mapping plus repository fallback
+# Inspect the theme's wallpaper policy, repository candidates and local files
 theme-wallpaper list japan-night
 
-# Select a specific mapped slot
+# Select a specific local slot from the theme's full discovered repository set
 theme-wallpaper set 2 japan-night
 
-# Central library maintenance; explicit network operation
+# Historical shared-library maintenance/audit only; not used by runtime switching
 theme-wallpaper-library plan
-theme-wallpaper-library sync
 theme-wallpaper-library status
 theme-wallpaper-library audit
 
-# Rehydrate already-recorded curated assets if local image data is missing
-theme-wallpaper-library fetch japan-night
+# Inspect a non-Omarchy palette donor mapping
+theme-wallpaper list gruvchad
 ```
 
 ### Importing Omarchy Themes:
@@ -367,3 +391,12 @@ A theme is suppressed when either condition holds:
 2. **Near duplicate:** same normalized theme family and light/dark type with mean per-color RGB distance `<= 70`. Cosmetic family suffixes such as `-pro`, `-moon`, and `-oled` are normalized; meaningful identities such as `gruvbox-material` and `kanagawa-dragon` are not collapsed into their base families.
 
 The 2026-11-01 fleet suppresses 20 exact/near copies. Remaining same-family pairs that exceed the threshold stay visible as real variants. The source files are not destructively deleted merely because the generated picker hides a duplicate; this prevents upstream Base46 or community sources from being damaged and makes the decision fully reversible from the manifest.
+
+---
+
+## 9. Future Plans & Extension Roadmaps
+
+Planned expansions to the theme architecture are documented in detail within the implementation specification:
+
+- **TUI Daily-Driver Expansion:** See [theme-implementation.md#8-tui-daily-driver-expansion-roadmap](file:///home/onyx/.local/share/chezmoi/docs/theme/theme-implementation.md#L241) for CAVA, FZF, Bat, Delta, Lazygit, and Zellij integrations.
+- **Dynamic Browser UI Retheming (Brave / Chromium):** See [theme-implementation.md#9-future-plans-dynamic-browser-ui-retheming-brave--chromium](file:///home/onyx/.local/share/chezmoi/docs/theme/theme-implementation.md#L257) for engineering analysis, trade-off evaluations between Matugen unpacked extensions vs Omarchy enterprise managed policies (`BrowserThemeColor`), and technical hooks for browser frame theming.

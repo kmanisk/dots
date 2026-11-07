@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Run Syncthing only around KeePassXC startup/shutdown; keep it off while idle.
+set -euo pipefail
+
+FOLDER_ID="keepass-vault"
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}"
+LOCK_FILE="$RUNTIME_DIR/keepassxc-sync.lock"
+
+sync_once() {
+    local started_here=0 api status state need
+
+    exec 9>"$LOCK_FILE"
+    flock 9
+
+    if ! systemctl --user is-active --quiet syncthing.service; then
+        systemctl --user start syncthing.service
+        started_here=1
+    fi
+
+    for _ in $(seq 1 20); do
+        if syncthing cli show system >/dev/null 2>&1; then
+            break
+        fi
+        sleep 0.25
+    done
+
+    if syncthing cli show system >/dev/null 2>&1; then
+        api="$(syncthing cli config gui apikey get 2>/dev/null || true)"
+        if [[ -n "$api" ]]; then
+            curl -fsS -X POST -H "X-API-Key: $api" \
+                "http://127.0.0.1:8384/rest/db/scan?folder=$FOLDER_ID" >/dev/null 2>&1 || true
+
+            # The vault is tiny. Give local changes a short bounded window to
+            # settle, but never leave a sync daemon resident waiting for an
+            # offline phone.
+            for _ in $(seq 1 20); do
+                status="$(curl -fsS -H "X-API-Key: $api" \
+                    "http://127.0.0.1:8384/rest/db/status?folder=$FOLDER_ID" 2>/dev/null || true)"
+                if [[ -n "$status" ]]; then
+                    state="$(jq -r '.state // ""' <<<"$status" 2>/dev/null || true)"
+                    need="$(jq -r '(.needBytes // 0) + (.needItems // 0)' <<<"$status" 2>/dev/null || echo 1)"
+                    if [[ "$state" == "idle" && "$need" == "0" ]]; then
+                        sleep 0.5
+                        break
+                    fi
+                fi
+                sleep 0.25
+            done
+        fi
+    fi
+
+    if [[ "$started_here" -eq 1 ]]; then
+        systemctl --user stop syncthing.service
+    fi
+
+    flock -u 9
+}
+
+if [[ "${1:-}" == "--sync-only" ]]; then
+    sync_once
+    exit 0
+fi
+
+sync_once
+rc=0
+/usr/bin/keepassxc "$@" || rc=$?
+sync_once
+exit "$rc"

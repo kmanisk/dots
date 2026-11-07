@@ -304,6 +304,33 @@ def fallback_launch(win):
     return []
 
 
+def night_light_enabled():
+    """Read applied wl-gammarelay temperature, not daemon presence.
+
+    The daemon runs for brightness control even when night light is off.
+    Fall back to the user preference only if D-Bus is unavailable.
+    """
+    try:
+        result = subprocess.check_output(
+            ["busctl", "--user", "get-property", "rs.wl-gammarelay", "/",
+             "rs.wl.gammarelay", "Temperature"],
+            stderr=subprocess.DEVNULL, timeout=2, text=True).split()
+        if len(result) == 2 and result[0] == "q":
+            return int(result[1]) < 6500
+    except (OSError, subprocess.CalledProcessError,
+            subprocess.TimeoutExpired, ValueError):
+        pass
+    try:
+        preference = NL_STATE.read_text().strip().lower()
+        if preference in ("on", "1"):
+            return True
+        if preference in ("off", "0", "disabled"):
+            return False
+    except OSError:
+        pass
+    return None
+
+
 def proc_running(name):
     try:
         subprocess.check_output(["pgrep", "-x", name],
@@ -319,11 +346,10 @@ def capture_system_state(sock):
     never raises, never aborts the workspace save."""
     state = {}
     try:
-        # Night light: what the user sees == wlsunset actually running.
-        # The state file is the toggle's persistent preference; the
-        # process is the ground truth (a crash leaves file stale).
-        nl_on = proc_running("wlsunset")
-        state["night_light"] = {"enabled": nl_on}
+        # wl-gammarelay serves brightness even when night light is off.
+        nl_on = night_light_enabled()
+        if nl_on is not None:
+            state["night_light"] = {"enabled": nl_on}
     except Exception:
         pass
     try:

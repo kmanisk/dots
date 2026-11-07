@@ -1,6 +1,6 @@
 # Waydroid + NVIDIA on CachyOS — Setup & Troubleshooting Log
 
-## Current live state — 2026-11-01
+## Current live state — 2026-11-02
 
 - Installed package: `waydroid-nvidia-bin 0.2.0-1`; host NVIDIA driver `615.78.08`, open kernel module, `nvidia_drm.modeset=Y`, dGPU-only Sway session on the RTX 5050.
 - The 0.2 migration is complete. `/var/lib/waydroid/waydroid.cfg` now selects `nvidia_driver_mode = nvidia-prolapse`, `nvidia_native_gl = off`, and `nvidia_prolapse_install = vendor-image`; `vendor_ota` points at the v0.2.0 NVIDIA vendor-image release.
@@ -13,10 +13,11 @@
   Its release gate passed all 22 Android/Android32 cases plus media checks against NVIDIA kernel module `615.78.08`. The installed vendor image is v0.2.0 and the previous configuration was preserved under `/var/lib/waydroid/before-vendor-image-20261101-135304/`.
 - Live verification after migration reports `Session: RUNNING`, `Container: RUNNING`, Android `sys.boot_completed=1`, and SurfaceFlinger GLES as ANGLE on NVIDIA Vulkan/NVK for the RTX 5050. `wd-venus.service` is not required in `nvidia-prolapse` mode.
 - `~/.local/bin/waydroid-launcher` is 0.2-mode-aware and waits for the Waydroid client bridge before opening the full UI or an app, avoiding the transient `Failed to get service waydroidplatform` race seen on cold starts. The user `Waydroid.desktop` entry used by the Alt+Space Fuzzel launcher resolves `waydroid-launcher` from the Sway session PATH instead of hardcoding the local username.
-- Waydroid is now strictly on-demand. `waydroid-container.service` is disabled at boot; the launcher starts it when needed. `~/.local/bin/waydroid-stop` stops the Android session, stops legacy Venus if present, then runs `systemctl disable --now waydroid-container.service` so future `waydroid-nvidia-setup` runs cannot accidentally leave the container enabled. Fuzzel exposes a separate `Stop Waydroid` entry and the main desktop entry's Stop action uses the same helper. Automatic shutdown from Sway window-close events is intentionally not used because normal Android activity/surface replacement can destroy and recreate the `app_id=Waydroid` surface, making compositor close events ambiguous.
+- Waydroid is now strictly on-demand. `waydroid-container.service` is disabled at boot; the launcher starts it when needed. `~/.local/bin/waydroid-stop` stops the Android session, stops legacy Venus if present, then runs `systemctl disable --now waydroid-container.service` so future `waydroid-nvidia-setup` runs cannot accidentally leave the container enabled. `~/.local/bin/waydroid-restart` composes the existing stop and launcher helpers, so recovery performs a full clean container/session restart and reopens the UI without duplicating lifecycle logic. Fuzzel exposes separate `Restart Waydroid` and `Stop Waydroid` entries, the main desktop entry has matching Restart/Stop actions, and Fish provides `wd`, `wds`, and `wdr` for launch/stop/restart. Automatic shutdown from Sway window-close events is intentionally not used because normal Android activity/surface replacement can destroy and recreate the `app_id=Waydroid` surface, making compositor close events ambiguous.
 - Host audio was re-audited after the 0.2 migration: the guest has `audio.primary.waydroid.so`, `/run/user/1000/pulse/native` is correctly bind-mounted as `/run/xdg/pulse/native`, Android's persisted music volume is nonzero, and `audio doctor` reports 0 errors/0 warnings. Do not modify global PipeWire/DAX routing solely for a silent protected Hotstar title; first prove that an Android playback stream is actually created.
 - The current Waydroid image contains Android MediaDrm framework libraries and the ClearKey DRM plugin only (`libdrmclearkeyplugin.so`); no Widevine CDM/plugin is installed. JioHotstar protected playback can therefore fail with black video and may never establish the normal media/audio pipeline. Do not spoof Widevine L1, device attestation, HDCP, or extracted DRM keys. Use a supported Widevine-capable browser or certified physical Android device for protected Hotstar playback. If unprotected Android apps are also silent, authorize the normal ADB debugging prompt and inspect `dumpsys audio`/logcat as a separate audio issue.
 - `/dev/udmabuf` access is correct for the desktop user, so the known "cursor invisible / black screenshot" permission failure is not present on this machine.
+- Waydroid now has reversible Kitsune/Magisk root installed through WaydroidSU in the existing system overlay; the base `system.img` and NVIDIA `vendor.img` were not modified. `Kitsune Mask` (`io.github.huskydg.magisk`) is installed and host-visible `magiskd` is running. A clean cold boot preserved Android boot completion, Play Store, Houdini (`x86_64,x86,arm64-v8a,armeabi-v7a,armeabi` / `libhoudini.so`), network, `audio.primary.waydroid.so`, and SurfaceFlinger ANGLE on NVIDIA Vulkan/NVK. ADB-shell `su` is denied until explicitly allowed in Kitsune superuser policy; this is the secure default, not a root failure. The pre-root rollback archive is `~/waydroid-backup-pre-magisk-20261102/`. Keep future root updates overlay-based; do not use direct system-image installation.
 
 ### Historical note
 
@@ -102,6 +103,28 @@ systemctl --user stop wd-venus.service
 - Functional proof: Subway Surfers (`com.rioo.runnersubway`) running translated — Houdini 14.0.0 `GoogleGame_com1.3` init OK, process maps contain `libhoudini.so` + 64-bit `vulkan.virtio.so` (ARM → x86_64 → Venus NVIDIA). Translated system procs: media provider, Google search, GMS.
 - Note: one `hwcomposer` SIGSEGV (Wayland-dispatch mutex) occurred post-install and felled a boot's windows; cleared by container restart, crash-free since. Causation vs Houdini not established (HWC flaky before).
 - Houdini uninstall: `cd /tmp/opencode/waydroid_script && sudo venv/bin/python3 main.py --android-version 13 remove libhoudini`.
+
+## 9. APK association and host media permissions (2026-11-02)
+
+- **APK double-click binding**:
+  - `~/.local/bin/waydroid-apk-install` provides a session-aware wrapper with desktop notifications. If Waydroid is stopped, it starts the container and user session, probes the client bridge, and installs the APK package via `waydroid app install`.
+  - Desktop entry: `~/.local/share/applications/waydroid-apk-install.desktop` associates MIME type `application/vnd.android.package-archive` to `waydroid-apk-install.desktop` so double-clicking `.apk` files in Thunar or browser downloads installs directly into Waydroid instead of opening PeaZip.
+  - Thunar custom action: right-click `Install in Waydroid` is registered in `~/.config/Thunar/uca.xml`.
+- **Host storage / media access**:
+  - Waydroid stores emulated media (`/sdcard/`) under `~/.local/share/waydroid/data/media/0/`.
+  - Android creates this folder under UID/GID `1023:1023` with mode `0770`, causing permission denied errors in host file managers (e.g. Yazi, Thunar).
+  - Preserving Android UID/GID while granting the host user full access is solved via POSIX ACLs:
+    ```bash
+    sudo setfacl -R -m u:onyx:rwx,d:u:onyx:rwx ~/.local/share/waydroid/data/media
+    ```
+  - This allows file managers and user scripts to read and copy files into `/sdcard/Download` or `/sdcard/Pictures` directly without modifying internal Android permissions or requiring root.
+- **Pixel XL persistent boot spoofing**:
+  - Fixed a boot race where the stock `gphotos-unlimited` module unmounted `Photos.apk` in `post-fs-data` and only re-mounted it after boot complete, allowing Google Photos to start unpatched and lose the unlimited backup offer.
+  - Bound `Photos.apk` immediately in `post-fs-data.sh` before Zygote starts.
+  - Added persistent Pixel XL identity properties in `system.prop` (`ro.product.model=Pixel XL`, `ro.product.brand=google`, `ro.product.manufacturer=Google`, `ro.product.device=marlin`).
+  - Injected `pixel_2016_exclusive.xml` under `/system/etc/sysconfig/` to declare `com.google.android.apps.photos.NEXUS_PRELOAD`.
+  - Added `am force-stop com.google.android.apps.photos` at the end of `service.sh` to ensure any transient boot process restarts with the spoofed tier intact.
+  - Full dedicated context and maintenance guide: `docs/virtualization/waydroid.md`.
 
 ## 7. Full rollback
 ```bash

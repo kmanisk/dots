@@ -13,7 +13,7 @@ in `.chezmoidata.toml`.
 | `asus.txt` | asusctl, supergfxctl | Official / `features.asus_ctl = true` |
 | `sway.txt` | Sway desktop stack (mako, fuzzel, grim, slurp, brave-origin-bin, ImageMagick for curated wallpaper normalization) | Official / `features.sway = true` |
 | `audio.txt` | PipeWire, WirePlumber, audio firmware, rnnoise | Official / audio provider starts with `pipewire` |
-| `development.txt` | Compilers, runtimes (Node.js, Python, ccache, mold) | Official / `features.development = true` |
+| `development.txt` | Compilers, runtimes, and native on-demand QEMU/KVM Windows virtualization (Node.js, Python, ccache, mold, QEMU, swtpm, FreeRDP) | Official / `features.development = true` |
 | `aur-explicit.txt` | AUR packages (antigravity-cli, xremap, vkbasalt, lib32-vkbasalt) | AUR via paru / helper present |
 
 `wallpapers/` and `systemd/enabled-units-reference.txt` are references only,

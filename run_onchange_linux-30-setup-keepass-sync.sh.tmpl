@@ -1,0 +1,105 @@
+{{- if eq .chezmoi.os "linux" -}}
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v keepassxc >/dev/null 2>&1 || ! command -v syncthing >/dev/null 2>&1; then
+    exit 0
+fi
+
+mkdir -p "$HOME/Sync/KeePass" "$HOME/.config/keepassxc" \
+    "$HOME/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts"
+
+# KeePassXC's main INI contains dynamic UI/application state, so preserve it and
+# only enforce the one durable browser-integration key this workstation needs.
+python3 - <<'PY'
+import os
+from pathlib import Path
+
+path = Path(os.path.expanduser("~/.config/keepassxc/keepassxc.ini"))
+text = path.read_text(encoding="utf-8") if path.exists() else ""
+lines = text.splitlines()
+section = None
+browser_start = None
+browser_end = len(lines)
+for i, line in enumerate(lines):
+    stripped = line.strip()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        section = stripped[1:-1].strip().lower()
+        if section == "browser" and browser_start is None:
+            browser_start = i
+        elif browser_start is not None and i > browser_start:
+            browser_end = i
+            break
+
+if browser_start is None:
+    if lines and lines[-1] != "":
+        lines.append("")
+    lines.extend(["[Browser]", "Enabled=true"])
+else:
+    replaced = False
+    for i in range(browser_start + 1, browser_end):
+        if lines[i].split("=", 1)[0].strip().lower() == "enabled":
+            lines[i] = "Enabled=true"
+            replaced = True
+            break
+    if not replaced:
+        lines.insert(browser_start + 1, "Enabled=true")
+
+new_text = "\n".join(lines).rstrip("\n") + "\n"
+tmp = path.with_suffix(path.suffix + ".tmp")
+tmp.write_text(new_text, encoding="utf-8")
+os.replace(tmp, path)
+PY
+
+cat > "$HOME/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts/org.keepassxc.keepassxc_browser.json.tmp" <<'JSON'
+{
+  "allowed_origins": [
+    "chrome-extension://oboonakemofpalcgghocfoadofidjkkk/",
+    "chrome-extension://pdffhmdngciaglkoonimfcmckehcpafo/"
+  ],
+  "description": "KeePassXC integration with native messaging support",
+  "name": "org.keepassxc.keepassxc_browser",
+  "path": "/usr/bin/keepassxc-proxy",
+  "type": "stdio"
+}
+JSON
+mv "$HOME/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts/org.keepassxc.keepassxc_browser.json.tmp" \
+   "$HOME/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts/org.keepassxc.keepassxc_browser.json"
+
+# Syncthing is configured on demand and must not become a persistent user daemon.
+systemctl --user disable syncthing.service >/dev/null 2>&1 || true
+syncthing_started_here=0
+if ! systemctl --user is-active --quiet syncthing.service; then
+    systemctl --user start syncthing.service 2>/dev/null || true
+    syncthing_started_here=1
+fi
+for _ in $(seq 1 20); do
+    if syncthing cli show system >/dev/null 2>&1; then
+        break
+    fi
+    sleep 0.25
+done
+
+if syncthing cli show system >/dev/null 2>&1; then
+    if ! syncthing cli config folders list | grep -Fxq 'keepass-vault'; then
+        syncthing cli config folders add \
+            --id=keepass-vault \
+            --label='KeePass Vault' \
+            --path="$HOME/Sync/KeePass" \
+            --type=sendreceive
+    fi
+
+    syncthing cli config folders keepass-vault label set 'KeePass Vault'
+    syncthing cli config folders keepass-vault path set "$HOME/Sync/KeePass"
+    syncthing cli config folders keepass-vault type set sendreceive
+    syncthing cli config folders keepass-vault fswatcher-enabled set true
+    syncthing cli config folders keepass-vault fswatcher-delays set 1
+    syncthing cli config folders keepass-vault versioning type set simple
+    syncthing cli config folders keepass-vault versioning params set keep 10
+    syncthing cli config folders keepass-vault versioning cleanup-intervals set 3600
+fi
+
+if [ "$syncthing_started_here" -eq 1 ]; then
+    systemctl --user stop syncthing.service 2>/dev/null || true
+fi
+{{ end }}

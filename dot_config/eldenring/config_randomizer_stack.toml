@@ -1,0 +1,19 @@
+# Managed Elden Ring randomizer/QoL ModEngine2 profile.
+# The Randomizer GUI owns its auto-generated config separately; do not copy
+# generated randomizer contents here. This profile points at the randomizer
+# output directory and layers runtime-only DLL mods around it.
+
+[modengine]
+debug = false
+external_dlls = [
+    "Z:\\mnt\\Games\\NonSteamGames\\ELDEN RING\\randomizer\\dll\\RandomizerCrashFix.dll",
+    "Z:\\mnt\\Games\\NonSteamGames\\ELDEN RING\\ModEngine2\\ModEngine-2.1.0.0-win64\\natives\\DelayedModLoader\\DelayedModLoader.dll",
+    "Z:\\mnt\\Games\\NonSteamGames\\ELDEN RING\\ModEngine2\\ModEngine-2.1.0.0-win64\\natives\\MapForGoblins\\MapForGoblins.dll",
+]
+
+[extension.mod_loader]
+enabled = true
+loose_params = false
+mods = [
+    { enabled = true, name = "randomizer", path = "Z:\\mnt\\Games\\NonSteamGames\\ELDEN RING\\randomizer" },
+]

@@ -1,8 +1,11 @@
 ---@type ChadrcConfig
 local M = {}
 
--- Read canonical system theme state on startup
+-- Read canonical system theme state on startup.
+-- Light themes must keep their own background; transparent Normal highlights
+-- would otherwise expose a stale/dark terminal surface behind the light palette.
 local system_theme = "gruvchad"
+local system_theme_type = "dark"
 local state_file = vim.fn.expand("~/.local/state/theme/name")
 local f_theme = io.open(state_file, "r")
 if f_theme then
@@ -12,10 +15,22 @@ if f_theme then
         system_theme = vim.trim(t)
     end
 end
+
+local type_file = vim.fn.expand("~/.local/state/theme/type")
+local f_type = io.open(type_file, "r")
+if f_type then
+    local t = f_type:read("*l")
+    f_type:close()
+    if t and t ~= "" then
+        system_theme_type = vim.trim(t)
+    end
+end
+
+local system_transparency = system_theme_type ~= "light"
 -- UI Configuration
 M.ui = {
     theme = system_theme, -- Set the theme for Neovim
-    transparency = true, -- Enable transparency
+    transparency = system_transparency, -- Opaque for light themes, transparent for dark themes
     -- default/vscode/vscode_colored/minimal
     -- default/round/block/arrow separators work only for default statusline theme
     -- round and block will work for minimal theme only
@@ -66,7 +81,7 @@ M.base46 = {
         TelescopePreviewTitle = { fg = "white", bg = "one_bg2", bold = true },
     },
     changed_themes = {},
-    transparency = true,
+    transparency = system_transparency,
     theme_toggle = { "gruvchad", "one_light" },
 }
 

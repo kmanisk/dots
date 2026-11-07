@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# bloodborne-run: Bloodborne (bbport Windows port by Supermedo) Launcher with Proton,
+# DLSS / FSR 4 upscaling, RTX 5050 Mobile dGPU offload, and automatic power & workspace orchestration.
+set -e
+
+# Steam AppID metadata for Proton
+export SteamAppId="bloodborne"
+export SteamGameId="bloodborne"
+export STEAM_COMPAT_CLIENT_INSTALL_PATH="$HOME/.local/share/Steam"
+export STEAM_COMPAT_DATA_PATH="$HOME/.local/share/Steam/steamapps/compatdata/bloodborne"
+mkdir -p "$STEAM_COMPAT_DATA_PATH"
+
+# --- GPU mode-aware graphics environment (AGENTS.md Rule 2) ---
+if [ -z "$GPU_MODE" ]; then
+    if [ -r "${XDG_RUNTIME_DIR:-/run/user/$UID}/gpu_mode" ]; then
+        read -r GPU_MODE < "${XDG_RUNTIME_DIR:-/run/user/$UID}/gpu_mode"
+    else
+        GPU_MODE="$(supergfxctl -g 2>/dev/null || true)"
+    fi
+fi
+
+case "$GPU_MODE" in
+    Hybrid)
+        export __NV_PRIME_RENDER_OFFLOAD=1
+        export __GLX_VENDOR_LIBRARY_NAME=nvidia
+        export __VK_LAYER_NV_optimus=NVIDIA_only
+        export LIBVA_DRIVER_NAME=iHD
+        ;;
+    AsusMuxDgpu)
+        unset __NV_PRIME_RENDER_OFFLOAD
+        unset __GLX_VENDOR_LIBRARY_NAME
+        export __VK_LAYER_NV_optimus=NVIDIA_only
+        export LIBVA_DRIVER_NAME=nvidia
+        ;;
+    *)
+        export __NV_PRIME_RENDER_OFFLOAD=1
+        export __GLX_VENDOR_LIBRARY_NAME=nvidia
+        export __VK_LAYER_NV_optimus=NVIDIA_only
+        ;;
+esac
+
+# Audio: follow system default output
+unset PIPEWIRE_NODE
+unset PULSE_SINK
+
+# Vulkan memory alignment & stability for NVIDIA Blackwell / RTX 50-series
+export VKD3D_CONFIG="no_upload_hvv,force_host_cached"
+export PROTON_ENABLE_NVAPI=1
+
+# MangoHud performance telemetry overlay (Alt+3 toggles, Alt+4 cycles font size)
+export MANGOHUD=1
+
+# Game paths
+GAME_BASE="/mnt/Games/NonSteamGames/New Folder/Bloodborne"
+if [ ! -d "$GAME_BASE" ] && [ -d "/mnt/Games/NonSteamGames/Bloodborne" ]; then
+    GAME_BASE="/mnt/Games/NonSteamGames/Bloodborne"
+fi
+BBPORT_DIR="$GAME_BASE/bbport-windows"
+
+# Select executable
+EXE_NAME="Play Bloodborne.exe"
+if [ "$1" = "--config" ] || [ "$1" = "-c" ]; then
+    EXE_NAME="Bloodborne.exe"
+    shift
+fi
+TARGET_EXE="$BBPORT_DIR/$EXE_NAME"
+
+# Single-instance guard
+if pgrep -f "bb-probe\.exe" >/dev/null 2>&1; then
+    notify-send -i input-gaming "Bloodborne" "Already running — switching to Workspace 4..." 2>/dev/null || true
+    if [ -n "$SWAYSOCK" ] || [ -n "$WAYLAND_DISPLAY" ]; then
+        swaymsg "workspace number 4" >/dev/null 2>&1 || true
+    fi
+    exit 0
+fi
+
+# Select Proton runner
+if [ -f "$HOME/.local/share/Steam/compatibilitytools.d/GE-Proton11-7-x86_64/proton" ]; then
+    PROTON_BIN="$HOME/.local/share/Steam/compatibilitytools.d/GE-Proton11-7-x86_64/proton"
+elif [ -f "$HOME/.local/share/Steam/compatibilitytools.d/proton-cachyos-slr/proton" ]; then
+    PROTON_BIN="$HOME/.local/share/Steam/compatibilitytools.d/proton-cachyos-slr/proton"
+else
+    PROTON_BIN="$HOME/.local/share/Steam/steamapps/common/Proton - Experimental/proton"
+fi
+
+# Auto power profile
+asusctl profile set Performance >/dev/null 2>&1 || true
+trap 'asusctl profile set Balanced >/dev/null 2>&1 || true' EXIT INT TERM
+trap '' HUP
+
+# Focus Workspace 4 automatically
+notify-send -i input-gaming "Bloodborne" "Launching Bloodborne (bbport / Proton)..." 2>/dev/null || true
+if [ -n "$SWAYSOCK" ] || [ -n "$WAYLAND_DISPLAY" ]; then
+    swaymsg "workspace number 4" >/dev/null 2>&1 || true
+fi
+
+cd "$BBPORT_DIR"
+
+exec "$PROTON_BIN" run "$TARGET_EXE" "$@"

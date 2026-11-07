@@ -26,6 +26,7 @@ CUSTOM_DIR = os.path.expanduser("~/.config/theme/custom")
 IMPORTED_DIR = os.path.expanduser("~/.config/theme/imported")
 MANIFEST_PATH = os.path.expanduser("~/.cache/theme/manifest.json")
 DEDUP_MANIFEST_PATH = os.path.expanduser("~/.cache/theme/dedup.json")
+PICKER_INDEX_PATH = os.path.expanduser("~/.cache/theme/picker-index.json")
 
 os.makedirs(CACHE_DIR, exist_ok=True)
 os.makedirs(PREVIEWS_DIR, exist_ok=True)
@@ -147,6 +148,45 @@ def ensure_fallbacks(data):
     data["base_16"] = b16
     data["base_30"] = b30
     return data
+
+def build_picker_index(themes, exposed_names):
+    """Write the compact metadata Rofi needs so menu open never reparses 327 JSON files."""
+    order = ["BASE08", "BASE09", "BASE0A", "BASE0B", "BASE0C", "BASE0D", "BASE0E", "BASE0F"]
+    entries = []
+    for name in sorted(exposed_names):
+        data = themes.get(name)
+        if not isinstance(data, dict):
+            continue
+        b16 = data.get("base_16") or (data.get("palette") or {}).get("base_16") or {}
+        source = data.get("source") or {}
+        entries.append({
+            "name": name,
+            "swatches": [str(b16.get(key) or "#777777") for key in order],
+            "meta": " ".join(
+                part for part in [
+                    str(source.get("provider") or ""),
+                    str(data.get("type") or ""),
+                    " ".join(str(tag) for tag in (source.get("tags") or [])),
+                ] if part
+            ).strip(),
+        })
+    payload = {"version": 1, "themes": entries}
+    write_atomic(PICKER_INDEX_PATH, json.dumps(payload, separators=(",", ":"), sort_keys=True))
+
+
+def build_picker_index_from_cache():
+    themes = {}
+    names = set()
+    for path in sorted(glob.glob(os.path.join(CACHE_DIR, "*.json"))):
+        name = os.path.splitext(os.path.basename(path))[0]
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                themes[name] = json.load(handle)
+            names.add(name)
+        except Exception:
+            continue
+    build_picker_index(themes, names)
+
 
 def write_atomic(filepath, content, binary=False):
     """Atomically replace a generated file only when its content changed."""
@@ -426,6 +466,8 @@ def main():
 
     stale, changed = is_cache_stale(source_dirs, MANIFEST_PATH)
     if not stale and not force and os.path.exists(CACHE_DIR) and len(os.listdir(CACHE_DIR)) > 0:
+        if not os.path.isfile(PICKER_INDEX_PATH):
+            build_picker_index_from_cache()
         print("Theme cache is up to date (0 changes detected via manifest).")
         return 0
 
@@ -554,6 +596,7 @@ def main():
     # caused needless write/delete churn on every forced rebuild.
     duplicate_names = set(dedup.get("duplicates", {}))
     exposed_names = set(normalized_themes) - duplicate_names
+    build_picker_index(normalized_themes, exposed_names)
     for cname in sorted(exposed_names):
         write_nvim_theme(normalized_themes[cname])
 

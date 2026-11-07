@@ -14,6 +14,9 @@ keymap:
   # --- Universal Hardware Controls (Volume, Brightness, Vibrance in Games & Desktop) ---
   - name: Universal Hardware Controls
     remap:
+      # Windows/Linux focus toggle (global: works inside Looking Glass too)
+      CapsLock-Tab:
+        launch: ["/bin/sh", "-c", "exec \"$HOME/.local/bin/win-focus-toggle\""]
       # Brightness (CapsLock + [ for up, ' for down)
       CapsLock-LEFTBRACE:
         launch: ["/home/onyx/.local/bin/change-brightness", "+5%"]

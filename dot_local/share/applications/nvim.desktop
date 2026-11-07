@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Neovim
+GenericName=Text Editor
+Comment=Edit text files in Foot terminal
+TryExec=nvim
+Exec=footclient nvim %F
+Icon=nvim
+Terminal=false
+Type=Application
+Categories=Utility;TextEditor;Development;
+StartupNotify=false
+MimeType=text/english;text/plain;text/x-makefile;text/x-c++hdr;text/x-c++src;text/x-chdr;text/x-csrc;text/x-java;text/x-moc;text/x-pascal;text/x-tcl;text/x-tex;application/x-shellscript;text/x-c;text/x-c++;text/markdown;text/x-markdown;application/json;application/toml;application/x-yaml;application/x-conf;application/x-config;text/x-python;text/x-go;text/x-rust;

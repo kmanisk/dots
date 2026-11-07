@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# GridCraft - Spreadsheets and data (ArtCraft Suite)
+# Ensure native Wayland display backend under Sway/Wayland sessions
+if [ -n "$WAYLAND_DISPLAY" ]; then
+    export GRIDCRAFT_WAYLAND=1
+fi
+exec /usr/bin/gridcraft "$@"

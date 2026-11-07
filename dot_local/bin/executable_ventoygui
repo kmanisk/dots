@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Ventoy uses pkexec to run a GTK3 GUI as root and forces X11.
+# Sway Xwayland permits only the desktop user by default; allow root only
+# for the duration of this one GUI session, then revoke our grant.
+set -euo pipefail
+
+export DISPLAY="${DISPLAY:-:0}"
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+exec 9>"$RUNTIME_DIR/ventoygui.lock"
+flock -n 9 || exit 0
+
+if ! command -v xhost >/dev/null; then
+    printf 'Ventoy: xhost is needed to authorize the elevated X11 window.\n' >&2
+    exit 1
+fi
+
+GRANTED_BY_US=0
+if ! xhost 2>/dev/null | grep -Fxq 'SI:localuser:root'; then
+    xhost +SI:localuser:root >/dev/null || exit 1
+    GRANTED_BY_US=1
+fi
+
+cleanup() {
+    if [ "$GRANTED_BY_US" = 1 ]; then
+        xhost -SI:localuser:root >/dev/null 2>&1 || true
+    fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
+# Ventoy itself requests polkit authentication. Never bypass it.
+/usr/bin/ventoygui "$@"

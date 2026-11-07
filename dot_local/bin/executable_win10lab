@@ -1,0 +1,678 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Isolated X-Lite Windows 10 test VM. NEVER touches Nano11 disk/UEFI/TPM.
+BASE="${WIN10LAB_BASE:-/mnt/Games/VirtualMachines/xlite-micro10}"
+DISK="$BASE/storage/win10lab.qcow2"
+VARS="$BASE/storage/OVMF_VARS.4m.fd"
+ISO="$BASE/media/xlite-micro10-19045.3757.iso"
+DRIVERS_IMG="$BASE/media/xlite-drivers-fat32.img"
+REPORT_IMG="$BASE/media/xlite-reports-fat32.img"
+KVMFR=/dev/kvmfr0
+VF_PCI=0000:00:02.1
+SPICE_SOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/win10lab/spice.sock"
+TPM_STATE="$BASE/storage/tpm"
+RUN="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/win10lab"
+PIDFILE="$RUN/qemu.pid"
+MONITOR="$RUN/monitor.sock"
+TPMSOCK="$RUN/swtpm.sock"
+TPMPID="$RUN/swtpm.pid"
+LOG="$HOME/.local/state/win10lab/qemu.log"
+RAM_MB="${WIN10LAB_RAM_MB:-4096}"
+NETWORK_MODE="${WIN10LAB_NETWORK:-1}" # 1=outbound QEMU user-mode NAT, 0=no guest NIC
+MEDIA_MODE="${WIN10LAB_MEDIA:-0}" # 0=clean normal desktop; 1=temporary installer/driver/report media
+LG_CLIENT="$HOME/.local/bin/looking-glass-client-idd"
+LG_WORKSPACE=5
+LG_APP_ID="win10lab-looking-glass"
+LG_TITLE="Windows-X-Lite-10"
+LG_LOCK="$RUN/looking-glass.lock"
+LG_LOG="$HOME/.local/state/win10lab/looking-glass.log"
+LG_STATE="$RUN/client-state.json"
+GPU_MODE="${WIN10LAB_GPU:-0}" # 0=stable virtual VGA; 1=experimental Intel VF + Looking Glass
+VGA_MODE="${WIN10LAB_VGA:-1}" # 0=IDD-only experimental boot; 1=keep QEMU VGA fallback
+
+setup_storage() {
+    mkdir -p "$BASE/storage" "$TPM_STATE" "$RUN" "$(dirname "$LOG")"
+    chmod 0700 "$TPM_STATE" "$RUN" "$(dirname "$LOG")"
+    [ -s "$ISO" ] && [ -s "$DRIVERS_IMG" ] && [ -s "$REPORT_IMG" ] || { echo "win10lab: ISO, driver USB or results USB missing" >&2; return 1; }
+    if [ ! -e "$DISK" ]; then
+        echo "win10lab: creating dedicated 40 GiB sparse disk (no Nano11 data)"
+        qemu-img create -f qcow2 -o preallocation=off "$DISK" 40G
+    fi
+    if [ ! -e "$VARS" ]; then
+        cp /usr/share/edk2/x64/OVMF_VARS.4m.fd "$VARS"
+        chmod 0600 "$VARS"
+    fi
+}
+vm_pid() {
+    [ -r "$PIDFILE" ] || return 1
+    local pid
+    read -r pid < "$PIDFILE"
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+    kill -0 "$pid" 2>/dev/null || return 1
+    tr '\0' '\n' < "/proc/$pid/cmdline" |
+       grep -Fx "file=$DISK,if=none,id=win10disk,format=qcow2,cache=none,aio=native" >/dev/null || return 1
+    echo "$pid"
+}
+running(){ vm_pid >/dev/null 2>&1; }
+qemu_state() {
+    running || { printf '%s\n' stopped; return; }
+    local state
+    state="$(hmp 'info status' 2>/dev/null | sed -n 's/^VM status: //p' | head -n1)"
+    printf '%s\n' "${state:-unknown}"
+}
+start_tpm() {
+    swtpm socket -t -d --tpm2 --tpmstate "dir=$TPM_STATE" \
+        --ctrl "type=unixio,path=$TPMSOCK" --pid "file=$TPMPID"
+    for _ in $(seq 1 50); do
+       [ -S "$TPMSOCK" ] && return 0
+       sleep .1
+    done
+    echo "win10lab: swtpm socket failed" >&2
+    return 1
+}
+stop_tpm() {
+    if [ -r "$TPMPID" ]; then
+      local pid
+      read -r pid <"$TPMPID" || pid=""
+      if [[ "$pid" =~ ^[0-9]+$ ]] && [ -r "/proc/$pid/cmdline" ] &&
+         tr '\0' '\n' < "/proc/$pid/cmdline" | grep -Fx "type=unixio,path=$TPMSOCK" >/dev/null; then
+          kill "$pid" 2>/dev/null || :
+      fi
+    fi
+    rm -f "$TPMPID" "$TPMSOCK"
+}
+prepare_intel_vf() {
+    # Recreate only the Intel SR-IOV VF after a host reboot; never detach the
+    # Intel physical function (host i915) or NVIDIA Sway display adapter.
+    local pf=0000:00:02.0 numvfs driver group peers
+    [ "$(basename "$(readlink -f "/sys/bus/pci/devices/$pf/driver" 2>/dev/null || true)")" = i915 ] || {
+        echo "win10lab: Intel PF is not controlled by host i915; refusing VF creation" >&2
+        return 1
+    }
+    [ -r "/sys/bus/pci/devices/$pf/sriov_numvfs" ] || {
+        echo "win10lab: Intel PF lacks SR-IOV support" >&2; return 1
+    }
+    numvfs="$(cat "/sys/bus/pci/devices/$pf/sriov_numvfs")"
+    case "$numvfs" in
+      0) echo 1 | sudo -n tee "/sys/bus/pci/devices/$pf/sriov_numvfs" >/dev/null ;;
+      1) ;;
+      *) echo "win10lab: unexpected Intel VF count=$numvfs; refusing to modify" >&2; return 1 ;;
+    esac
+    [ -e "/sys/bus/pci/devices/$VF_PCI" ] || {
+        echo "win10lab: Intel VF missing after enabling SR-IOV: $VF_PCI" >&2; return 1
+    }
+    # Check isolation before any unbind; never disturb a shared group.
+    group="$(basename "$(readlink -f "/sys/bus/pci/devices/$VF_PCI/iommu_group")")"
+    peers="$(find "/sys/kernel/iommu_groups/$group/devices" -mindepth 1 -maxdepth 1 -printf . | wc -c)"
+    [ "$peers" = 1 ] || {
+        echo "win10lab: VF IOMMU group $group contains $peers devices; refusing passthrough" >&2; return 1
+    }
+    if fuser -s "/dev/vfio/$group" "$KVMFR" 2>/dev/null; then
+        echo "win10lab: VFIO or KVMFR already in use; refusing reassignment" >&2; return 1
+    fi
+    sudo -n modprobe vfio-pci
+    driver="$(basename "$(readlink -f "/sys/bus/pci/devices/$VF_PCI/driver" 2>/dev/null || true)")"
+    if [ "$driver" != vfio-pci ]; then
+        case "$driver" in
+          i915|xe|'') ;;
+          *) echo "win10lab: Intel VF owned by unexpected driver=$driver; refusing rebind" >&2; return 1 ;;
+        esac
+        if [ -L "/sys/bus/pci/devices/$VF_PCI/driver" ]; then
+            echo "$VF_PCI" | sudo -n tee "/sys/bus/pci/devices/$VF_PCI/driver/unbind" >/dev/null
+        fi
+        echo vfio-pci | sudo -n tee "/sys/bus/pci/devices/$VF_PCI/driver_override" >/dev/null
+        echo "$VF_PCI" | sudo -n tee /sys/bus/pci/drivers/vfio-pci/bind >/dev/null
+    fi
+    [ "$(basename "$(readlink -f "/sys/bus/pci/devices/$VF_PCI/driver")")" = vfio-pci ] || {
+        echo "win10lab: Intel VF did not bind to vfio-pci" >&2; return 1
+    }
+    group="$(basename "$(readlink -f "/sys/bus/pci/devices/$VF_PCI/iommu_group")")"
+    peers="$(find "/sys/kernel/iommu_groups/$group/devices" -mindepth 1 -maxdepth 1 -printf . | wc -c)"
+    [ "$peers" = 1 ] || {
+        echo "win10lab: VF IOMMU group $group contains $peers devices; refusing passthrough" >&2; return 1
+    }
+    [ -c "/dev/vfio/$group" ] || { echo "win10lab: VFIO group $group node missing" >&2; return 1; }
+    sudo -n chgrp video "/dev/vfio/$group"
+    sudo -n chmod 0660 "/dev/vfio/$group"
+    [ -r "/dev/vfio/$group" ] && [ -w "/dev/vfio/$group" ] || {
+        echo "win10lab: no permission to VFIO IOMMU group $group" >&2; return 1
+    }
+    echo "win10lab: Intel VF $VF_PCI ready in isolated IOMMU group $group"
+}
+
+start_vm() {
+    mkdir -p "$RUN"
+    chmod 0700 "$RUN"
+    WIN10LAB_GPU="$GPU_MODE" WIN10LAB_VGA="$VGA_MODE" WIN10LAB_MEDIA="$MEDIA_MODE" \
+      flock -x -o "$RUN/lifecycle.lock" "$0" __start_locked
+}
+start_vm_locked() {
+    case "$GPU_MODE:$NETWORK_MODE:$VGA_MODE:$MEDIA_MODE" in
+      [01]:[01]:[01]:[01]) ;;
+      *) echo "win10lab: GPU, NETWORK, VGA and MEDIA modes must be 0 or 1" >&2; return 1 ;;
+    esac
+    if ! [[ "$RAM_MB" =~ ^[0-9]+$ ]] || (( RAM_MB == 0 )); then
+        echo "win10lab: RAM must be a positive integer in MiB" >&2; return 1
+    fi
+    if running; then
+      local active_mode=0 active_vga=0 active_network=0 expected_vga="$VGA_MODE"
+      if tr '\0' '\n' < "/proc/$(vm_pid)/cmdline" | grep -Fx "user,id=xlitenat,ipv6=off" >/dev/null; then active_network=1; fi
+      if [ "$active_network" != "$NETWORK_MODE" ]; then
+        echo "win10lab: running network mode=$active_network, requested=$NETWORK_MODE; stop guest to change network hardware." >&2
+        return 1
+      fi
+      if tr '\0' '\n' < "/proc/$(vm_pid)/cmdline" | grep -F "vfio-pci,host=$VF_PCI" >/dev/null; then active_mode=1; fi
+      if tr '\0' '\n' < "/proc/$(vm_pid)/cmdline" | grep -Fx "VGA" >/dev/null; then active_vga=1; fi
+      if [ "$GPU_MODE" = 0 ]; then expected_vga=1; fi
+      if [ "$active_vga" != "$expected_vga" ]; then
+        echo "win10lab: running VGA mode=$active_vga, requested=$expected_vga; stop the guest before changing display hardware." >&2
+        return 1
+      fi
+      if [ "$active_mode" != "$GPU_MODE" ]; then
+        echo "win10lab: already running GPU mode=$active_mode, requested=$GPU_MODE. Shut down the guest before switching modes." >&2
+        return 1
+      fi
+      if [ "$MEDIA_MODE" = 1 ] && ! tr '\0' '\n' < "/proc/$(vm_pid)/cmdline" | grep -F "file=$DRIVERS_IMG," >/dev/null; then
+        echo "win10lab: diagnostics media require a clean guest stop before relaunch." >&2
+        return 1
+      fi
+      echo "win10lab: already running pid=$(vm_pid), GPU mode=$active_mode"; return 0
+    fi
+    if command -v nano11 >/dev/null && nano11 status | grep -q 'native QEMU running'; then
+      echo "win10lab: Nano11 is running; stop it gracefully first to avoid RAM pressure and Intel VF conflict." >&2
+      return 1
+    fi
+    setup_storage
+    [ -r /dev/kvm ] && [ -w /dev/kvm ] || { echo "win10lab: /dev/kvm unavailable" >&2; return 1; }
+    if [ "$GPU_MODE" = 1 ]; then
+      [ -r "$KVMFR" ] && [ -w "$KVMFR" ] || { echo "win10lab: KVMFR unavailable" >&2; return 1; }
+      prepare_intel_vf
+    elif [ "$GPU_MODE" != 0 ]; then echo "win10lab: WIN10LAB_GPU must be 0 or 1" >&2; return 1; fi
+    if command -v fuser >/dev/null && fuser -s "$DISK" 2>/dev/null; then
+       echo "win10lab: disk already owned; refusing concurrent writer" >&2
+       return 1
+    fi
+    rm -f "$PIDFILE" "$MONITOR" "$TPMSOCK" "$SPICE_SOCK"
+    sudo -n systemd-run --unit=win10lab-qemu --collect --no-block \
+      --property="User=$(id -un)" --property="Group=$(id -gn)" \
+      --property=LimitMEMLOCK=infinity --property=SupplementaryGroups=video \
+      --property="Environment=HOME=$HOME" \
+      --property="Environment=WIN10LAB_BASE=$BASE" \
+      --property="Environment=WIN10LAB_GPU=$GPU_MODE" \
+      --property="Environment=WIN10LAB_NETWORK=$NETWORK_MODE" \
+      --property="Environment=WIN10LAB_VGA=$VGA_MODE" \
+      --property="Environment=WIN10LAB_RAM_MB=$RAM_MB" \
+      --property="Environment=WIN10LAB_MEDIA=$MEDIA_MODE" \
+      --property="Environment=XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" \
+      -- "$HOME/.local/bin/win10lab" __run
+    for _ in $(seq 1 100); do
+      if running && [ -S "$MONITOR" ]; then
+        echo "win10lab: running pid=$(vm_pid), RAM=${RAM_MB}MiB, network=$NETWORK_MODE (1=outbound NAT, 0=off), VNC=127.0.0.1:5912, SPICE=$SPICE_SOCK"
+        return 0
+      fi
+      if sudo -n systemctl is-failed --quiet win10lab-qemu.service 2>/dev/null; then
+        echo "win10lab: VM launch failed; see $LOG" >&2; return 1
+      fi
+      sleep .15
+    done
+    echo "win10lab: VM startup timed out" >&2
+    return 1
+}
+run_vm() {
+    setup_storage
+    trap 'stop_tpm; rm -f "$PIDFILE" "$MONITOR" "$SPICE_SOCK"' EXIT
+    start_tpm
+    : > "$LOG"
+    # QEMU options deliberately contain comma-separated key/value arguments.
+    # shellcheck disable=SC2054
+    local -a args=(
+      -nodefaults
+      -name "Windows X-Lite Micro10,process=win10lab"
+      -machine type=q35,accel=kvm,smm=on,vmport=off
+      # Reference time/synthetic timers remove the measured HPET MMIO storm.
+      # hv-relaxed supplies hypervisor watchdog handling after a saved 0x101.
+      -cpu host,kvm=on,hv-time=on,hv-vpindex=on,hv-synic=on,hv-stimer=on,hv-relaxed=on
+      -smp 12,sockets=1,cores=6,threads=2
+      -m "$RAM_MB"
+      -rtc base=localtime
+      -pidfile "$PIDFILE"
+      -monitor "unix:$MONITOR,server=on,wait=off,nodelay=on"
+      -serial none
+      -chardev "socket,id=chrtpm,path=$TPMSOCK"
+      -tpmdev emulator,id=tpm0,chardev=chrtpm
+      -device tpm-tis,tpmdev=tpm0
+      -device qemu-xhci,id=usb
+      -device usb-kbd
+      -device ich9-ahci,id=sata
+      -drive "file=$DISK,if=none,id=win10disk,format=qcow2,cache=none,aio=native"
+      -device ide-hd,drive=win10disk,bus=sata.0,bootindex=1
+      # Installer/diagnostic media are only attached via WIN10LAB_MEDIA=1.
+      # Keep normal Windows sessions free from the temporary E:/F: USB disks.
+      -boot order=c,menu=on
+      -display none
+      -vnc "127.0.0.1:12"
+      -device pcie-root-port,id=intelvfport,bus=pcie.0,addr=0x8,chassis=1,slot=1
+    )
+    # Looking Glass capture uses relative input; absolute USB tablets conflict
+    # with that path. Retain the tablet for the separate basic-VGA recovery boot.
+    if [ "$GPU_MODE" = 0 ]; then args+=( -device usb-tablet ); fi
+    if [ "$MEDIA_MODE" = 1 ]; then
+      # Recovery/guest diagnostics only: preserved images, not everyday USB disks.
+      # shellcheck disable=SC2054
+      args+=(
+        -drive "file=$ISO,if=none,id=installmedia,format=raw,media=cdrom,readonly=on"
+        -device ide-cd,drive=installmedia,bus=sata.1,bootindex=2
+        -drive "file=$DRIVERS_IMG,if=none,id=driverdisk,format=raw,readonly=on"
+        -device usb-storage,drive=driverdisk
+        -drive "file=$REPORT_IMG,if=none,id=reportdisk,format=raw,cache=none"
+        -device usb-storage,drive=reportdisk
+      )
+    fi
+    if [ "$NETWORK_MODE" = 1 ]; then
+      # User-mode SLIRP NAT: outbound only, no bridge, no hostfwd/listening ports.
+      # e1000e is PCIe and Windows 10 contains an inbox driver.
+      args+=( -netdev "user,id=xlitenat,ipv6=off" -device "e1000e,id=xlitenic,netdev=xlitenat,bus=pcie.0,addr=0x9,mac=52:54:00:af:10:02" )
+    elif [ "$NETWORK_MODE" = 0 ]; then
+      args+=( -nic none )
+    else
+      echo "win10lab: WIN10LAB_NETWORK must be 0 or 1" >&2; return 1
+    fi
+    if [ "$GPU_MODE" = 0 ] || [ "$VGA_MODE" = 1 ]; then
+      args+=( -device VGA )
+    elif [ "$VGA_MODE" = 0 ]; then
+      args+=( -vga none )
+    else
+      echo "win10lab: WIN10LAB_VGA must be 0 or 1" >&2; return 1
+    fi
+    if [ "$GPU_MODE" = 1 ]; then
+      # shellcheck disable=SC2054
+      args+=(
+        -device "vfio-pci,host=$VF_PCI,bus=intelvfport,rombar=0"
+        -object "memory-backend-file,id=lgmem,mem-path=$KVMFR,size=64M,share=on"
+        -device ivshmem-plain,memdev=lgmem,id=shmem0
+        -spice "unix=on,addr=$SPICE_SOCK,disable-ticketing=on,max-refresh-rate=165"
+        -audiodev spice,id=spiceaudio
+        -device intel-hda
+        -device hda-duplex,audiodev=spiceaudio
+      )
+    fi
+    taskset -c 0-11 qemu-system-x86_64 "${args[@]}" >>"$LOG" 2>&1
+}
+hmp() {
+    python3 - "$MONITOR" "$*" <<'PY'
+import re,socket,sys,time
+s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);s.settimeout(3)
+s.connect(sys.argv[1])
+def response():
+    data=b''
+    while not re.search(rb'\(qemu\)\s*$',data):
+        chunk=s.recv(65536)
+        if not chunk: raise RuntimeError('QEMU monitor closed before completing command')
+        data+=chunk
+    return data
+response()  # Drain the complete greeting/prompt before sending a command.
+s.sendall((sys.argv[2]+'\n').encode())
+if sys.argv[2] == 'quit':
+    # Only the separately confirmed force-stop path uses this. QEMU closes
+    # the monitor on quit, so it cannot return the usual (qemu) prompt.
+    try:
+        data=s.recv(65536)
+        if b'unknown command' in data:
+            raise RuntimeError('QEMU rejected quit')
+    except (socket.timeout, ConnectionResetError, BrokenPipeError):
+        pass
+    s.close()
+    print('QEMU quit request sent')
+    sys.exit(0)
+data=response().decode(errors='replace')
+print(data.split('\r\n',1)[-1].removesuffix('(qemu) ').strip())
+# Keep the monitor alive until sendkey has emitted its scheduled key release.
+if sys.argv[2].startswith('sendkey '):
+    match=re.fullmatch(r'sendkey\s+\S+(?:\s+(\d+))?',sys.argv[2])
+    time.sleep((int(match.group(1) or 100) if match else 100)/1000+.1)
+s.close()
+PY
+}
+cleanup_client_after_stop() {
+    # QEMU may exit before the Looking Glass client releases /dev/kvmfr0.
+    local id
+    if id="$(lg_window_id)"; then
+        swaymsg "[con_id=$id] kill" >/dev/null 2>&1 || :
+    fi
+    for _ in $(seq 1 60); do
+        fuser -s "$KVMFR" 2>/dev/null || return 0
+        sleep .2
+    done
+    echo "win10lab: Windows stopped, but KVMFR remains busy; inspect its owner." >&2
+    return 1
+}
+stop_vm() {
+    mkdir -p "$RUN"
+    chmod 0700 "$RUN"
+    flock -x -o "$RUN/lifecycle.lock" "$0" __stop_locked || return
+    cleanup_client_after_stop
+}
+force_stop_vm() {
+    # Separate, explicitly confirmed hard poweroff; never called by win stop.
+    if ! running; then echo "win10lab: stopped"; return 0; fi
+    if [ ! -r /dev/tty ]; then
+        echo "win10lab: force-stop requires an interactive terminal confirmation" >&2
+        return 2
+    fi
+    local answer
+    printf '%s\n' 'WARNING: FORCE STOP cuts guest power. Unsaved work and NTFS data may be lost.' >/dev/tty
+    printf '%s' 'Type FORCE POWER OFF to proceed: ' >/dev/tty
+    IFS= read -r answer </dev/tty || return 1
+    if [ "$answer" != 'FORCE POWER OFF' ]; then
+        echo "win10lab: force-stop cancelled"
+        return 1
+    fi
+    mkdir -p "$RUN"
+    chmod 0700 "$RUN"
+    flock -x -o "$RUN/lifecycle.lock" "$0" __force_stop_locked || return
+    cleanup_client_after_stop
+}
+force_stop_vm_locked() {
+    if ! running; then echo "win10lab: stopped"; return 0; fi
+    local pid
+    pid="$(vm_pid)" || return 1
+    echo "win10lab: confirmed emergency QEMU poweroff for PID $pid"
+    # HMP quit means abrupt power loss to Windows; never use for routine stop.
+    hmp quit || echo "win10lab: QEMU monitor quit unavailable; checking PID" >&2
+    for _ in $(seq 1 30); do
+        if ! running; then echo "win10lab: QEMU exited after emergency poweroff"; return 0; fi
+        sleep .1
+    done
+    # If QEMU ignored the monitor quit, SIGTERM targets only the same
+    # previously verified guest process; never kill arbitrary PID reuse.
+    if [ "$(vm_pid 2>/dev/null || :)" = "$pid" ]; then
+        echo "win10lab: verified QEMU still alive; sending SIGTERM to $pid" >&2
+        kill -TERM "$pid" || return 1
+    fi
+    for _ in $(seq 1 50); do
+        if ! running; then echo "win10lab: QEMU exited after emergency signal"; return 0; fi
+        sleep .1
+    done
+    echo "win10lab: QEMU did not exit; inspect process before further action" >&2
+    return 1
+}
+stop_vm_locked() {
+    if ! running; then echo "win10lab: stopped"; return 0; fi
+    local state wait_seconds=45 key
+    state="$(qemu_state)"
+    PAUSED_SHUTDOWN_ACTIVE=no
+    case "$state" in
+        running) ;;
+        paused)
+            # An ACPI event cannot execute while QEMU is paused. An explicit
+            # "win stop" request authorizes a bounded resume for shutdown,
+            # but never an unattended hard reset or QEMU process kill.
+            echo "win10lab: resuming paused guest only to request clean shutdown"
+            PAUSED_SHUTDOWN_ACTIVE=yes
+            # Re-pause on any early error/exit if Windows did not shut down.
+            trap 'if [ "${PAUSED_SHUTDOWN_ACTIVE:-no}" = yes ] && running && [ "$(qemu_state)" = running ]; then hmp stop >&2 || :; echo "win10lab: guest re-paused after failed shutdown" >&2; fi' EXIT
+            hmp cont || return 1
+            if [ "$(qemu_state)" != running ]; then
+                echo "win10lab: could not resume guest for shutdown; leaving it intact" >&2
+                return 1
+            fi
+            # A previously paused guest may again consume excessive CPU.
+            # Limit the post-fallback wait rather than spin for 45 seconds.
+            wait_seconds=18
+            ;;
+        *)
+            echo "win10lab: QEMU state=$state; cannot safely request guest shutdown" >&2
+            return 1
+            ;;
+    esac
+
+    echo "win10lab: requesting Windows ACPI shutdown"
+    if ! hmp system_powerdown; then
+        echo "win10lab: ACPI monitor unavailable; trying guest keyboard shutdown" >&2
+    fi
+    for _ in $(seq 1 8); do
+        if ! running; then echo "win10lab: cleanly stopped"; return 0; fi
+        sleep 1
+    done
+    # The guest may ignore ACPI. The offline-provisioned C:\\Windows\\wstop.cmd
+    # invokes shutdown.exe. Only a short 'wstop' is typed into Win+R; this
+    # is still a guest keyboard fallback, not a guest-agent command channel.
+    echo "win10lab: ACPI ignored; requesting guest wstop.cmd shutdown"
+    hmp 'sendkey meta_l-r 200'
+    sleep .7
+    hmp 'sendkey ctrl-a 200'
+    for key in w s t o p ret; do
+        hmp "sendkey $key 200"
+    done
+    for _ in $(seq 1 "$wait_seconds"); do
+        if ! running; then echo "win10lab: cleanly stopped"; return 0; fi
+        sleep 1
+    done
+    echo "win10lab: guest ignored graceful shutdown; no forced poweroff performed" >&2
+    return 1
+}
+# The guest IDD stays at 1920x1200@165Hz; fpsMin=-1 uses host refresh.
+sway_socket() {
+    if [ -z "${SWAYSOCK:-}" ]; then
+        local socket
+        socket="$(systemctl --user show-environment 2>/dev/null | sed -n 's/^SWAYSOCK=//p' | head -n1)"
+        [ -S "$socket" ] && export SWAYSOCK="$socket"
+    fi
+    swaymsg -t get_version >/dev/null 2>&1
+}
+lg_window_id() {
+    sway_socket || return 1
+    swaymsg -t get_tree 2>/dev/null |
+      jq -r --arg app "$LG_APP_ID" '.. | objects | select(.app_id? == $app) | .id' |
+      head -n1 | grep -E '^[0-9]+$'
+}
+client_status() {
+    sway_socket || { echo unknown; return; }
+    local pid
+    pid="$(swaymsg -t get_tree | jq -r --arg app "$LG_APP_ID" '.. | objects | select(.app_id? == $app) | .pid' | head -n1)"
+    python3 - "$LG_STATE" "$pid" <<'PYCLIENT'
+import json,pathlib,sys
+try:
+    state=json.loads(pathlib.Path(sys.argv[1]).read_text())
+    pid=int(sys.argv[2])
+    current=pathlib.Path(f'/proc/{pid}/stat').read_text().split()[21]
+    if state['pid']!=pid or state['startTicks']!=current: raise ValueError('stale client metadata')
+    print('pid={} fps={} escape={} dma={}'.format(pid,state['fps'],state['escape'],state['dma']))
+except (OSError,ValueError,KeyError,IndexError):
+    print('unknown')
+PYCLIENT
+}
+lg_source_state() {
+    # Report log evidence, not live frame health: a previous frame is not a
+    # guarantee that Windows is still presenting updates.
+    [ -r "$LG_LOG" ] || { echo unknown; return; }
+    local last
+    last="$(grep -E 'Starting session|primaryLost|The transport source is not available|Format: FRAME_TYPE_' "$LG_LOG" | tail -n1 || :)"
+    case "$last" in
+      *primaryLost*|*'The transport source is not available'*) echo unavailable ;;
+      *'Format: FRAME_TYPE_'*) echo last-frame ;;
+      *) echo unknown ;;
+    esac
+}
+lg_source_lost() { [ "$(lg_source_state)" = unavailable ]; }
+move_here() {
+    local id workspace
+    id="$(lg_window_id)" || { echo "win10lab: no existing client to move" >&2; return 1; }
+    workspace="$(swaymsg -t get_workspaces | jq -er '.[] | select(.focused) | .num')" || return
+    [[ "$workspace" =~ ^[0-9]+$ ]] || return 1
+    swaymsg "[con_id=$id] move to workspace number $workspace, focus" >/dev/null
+}
+focus_glass() {
+    local id
+    id="$(lg_window_id)" || return 1
+    swaymsg "[con_id=$id] move to workspace number $LG_WORKSPACE, fullscreen enable, focus" >/dev/null 2>&1 || return 1
+    swaymsg "workspace number $LG_WORKSPACE" >/dev/null 2>&1 || return 1
+    if lg_source_lost; then
+        echo "win10lab: Looking Glass source lost; this window shows only the splash. Use Alt+Shift+W for manual recovery." >&2
+        # No notification on every focus: repeated Alt+W previously stacked alerts.
+    fi
+}
+open_glass() {
+    local client_hz="${WIN10LAB_CLIENT_HZ:--1}" fps_overlay="${WIN10LAB_SHOW_FPS:-no}" escape_key="${WIN10LAB_ESCAPE_KEY:-KEY_RIGHTCTRL}" allow_dma="${WIN10LAB_ALLOW_DMA:-no}"
+    local wayland client_pid ready=no
+    if [ "$client_hz" != -1 ] && {
+        ! [[ "$client_hz" =~ ^[0-9]+$ ]] || (( client_hz < 24 || client_hz > 1000 ))
+    }; then
+        echo "win10lab: invalid WIN10LAB_CLIENT_HZ=$client_hz (allowed 24-1000 or -1)" >&2
+        return 1
+    fi
+    case "$escape_key" in KEY_F12|KEY_RIGHTCTRL) ;; *)
+        echo "win10lab: WIN10LAB_ESCAPE_KEY must be KEY_F12 or KEY_RIGHTCTRL" >&2; return 1 ;;
+    esac
+    case "$allow_dma" in yes|no) ;; *)
+        echo "win10lab: WIN10LAB_ALLOW_DMA must be yes or no" >&2; return 1 ;;
+    esac
+    case "$fps_overlay" in yes|no) ;; *)
+        echo "win10lab: WIN10LAB_SHOW_FPS must be yes or no" >&2; return 1 ;;
+    esac
+    if focus_glass; then
+        echo "win10lab: existing Looking Glass window focused on workspace $LG_WORKSPACE"
+        return 0
+    fi
+    [ -x "$LG_CLIENT" ] || { echo "win10lab: Looking Glass IDD client missing: $LG_CLIENT" >&2; return 1; }
+    [ -r "$KVMFR" ] && [ -w "$KVMFR" ] || { echo "win10lab: /dev/kvmfr0 inaccessible" >&2; return 1; }
+    mkdir -p "$RUN" "$(dirname "$LG_LOG")"
+    exec 7>"$LG_LOCK"
+    if ! flock -n 7; then
+        for _ in $(seq 1 80); do
+            if focus_glass; then return 0; fi
+            sleep .125
+        done
+        echo "win10lab: another Looking Glass client is starting; retry" >&2
+        return 1
+    fi
+    if focus_glass; then return 0; fi
+    for _ in $(seq 1 240); do
+        [ -S "$SPICE_SOCK" ] && break
+        running || return 1
+        sleep .125
+    done
+    [ -S "$SPICE_SOCK" ] || { echo "win10lab: SPICE unavailable" >&2; return 1; }
+    wayland="${WAYLAND_DISPLAY:-$(systemctl --user show-environment 2>/dev/null | sed -n 's/^WAYLAND_DISPLAY=//p' | head -n1)}"
+    # Keep bounded previous sessions for correlating guest failures. This runs
+    # only on an explicit client launch after the single-client lock is held.
+    local index
+    for index in 5 4 3 2; do
+        [ ! -f "$LG_LOG.$((index-1))" ] || mv -f "$LG_LOG.$((index-1))" "$LG_LOG.$index"
+    done
+    [ ! -f "$LG_LOG" ] || mv -f "$LG_LOG" "$LG_LOG.1"
+    printf 'win10lab client start UTC=%s QEMU=%s\n' "$(date -u +%FT%TZ)" "$(vm_pid)" >"$LG_LOG"
+    env XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" WAYLAND_DISPLAY="${wayland:-wayland-1}" \
+      "$LG_CLIENT" \
+      "lgmp:shmDevice=$KVMFR" "lgmp:allowDMA=$allow_dma" \
+      "win:title=$LG_TITLE" "win:appId=$LG_APP_ID" \
+      win:fullScreen=yes win:setGuestRes=no win:alerts=yes "win:fpsMin=$client_hz" "win:showFPS=$fps_overlay" \
+      "input:escapeKey=$escape_key" input:captureOnStart=yes input:grabKeyboard=yes input:ignoreWindowsKeys=no \
+      input:captureOnFocus=yes input:autoCapture=no input:releaseKeysOnFocusLoss=yes input:rawMouse=no \
+      spice:enable=yes "spice:host=$SPICE_SOCK" spice:port=0 \
+      spice:input=yes spice:clipboard=yes spice:audio=yes >>"$LG_LOG" 2>&1 &
+    client_pid=$!
+    # The LG option parser consumes argv, so /proc/PID/cmdline cannot report
+    # the active FPS setting. Record requested options tied to process lifetime.
+    python3 - "$LG_STATE" "$client_pid" "$fps_overlay" "$escape_key" "$allow_dma" <<'PYCLIENT'
+import json,pathlib,sys,os
+try:
+    target=pathlib.Path(sys.argv[1]);pid=int(sys.argv[2])
+    state={'pid':pid,'startTicks':pathlib.Path(f'/proc/{pid}/stat').read_text().split()[21],
+           'fps':sys.argv[3],'escape':sys.argv[4],'dma':sys.argv[5]}
+    temporary=target.with_name(target.name+'.'+str(os.getpid()))
+    temporary.write_text(json.dumps(state));temporary.replace(target)
+except (OSError,ValueError,IndexError):
+    pass  # An immediately failed client is handled by the readiness loop.
+PYCLIENT
+    for _ in $(seq 1 120); do
+        if grep -q ' | .* | Format: ' "$LG_LOG"; then ready=yes; break; fi
+        kill -0 "$client_pid" 2>/dev/null || break
+        sleep .25
+    done
+    if [ "$ready" != yes ]; then
+        kill "$client_pid" 2>/dev/null || true
+        wait "$client_pid" 2>/dev/null || true
+        if grep -q 'The transport source is not available' "$LG_LOG"; then
+            echo "win10lab: Windows is running, but its Looking Glass IDD guest source is not producing frames." >&2
+            notify-send -a "Windows 10" -u critical "Windows 10 display unavailable" \
+                "Looking Glass IDD stopped producing frames. The VM was left running; check the VM log before restarting." 2>/dev/null || true
+        else
+            notify-send -a "Windows 10" -u critical "Windows 10 display failed" \
+                "Looking Glass produced no verified guest frame. The VM was left running." 2>/dev/null || true
+        fi
+        echo "win10lab: no verified Looking Glass frame; see $LG_LOG" >&2
+        return 1
+    fi
+    echo "win10lab: verified Looking Glass frame on workspace $LG_WORKSPACE (client fpsMin=$client_hz, releaseKey=$escape_key, DMA=$allow_dma)"
+    wait "$client_pid" || true
+}
+launch_vm() {
+    if running && [ "$(qemu_state)" = paused ]; then
+        echo "win10lab: guest paused; opening Windows menu (resume or stop must be selected explicitly)." >&2
+        # Remove the stale purple splash; it is only a Linux client window,
+        # not the paused Windows guest, disk or QEMU process.
+        local stale_id
+        if stale_id="$(lg_window_id)"; then
+            swaymsg "[con_id=$stale_id] kill" >/dev/null 2>&1 || :
+        fi
+        exec "$HOME/.local/bin/rofi-windows"
+    fi
+    GPU_MODE=1 VGA_MODE=0 start_vm || return
+    if sway_socket; then swaymsg "workspace number $LG_WORKSPACE" >/dev/null 2>&1 || true; fi
+    open_glass
+}
+reopen_glass() {
+    # User-invoked display-only restart; the Windows QEMU guest keeps running.
+    local id
+    if id="$(lg_window_id)"; then
+        swaymsg "[con_id=$id] kill" >/dev/null 2>&1 || return 1
+        for _ in $(seq 1 60); do
+            lg_window_id >/dev/null 2>&1 || break
+            sleep 0.1
+        done
+        sleep 0.3
+    fi
+    launch_vm
+}
+case "${1:-status}" in
+ init) setup_storage; echo "win10lab: separate guest storage initialized" ;;
+ start) start_vm ;;
+ __run) run_vm ;;
+ __start_locked) start_vm_locked ;;
+ __stop_locked) stop_vm_locked ;;
+ __force_stop_locked) force_stop_vm_locked ;;
+ stop) stop_vm ;;
+ force-stop) force_stop_vm ;;
+ status) if running; then
+             mode=basic-vga
+             if tr '\0' '\n' < "/proc/$(vm_pid)/cmdline" | grep -F "vfio-pci,host=$VF_PCI" >/dev/null; then mode=intel-vfio-lgmp; fi
+             display=idd-only
+             if tr '\0' '\n' < "/proc/$(vm_pid)/cmdline" | grep -Fx "VGA" >/dev/null; then display=vga-fallback; fi
+             network=offline
+             if tr '\0' '\n' < "/proc/$(vm_pid)/cmdline" | grep -Fx "user,id=xlitenat,ipv6=off" >/dev/null; then network=outbound-nat; fi
+             memory="$(tr '\0' '\n' < "/proc/$(vm_pid)/cmdline" | awk '$0=="-m" {getline; print; exit}')"
+             vcpus="$(tr '\0' '\n' < "/proc/$(vm_pid)/cmdline" | awk '$0=="-smp" {getline; split($0,a,","); print a[1]; exit}')"
+             media=none
+             if tr '\0' '\n' < "/proc/$(vm_pid)/cmdline" | grep -F "file=$DRIVERS_IMG," >/dev/null; then
+                 media=diagnostics
+             elif hmp 'info block' 2>/dev/null | grep -Eq '^aud(media|report) ' ; then
+                 media=runtime-diagnostics
+             fi
+             state="$(qemu_state)"
+             echo "win10lab: running pid=$(vm_pid), qemu_state=$state, mode=$mode, display=$display, vCPUs=$vcpus, RAM=${memory}MiB, network=$network, media=$media, VNC=127.0.0.1:5912"
+         else echo "win10lab: stopped"; fi ;;
+ source-status) lg_source_state ;;
+ client-status) client_status ;;
+ here) move_here ;;
+ monitor) shift; hmp "$*" ;;
+ screen) mkdir -p "$HOME/.local/state/win10lab"; hmp "screendump $HOME/.local/state/win10lab/console.ppm" ;;
+ logs) exec tail -n 60 -F "$LOG" ;;
+ glass|workspace) launch_vm ;;
+ diagnostics) MEDIA_MODE=1 launch_vm ;;
+ fps-on) WIN10LAB_SHOW_FPS=yes reopen_glass ;;
+ fps-off) WIN10LAB_SHOW_FPS=no reopen_glass ;;
+ reconnect-input) reopen_glass ;;
+ viewer) exec vncviewer -SecurityTypes None 127.0.0.1:5912 ;;
+ *) echo "usage: win10lab {init|start|glass|workspace|diagnostics|fps-on|fps-off|reconnect-input|here|source-status|client-status|stop|force-stop|status|screen|monitor <HMP>|logs|viewer}" >&2; exit 2 ;;
+esac

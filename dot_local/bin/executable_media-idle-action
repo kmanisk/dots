@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""Playback-aware Sway idle actions; watchers exist only during idle playback.
+
+At an idle deadline, execute the requested action if media is inactive.
+If media is playing, start a detached low-frequency watcher to run the action
+when playback ends. Sway's resume callback cancels every pending action.
+"""
+import json
+import os
+from pathlib import Path
+import secrets
+import subprocess
+import sys
+import time
+
+ACTIONS = ("dim", "dpms-off", "lock")
+STATE = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "media-idle"
+HOME = Path.home()
+
+
+def output(cmd, timeout=3):
+    try:
+        return subprocess.run(cmd, check=False, capture_output=True,
+                              text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def media_playing():
+    # MPRIS covers browsers and media players, including muted video playback.
+    status = output(["playerctl", "-a", "status"], timeout=2)
+    if status and any(line.strip().lower() == "playing"
+                      for line in status.stdout.splitlines()):
+        return True
+
+    # PipeWire catches applications playing audio without MPRIS. Ignore
+    # virtual-sink/DSP processing nodes (which can remain running at idle).
+    nodes = output(["pw-dump"], timeout=3)
+    if not nodes or nodes.returncode != 0:
+        return False
+    try:
+        graph = json.loads(nodes.stdout)
+    except (ValueError, TypeError):
+        return False
+    for item in graph:
+        if item.get("type") != "PipeWire:Interface:Node":
+            continue
+        info = item.get("info") or {}
+        props = info.get("props") or {}
+        if (props.get("media.class") == "Stream/Output/Audio"
+                and str(info.get("state", "")).lower() == "running"
+                and props.get("application.name")
+                and props.get("application.name", "").lower()
+                not in ("pipewire", "wireplumber", "easyeffects")):
+            return True
+    return False
+
+
+def marker(action):
+    return STATE / action
+
+
+def cancel():
+    for action in ACTIONS:
+        marker(action).unlink(missing_ok=True)
+
+
+def run_action(action):
+    if action == "dim":
+        subprocess.run([str(HOME / ".local/bin/screen-dim")], check=False)
+    elif action == "dpms-off":
+        subprocess.run(["swaymsg", "output * dpms off"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       check=False)
+    elif action == "lock":
+        subprocess.run(["swaylock", "-f", "-c", "000000"], check=False)
+        subprocess.Popen([str(HOME / ".local/bin/bt-katana")],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+
+
+def watch(action, token):
+    path = marker(action)
+    while True:
+        time.sleep(10)
+        if (STATE.parent / "screen-black.state").exists():
+            return
+        try:
+            if path.read_text() != token:
+                return
+        except OSError:
+            return
+        if not media_playing():
+            # The marker remains available to resume/cancel while media ends.
+            try:
+                if path.read_text() != token:
+                    return
+            except OSError:
+                return
+            run_action(action)
+            if path.is_file() and path.read_text() == token:
+                path.unlink(missing_ok=True)
+            return
+
+
+def main():
+    args = sys.argv[1:]
+    if args == ["check"]:
+        active = media_playing()
+        print("playing" if active else "idle")
+        return 0 if active else 1
+    if args == ["cancel"]:
+        cancel()
+        return 0
+    if len(args) == 3 and args[0] == "watch" and args[1] in ACTIONS:
+        watch(args[1], args[2])
+        return 0
+    if len(args) != 1 or args[0] not in ACTIONS:
+        print("usage: media-idle-action [dim|dpms-off|lock|cancel|check]", file=sys.stderr)
+        return 2
+    action = args[0]
+    if (STATE.parent / "screen-black.state").exists():
+        return 0
+    if not media_playing():
+        run_action(action)
+        return 0
+    STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
+    token = secrets.token_hex(12)
+    marker(action).write_text(token)
+    subprocess.Popen([sys.executable, str(Path(__file__).resolve()),
+                      "watch", action, token], start_new_session=True,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

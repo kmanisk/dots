@@ -1,0 +1,45 @@
+{
+  "accent": "#8aadf4",
+  "assets": {
+    "background_mode": "solid",
+    "preview": null,
+    "wallpaper": null,
+    "wallpapers": []
+  },
+  "base_16": {
+    "BASE00": "#24273a",
+    "BASE01": "#1e2030",
+    "BASE02": "#363a4f",
+    "BASE03": "#494d64",
+    "BASE04": "#5b6078",
+    "BASE05": "#cad3f5",
+    "BASE06": "#f4dbd6",
+    "BASE07": "#b7bdf8",
+    "BASE08": "#ed8796",
+    "BASE09": "#f5a97f",
+    "BASE0A": "#eed49f",
+    "BASE0B": "#a6da95",
+    "BASE0C": "#8bd5ca",
+    "BASE0D": "#8aadf4",
+    "BASE0E": "#c6a0f6",
+    "BASE0F": "#f0c6c6"
+  },
+  "capabilities": {
+    "browser": false,
+    "icons": false,
+    "palette": true,
+    "terminal": true,
+    "wallpaper": false
+  },
+  "display_name": "Catppuccin Macchiato",
+  "name": "catppuccin-macchiato",
+  "source": {
+    "author": "https://github.com/catppuccin/catppuccin",
+    "commit": "05e6e6f7e53a2745345ba3658b0172831ff54e9b",
+    "file_sha256": "49ba15d879ee0d2fad9f95007ac7e3540b057d8dc5c2f5a69a3581764ccf0b17",
+    "palette_url": "https://raw.githubusercontent.com/tinted-theming/schemes/05e6e6f7e53a2745345ba3658b0172831ff54e9b/base16/catppuccin-macchiato.yaml",
+    "provider": "curated-base16",
+    "repository": "https://github.com/tinted-theming/schemes"
+  },
+  "type": "dark"
+}

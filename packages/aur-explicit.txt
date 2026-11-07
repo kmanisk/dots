@@ -5,3 +5,5 @@ tmog-appimage
 xremap-x11-bin
 vkbasalt
 lib32-vkbasalt
+looking-glass
+looking-glass-module-dkms

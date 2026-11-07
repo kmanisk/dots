@@ -152,6 +152,7 @@ esac
 ## 5. Security & Secret Handling
 
 * **Credentials Location:** `~/.config/rclone/rclone.conf`.
+* **Ownership/Mode Invariant:** The credential file must be owned by the interactive user (`onyx:onyx` on this workstation) with mode `0600`. Root ownership breaks normal user-level `rclone` and the on-demand Google Drive workflow even when the group is correct.
 * **Dotfile Exclusion:** Never track `~/.config/rclone/rclone.conf` in unencrypted Git or plain chezmoi commits (RULE 6).
 * **Encryption Policy:** If synchronizing via chezmoi, encrypt the entire file using age:
   ```bash

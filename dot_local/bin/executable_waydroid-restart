@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Restart Waydroid through the existing stop/start helpers and reopen the UI/app.
+set -euo pipefail
+
+export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
+
+waydroid-stop
+exec waydroid-launcher "$@"

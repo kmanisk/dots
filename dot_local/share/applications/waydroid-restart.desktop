@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Restart Waydroid
+GenericName=Android Container Control
+Comment=Restart the Waydroid session and container, then reopen Android.
+Exec=waydroid-restart
+TryExec=waydroid-restart
+Icon=waydroid
+Terminal=false
+Categories=X-WayDroid-App;Utility;
+NoDisplay=false

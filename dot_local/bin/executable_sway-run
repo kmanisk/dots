@@ -39,6 +39,11 @@ export QT_QPA_PLATFORM="wayland;xcb"
 export SDL_VIDEODRIVER="wayland,x11"
 export CLUTTER_BACKEND=wayland
 export _JAVA_AWT_WM_NONREPARENTING=1
+# ArtCraft Suite Wayland integration
+export GRIDCRAFT_WAYLAND=1
+export WORDCRAFT_WAYLAND=1
+export FILMCRAFT_WAYLAND=1
+export PHOTOCRAFT_NATIVE_WAYLAND=1
 # WLR cursor fallback for NVIDIA and hybrid GPU configurations (fixes invisible cursor in Xwayland/Steam)
 export WLR_NO_HARDWARE_CURSORS=1
 export XCURSOR_PATH="$HOME/.local/share/icons:$HOME/.icons:/usr/share/icons:/usr/share/pixmaps"

@@ -1,0 +1,20 @@
+[Desktop Entry]
+Type=Application
+Name=Windows 10 (X-Lite)
+Comment=Open the isolated Windows 10 X-Lite VM on workspace 5
+Exec=win10lab workspace
+Icon=distributor-logo-windows
+Terminal=false
+Categories=System;Emulator;
+Keywords=windows;win10;xlite;vm;looking-glass;qemu;
+StartupNotify=false
+
+Actions=Start;Stop;
+
+[Desktop Action Start]
+Name=Start / Show Windows 10
+Exec=win10lab workspace
+
+[Desktop Action Stop]
+Name=Stop Windows 10
+Exec=win10lab stop

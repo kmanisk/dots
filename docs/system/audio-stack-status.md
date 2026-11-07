@@ -19,9 +19,8 @@ The entire audio infrastructure is unified into a native, high-performance, daem
    - Anti-shout compressor (5ms attack, 120ms hold, 500ms release) and brickwall limiter (-2.0 dBFS ceiling) protect against clipping.
    - Low-level speech leveling (+4.0 dB boost) on Natural Clean lifts soft conversational speech into broadcast clarity.
 5. **MicStudio v1.0.0 Deployed**: Native Rust binary (`~/.local/bin/micstudio` with wrapper `mic`) controlling 27 tuned voice models, 7 live audio controls, fullscreen dual-graph spectrograph, and safe sidetone monitoring.
-6. **ASUS TUF DAX3 Dolby Speaker DSP**: Factory Windows DAX3 impulse response convolution (`Dolby_Speaker.irs`), 45 Hz driver excursion protection high-pass filter, and 7 tuned voicings:
+6. **ASUS TUF DAX3 Dolby Speaker DSP**: Factory Windows DAX3 impulse response convolution (`Dolby_Speaker.irs`), 45 Hz driver excursion protection high-pass filter, and 6 tuned voicings:
    - `tuned`: Focused & Natural (default, slev 1.30 spatializer width, clean +11.6 dB presence curve).
-   - `tuned-old`: Wide staging (slev 1.82 expansive soundstage).
    - `custom`: Windows Dolby Access Custom 2 profile (+11.6 dB presence peak).
    - `dynamic`: Windows DAX3 default (+9.0 dB makeup gain, slev 1.45, AutoGain Leveler + Spatial).
    - `music`: Windows DAX3 Audiophile (+11.0 dB makeup gain, uncompressed natural dynamics).

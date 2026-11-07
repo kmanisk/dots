@@ -55,7 +55,7 @@ IMPORTED_OMARCHY_DIR = os.path.expanduser("~/.config/theme/imported/omarchy")
 PREVIEWS_DIR = os.path.expanduser("~/.cache/theme/previews")
 IMPORT_TMP_BASE = os.path.expanduser("~/.cache/theme/import-tmp")
 WALLPAPERS_CACHE = os.path.expanduser("~/.local/share/theme/wallpapers/upstream")
-MAX_WALLPAPERS_PER_THEME = 5
+REPOSITORY_DISCOVERY_VERSION = 3
 
 os.makedirs(IMPORTED_OMARCHY_DIR, exist_ok=True)
 os.makedirs(PREVIEWS_DIR, exist_ok=True)
@@ -327,7 +327,7 @@ def parse_cava_theme(filepath):
         return None
 
 
-def find_candidate_files(repo_dir, max_depth=3):
+def find_candidate_files(repo_dir, max_depth=6):
     """
     Recursively scans repo_dir up to max_depth (skipping hidden and build dirs).
     Returns a dict of discovered candidate files grouped by format/app.
@@ -353,8 +353,10 @@ def find_candidate_files(repo_dir, max_depth=3):
         "steam": [],
         "vencord": [],
         "browser": [],
+        "icons": [],
         "zed": [],
         "wallpapers": [],
+        "wallpaper_fallbacks": [],
         "previews": [],
         "ignored": [],
     }
@@ -393,13 +395,22 @@ def find_candidate_files(repo_dir, max_depth=3):
                 candidates["previews"].append(rel_file)
                 continue
 
-            # Wallpaper discovery
-            if (
-                any(w in rel_file.lower() for w in ("background", "wallpaper", "bg/"))
-                and f_lower.endswith((".png", ".jpg", ".jpeg", ".webp"))
-            ):
-                candidates["wallpapers"].append(rel_file)
-                continue
+            # Wallpaper discovery. Conventional background/wallpaper paths win.
+            # If a repository stores wallpapers elsewhere, retain non-UI images as
+            # fallback candidates and use them only after explicit paths are exhausted.
+            if f_lower.endswith((".png", ".jpg", ".jpeg", ".webp")):
+                low_path = rel_file.replace("\\", "/").lower()
+                if any(w in low_path for w in ("background", "wallpaper", "bg/")):
+                    candidates["wallpapers"].append(rel_file)
+                    continue
+                ui_asset_tokens = (
+                    "preview", "screenshot", "thumbnail", "thumb", "logo",
+                    "icon", "badge", "avatar", "banner", "social", "readme",
+                    "unlock", "lockscreen", "lock-screen", "lock_screen", "splash",
+                )
+                if not any(token in low_path for token in ui_asset_tokens):
+                    candidates["wallpaper_fallbacks"].append(rel_file)
+                    continue
 
             # Palette files
             if f_lower == "colors.toml":
@@ -442,6 +453,8 @@ def find_candidate_files(repo_dir, max_depth=3):
                 candidates["vencord"].append(rel_file)
             elif f_lower == "chromium.theme":
                 candidates["browser"].append(rel_file)
+            elif f_lower == "icons.theme":
+                candidates["icons"].append(rel_file)
             elif f_lower.endswith(".zed.json"):
                 candidates["zed"].append(rel_file)
 
@@ -452,13 +465,13 @@ def find_candidate_files(repo_dir, max_depth=3):
     return candidates
 
 
-def select_wallpaper_candidates(paths, limit=MAX_WALLPAPERS_PER_THEME):
-    """Return at most `limit` deterministic, primary wallpaper paths.
+def select_wallpaper_candidates(paths, limit=None):
+    """Return deterministic wallpaper paths, optionally capped by `limit`.
 
-    Prefer the repository's canonical `backgrounds/` directory. Historical,
-    alternate, and portrait/vertical directories are only used when there are
-    not enough primary images. This keeps a small useful set without copying
-    every image a community theme has ever shipped.
+    Prefer the repository's canonical `backgrounds/` directory, followed by
+    conventional wallpaper directories, other non-UI images, and finally
+    historical/alternate/portrait assets. Omarchy import calls this uncapped so
+    every relevant discovered repository image is retained.
     """
     def natural_key(value):
         value = value.replace("\\", "/").lower()
@@ -493,9 +506,69 @@ def select_wallpaper_candidates(paths, limit=MAX_WALLPAPERS_PER_THEME):
             continue
         seen.add(key)
         selected.append(normalized)
-        if len(selected) >= max(0, int(limit)):
+        if limit is not None and len(selected) >= max(0, int(limit)):
             break
     return selected
+
+
+def _safe_wallpaper_filename(index, source_path):
+    base = os.path.basename(source_path)
+    base = re.sub(r"[^A-Za-z0-9._@+-]+", "-", base).strip("-") or f"wallpaper-{index}"
+    return f"{index:02d}-{base}"
+
+
+def persist_repository_wallpapers(repo_dir, slug, canonical):
+    """Persist only the chosen images from the repository before its clone is deleted."""
+    candidates = list((canonical.get("assets") or {}).get("wallpapers") or [])
+    if not candidates:
+        return
+
+    source = canonical.get("source") or {}
+    destination = os.path.join(WALLPAPERS_CACHE, slug)
+    stage = tempfile.mkdtemp(prefix=f".{slug}-wallpapers-", dir=WALLPAPERS_CACHE)
+    files = []
+    try:
+        for index, relative in enumerate(candidates, 1):
+            relative = str(relative).replace("\\", "/").lstrip("./")
+            source_file = os.path.realpath(os.path.join(repo_dir, relative))
+            repo_root = os.path.realpath(repo_dir) + os.sep
+            if not source_file.startswith(repo_root) or not os.path.isfile(source_file):
+                continue
+            filename = _safe_wallpaper_filename(index, relative)
+            shutil.copy2(source_file, os.path.join(stage, filename))
+            files.append({"source": relative, "file": filename})
+
+        if not files:
+            raise RuntimeError(f"{slug}: wallpaper candidates were recorded but no repository image could be preserved")
+
+        manifest = {
+            "theme": slug,
+            "repository": str(source.get("repository") or ""),
+            "ref": str(source.get("commit") or source.get("branch") or "main"),
+            "discovery_version": REPOSITORY_DISCOVERY_VERSION,
+            "candidates": candidates,
+            "files": files,
+        }
+        with open(os.path.join(stage, "manifest.json"), "w", encoding="utf-8") as handle:
+            json.dump(manifest, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+
+        backup = destination + f".old-{os.getpid()}"
+        if os.path.exists(backup):
+            shutil.rmtree(backup, ignore_errors=True)
+        if os.path.isdir(destination):
+            os.replace(destination, backup)
+        try:
+            os.replace(stage, destination)
+            stage = None
+        except Exception:
+            if os.path.isdir(backup) and not os.path.exists(destination):
+                os.replace(backup, destination)
+            raise
+        shutil.rmtree(backup, ignore_errors=True)
+    finally:
+        if stage and os.path.isdir(stage):
+            shutil.rmtree(stage, ignore_errors=True)
 
 
 def parse_alacritty_dict(data):
@@ -515,6 +588,8 @@ def parse_alacritty_dict(data):
     if "cursor" in cursor:
         c["cursor"] = clean_hex(cursor["cursor"])
         c["accent"] = c["cursor"]
+    if "text" in cursor:
+        c["cursor_text"] = clean_hex(cursor["text"])
     if isinstance(selection, dict) and "background" in selection:
         c["selection"] = clean_hex(selection["background"])
     if isinstance(selection, dict) and "text" in selection:
@@ -623,30 +698,38 @@ def parse_alacritty_file(filepath):
 def parse_kitty_file(filepath):
     try:
         c = {}
+        theme_values = {}
         with open(filepath, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
                 if not line or line.startswith("#"):
                     continue
                 parts = line.split()
-                if len(parts) >= 2:
-                    k, v = parts[0].lower(), parts[1]
-                    if HEX_RE.match(clean_hex(v)):
-                        val = clean_hex(v)
-                        if k in ("background", "bg"):
-                            c["background"] = val
-                        elif k in ("foreground", "fg"):
-                            c["foreground"] = val
-                        elif k in ("cursor", "cursor_color"):
-                            c["cursor"] = val
-                            c["accent"] = val
-                        elif k in ("selection_background", "selection_bg"):
-                            c["selection"] = val
-                            c["selection_background"] = val
-                        elif k in ("selection_foreground", "selection_fg"):
-                            c["selection_foreground"] = val
-                        elif k.startswith("color") and k[5:].isdigit():
-                            c[k] = val
+                if len(parts) < 2:
+                    continue
+                k, v = parts[0].lower(), parts[1]
+                val = clean_hex(v)
+                if not HEX_RE.match(val):
+                    continue
+                theme_values[k] = val
+                if k in ("background", "bg"):
+                    c["background"] = val
+                elif k in ("foreground", "fg"):
+                    c["foreground"] = val
+                elif k in ("cursor", "cursor_color"):
+                    c["cursor"] = val
+                    c["accent"] = val
+                elif k in ("cursor_text_color", "cursor_text"):
+                    c["cursor_text"] = val
+                elif k in ("selection_background", "selection_bg"):
+                    c["selection"] = val
+                    c["selection_background"] = val
+                elif k in ("selection_foreground", "selection_fg"):
+                    c["selection_foreground"] = val
+                elif k.startswith("color") and k[5:].isdigit():
+                    c[k] = val
+        if theme_values:
+            c["theme"] = theme_values
         return c if len(c) >= 4 else None
     except Exception as e:
         print(f"Warning parsing Kitty {filepath}: {e}", file=sys.stderr)
@@ -656,33 +739,42 @@ def parse_kitty_file(filepath):
 def parse_ghostty_file(filepath):
     try:
         c = {}
+        theme_values = {}
         with open(filepath, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
                 if not line or line.startswith("#"):
                     continue
-                if "=" in line:
-                    k, v = line.split("=", 1)
-                    k, v = k.strip().lower(), v.strip().strip("'\"")
-                    if k == "palette" and "=" in v:
-                        idx, color = v.split("=", 1)
-                        idx, color = idx.strip(), color.strip()
-                        if idx.isdigit() and HEX_RE.match(clean_hex(color)):
-                            c[f"color{idx}"] = clean_hex(color)
-                    elif HEX_RE.match(clean_hex(v)):
-                        val = clean_hex(v)
-                        if k in ("background", "bg"):
-                            c["background"] = val
-                        elif k in ("foreground", "fg"):
-                            c["foreground"] = val
-                        elif k in ("cursor-color", "cursor"):
-                            c["cursor"] = val
-                            c["accent"] = val
-                        elif k in ("selection-background", "selection_bg"):
-                            c["selection"] = val
-                            c["selection_background"] = val
-                        elif k in ("selection-foreground", "selection_fg"):
-                            c["selection_foreground"] = val
+                if "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k, v = k.strip().lower(), v.strip().strip("'\"")
+                if k == "palette" and "=" in v:
+                    idx, color = v.split("=", 1)
+                    idx, color = idx.strip(), color.strip()
+                    if idx.isdigit() and HEX_RE.match(clean_hex(color)):
+                        val = clean_hex(color)
+                        c[f"color{idx}"] = val
+                        theme_values[f"palette_{idx}"] = val
+                elif HEX_RE.match(clean_hex(v)):
+                    val = clean_hex(v)
+                    theme_values[k] = val
+                    if k in ("background", "bg"):
+                        c["background"] = val
+                    elif k in ("foreground", "fg"):
+                        c["foreground"] = val
+                    elif k in ("cursor-color", "cursor"):
+                        c["cursor"] = val
+                        c["accent"] = val
+                    elif k in ("cursor-text", "cursor-text-color"):
+                        c["cursor_text"] = val
+                    elif k in ("selection-background", "selection_bg"):
+                        c["selection"] = val
+                        c["selection_background"] = val
+                    elif k in ("selection-foreground", "selection_fg"):
+                        c["selection_foreground"] = val
+        if theme_values:
+            c["theme"] = theme_values
         return c if len(c) >= 4 else None
     except Exception as e:
         print(f"Warning parsing Ghostty {filepath}: {e}", file=sys.stderr)
@@ -690,33 +782,147 @@ def parse_ghostty_file(filepath):
 
 
 def parse_btop_file(filepath):
+    """Parse btop theme colors and preserve the complete authored theme map."""
     try:
         c = {}
+        theme_values = {}
         with open(filepath, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
                 if not line or line.startswith("#"):
                     continue
-                m = re.match(r'theme\[(\w+)\]\s*=\s*[\'"]?([#0-9a-fA-F]{6,7})[\'"]?', line)
-                if m:
-                    k, v = m.group(1).lower(), clean_hex(m.group(2))
-                    if k == "main_bg":
-                        c["background"] = v
-                    elif k == "main_fg":
-                        c["foreground"] = v
-                    elif k == "title":
-                        c["accent"] = v
-                    elif k == "selected_bg":
-                        c["selection"] = v
-                        c["selection_background"] = v
-                    elif k == "selected_fg":
-                        c["selection_foreground"] = v
-                    elif k == "div_line":
-                        c["border"] = v
+                m = re.match(r'theme\[(\w+)\]\s*=\s*[\'"]?([^\'"]*)[\'"]?', line)
+                if not m:
+                    continue
+                k, raw = m.group(1).lower(), m.group(2).strip()
+                if raw == "":
+                    theme_values[k] = ""
+                    continue
+                val = clean_hex(raw)
+                if not HEX_RE.match(val):
+                    continue
+                theme_values[k] = val
+                if k == "main_bg":
+                    c["background"] = val
+                elif k == "main_fg":
+                    c["foreground"] = val
+                elif k == "title":
+                    c["accent"] = val
+                elif k == "selected_bg":
+                    c["selection"] = val
+                    c["selection_background"] = val
+                elif k == "selected_fg":
+                    c["selection_foreground"] = val
+                elif k == "div_line":
+                    c["border"] = val
+        if theme_values:
+            c["theme"] = theme_values
         return c if c else None
     except Exception as e:
         print(f"Warning parsing Btop {filepath}: {e}", file=sys.stderr)
         return None
+
+
+def parse_mako_file(filepath):
+    """Parse unambiguous Mako theme colors; behavior/geometry remain local.
+
+    Omarchy repositories do not consistently place global colors before filter
+    sections. Scan the whole file, but accept a color key only when every
+    occurrence agrees so a section-specific override cannot become our global
+    notification palette by accident.
+    """
+    try:
+        occurrences = {
+            "background-color": [],
+            "text-color": [],
+            "border-color": [],
+        }
+        with open(filepath, "r", encoding="utf-8", errors="replace") as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line or line.startswith(("#", ";")) or "=" not in line:
+                    continue
+                key, value = [part.strip() for part in line.split("=", 1)]
+                if key not in occurrences:
+                    continue
+                match = re.search(r"#[0-9a-fA-F]{6}", value)
+                if match:
+                    occurrences[key].append(clean_hex(match.group(0)))
+        values = {}
+        for key, found in occurrences.items():
+            unique = sorted(set(found))
+            if len(unique) == 1:
+                values[key.replace("-", "_")] = unique[0]
+        return values or None
+    except Exception as exc:
+        print(f"Warning parsing Mako {filepath}: {exc}", file=sys.stderr)
+        return None
+
+
+def parse_chromium_theme(filepath):
+    """Parse Omarchy chromium.theme RGB triplet into a canonical frame color."""
+    try:
+        text = open(filepath, "r", encoding="utf-8", errors="replace").read().strip()
+        parts = [part.strip() for part in text.split(",")]
+        if len(parts) != 3:
+            return None
+        rgb = [int(part) for part in parts]
+        if any(value < 0 or value > 255 for value in rgb):
+            return None
+        return {"frame": "#{:02x}{:02x}{:02x}".format(*rgb)}
+    except Exception:
+        return None
+
+
+def parse_icon_theme(filepath):
+    """Read a requested icon-theme name; runtime applies it only when installed."""
+    try:
+        value = open(filepath, "r", encoding="utf-8", errors="replace").read().strip()
+    except OSError:
+        return None
+    if not value or len(value) > 128 or "\n" in value or "\r" in value:
+        return None
+    if not re.fullmatch(r"[A-Za-z0-9._ +@-]+", value):
+        return None
+    return {"name": value}
+
+
+def build_authored_apps(repo_dir, candidates):
+    """Extract safe, color-only app intent from upstream theme files.
+
+    Do not carry fonts, geometry, keybindings, shell commands, or compositor
+    settings from third-party repositories. Parsed color/profile data can be
+    merged into local templates without surrendering workstation ownership.
+    """
+    apps = {}
+    parsers = {
+        "alacritty": parse_alacritty_file,
+        "kitty": parse_kitty_file,
+        "ghostty": parse_ghostty_file,
+        "btop": parse_btop_file,
+        "cava": parse_cava_theme,
+        "mako": parse_mako_file,
+        "browser": parse_chromium_theme,
+        "icons": parse_icon_theme,
+    }
+    for app, parser in parsers.items():
+        paths = list(candidates.get(app) or [])
+        if not paths:
+            continue
+        relative = paths[0]
+        parsed = parser(os.path.join(repo_dir, relative))
+        if not parsed:
+            continue
+        if app in {"cava", "mako", "browser", "icons"}:
+            profile = dict(parsed)
+            profile["source_file"] = relative.replace("\\", "/")
+        else:
+            profile = {
+                "source_file": relative.replace("\\", "/"),
+                "colors": parsed,
+            }
+        apps[app] = profile
+    return apps
 
 
 def resolve_theme_palette(repo_dir, candidates):
@@ -807,8 +1013,15 @@ def analyze_repository(repo_dir, git_url=None, owner="Unknown", repo_name=""):
     Returns (raw_theme, analysis_summary)
     """
     candidates = find_candidate_files(repo_dir)
-    wallpapers_found = len(candidates["wallpapers"])
-    candidates["wallpapers"] = select_wallpaper_candidates(candidates["wallpapers"])
+    explicit_wallpapers = list(candidates["wallpapers"])
+    fallback_wallpapers = list(candidates.get("wallpaper_fallbacks") or [])
+    wallpapers_found = len(explicit_wallpapers) if explicit_wallpapers else len(fallback_wallpapers)
+    # Conventional wallpaper/background paths are authoritative when present.
+    # Miscellaneous repository images are a fallback only for themes that ship
+    # no conventional wallpaper path at all; never mix lock-screen/readme art
+    # into a valid backgrounds/ or wallpapers/ set.
+    wallpaper_pool = explicit_wallpapers if explicit_wallpapers else fallback_wallpapers
+    candidates["wallpapers"] = select_wallpaper_candidates(wallpaper_pool)
 
     # Derive slug
     if git_url:
@@ -899,17 +1112,12 @@ def analyze_repository(repo_dir, git_url=None, owner="Unknown", repo_name=""):
         "steam": len(candidates["steam"]) > 0,
         "vencord": len(candidates["vencord"]) > 0,
         "browser": len(candidates["browser"]) > 0,
+        "icons": len(candidates["icons"]) > 0,
         "zed": len(candidates["zed"]) > 0,
         "terminal": True,
     }
 
-    apps = {}
-    # Cava
-    if candidates["cava"]:
-        cava_file = os.path.join(repo_dir, candidates["cava"][0])
-        cava_parsed = parse_cava_theme(cava_file)
-        if cava_parsed:
-            apps["cava"] = cava_parsed
+    apps = build_authored_apps(repo_dir, candidates)
 
     # Previews. Use the expanded path for the local copy, but persist a
     # home-relative path in source metadata so catalog JSON stays portable.
@@ -958,6 +1166,12 @@ def analyze_repository(repo_dir, git_url=None, owner="Unknown", repo_name=""):
         "assets": {
             "wallpapers": candidates["wallpapers"],
             "preview": preview_meta,
+            "upstream_app_files": {
+                app: paths[0].replace("\\", "/")
+                for app, paths in candidates.items()
+                if app in {"alacritty", "kitty", "ghostty", "btop", "cava", "mako", "browser", "icons"} and paths
+            },
+            "upstream_apps_version": 3,
         }
     }
 
@@ -1032,7 +1246,7 @@ def print_theme_analysis(summary, branch="master", commit=""):
                 if has_cap:
                     kept = summary.get("wallpapers_count", 0)
                     found = summary.get("wallpapers_found", kept)
-                    w_status = f"yes ({kept} kept of {found} found; max {MAX_WALLPAPERS_PER_THEME})"
+                    w_status = f"yes ({kept} kept of {found} found)"
                 else:
                     w_status = "no"
                 print(f"  {cap_name.capitalize():<12} {w_status}")
@@ -1140,6 +1354,10 @@ def import_git_theme(
             print("[Dry Run] Theme passed all validation checks cleanly.")
             return True
 
+        # Preserve the repository's selected wallpapers before the temporary
+        # clone is deleted. Omarchy themes use these exact files at runtime.
+        persist_repository_wallpapers(clone_dir, slug, canonical)
+
         # Transactional write via temporary file
         print(f"\nWriting:")
         print(f"  {dest_file}")
@@ -1197,6 +1415,8 @@ def remove_imported_theme(theme_name):
 
     remove_from_chezmoi_source(target)
     os.remove(target)
+    shutil.rmtree(os.path.join(WALLPAPERS_CACHE, clean_name), ignore_errors=True)
+    shutil.rmtree(os.path.join(WALLPAPERS_CACHE, f"omarchy-{clean_name}"), ignore_errors=True)
     print(f"Removed: {target}")
     print("Syncing cache...")
     subprocess.run([os.path.expanduser("~/.local/bin/theme-sync")], check=True)

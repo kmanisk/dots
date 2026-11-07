@@ -17,6 +17,7 @@ import shutil
 
 sys.path.insert(0, os.path.expanduser("~/.local/lib"))
 from theme_engine.schema import contrast_ratio, BASE16_KEYS, HEX_RE, clean_hex
+from theme_engine.wallpaper_policy import resolve_omarchy_wallpaper_source_info
 
 def colored(text, color):
     codes = {
@@ -118,7 +119,7 @@ def main():
     print(f"  Manifest:               {status_label(manifest_ok, '(mtime_ns tracking)')}")
 
     # Templates
-    templates = ["sway.conf", "swaybar.conf", "dunst.conf", "alacritty.toml", "colors.sh", "btop.theme", "rofi.rasi", "yazi.toml", "zed-theme.json", "cava.conf"]
+    templates = ["sway.conf", "swaybar.conf", "dunst.conf", "alacritty.toml", "kitty-colors.conf", "colors.sh", "btop.theme", "rofi.rasi", "yazi.toml", "zed-theme.json", "cava.conf"]
     missing_tpl = [t for t in templates if not os.path.exists(os.path.expanduser(f"~/.config/theme/templates/{t}"))]
     print(f"  Templates:              {status_label(len(missing_tpl) == 0, f'({len(templates)-len(missing_tpl)}/{len(templates)})')}")
 
@@ -135,18 +136,120 @@ def main():
     rofi_ok = os.path.exists(os.path.expanduser("~/.local/bin/rofi-theme"))
     wallpaper_helper = os.path.expanduser("~/.local/bin/theme-wallpaper")
     wallpaper_ok = os.path.isfile(wallpaper_helper) and os.access(wallpaper_helper, os.X_OK)
-    wallpaper_theme_count = 0
+    upstream_apps_helper = os.path.expanduser("~/.local/bin/theme-upstream-apps")
+    upstream_apps_helper_ok = os.path.isfile(upstream_apps_helper) and os.access(upstream_apps_helper, os.X_OK)
+    upstream_apps_root = os.path.expanduser("~/.local/share/theme/upstream-apps")
+    embedded_app_profile_count = 0
+    lazy_app_profile_count = 0
+    stale_app_profile_count = 0
+    authored_app_kinds = set()
+    invalid_app_profiles = []
+    for theme_path in cached_files:
+        try:
+            with open(theme_path, "r", encoding="utf-8") as handle:
+                theme_data = json.load(handle)
+        except Exception:
+            continue
+        source = theme_data.get("source") or {}
+        if str(source.get("provider") or "").lower() != "omarchy":
+            continue
+        theme_name = os.path.splitext(os.path.basename(theme_path))[0]
+        assets = theme_data.get("assets") or {}
+        apps = theme_data.get("apps") or {}
+        if assets.get("upstream_apps_version") == 3:
+            embedded_app_profile_count += 1
+            for app, profile in apps.items():
+                if isinstance(profile, dict) and profile.get("source_file"):
+                    authored_app_kinds.add(app)
+            continue
+        overlay_path = os.path.join(upstream_apps_root, f"{theme_name}.json")
+        if not os.path.isfile(overlay_path):
+            continue
+        try:
+            with open(overlay_path, "r", encoding="utf-8") as handle:
+                overlay = json.load(handle)
+            expected_repo = str(source.get("repository") or "").rstrip("/")
+            expected_ref = str(source.get("commit") or source.get("branch") or "main")
+            structurally_valid = isinstance(overlay.get("apps"), dict) and bool(overlay.get("repository"))
+            if not structurally_valid:
+                invalid_app_profiles.append(theme_name)
+                continue
+            current = (
+                overlay.get("version") == 3
+                and str(overlay.get("repository") or "").rstrip("/") == expected_repo
+                and str(overlay.get("ref") or "") == expected_ref
+            )
+            if not current:
+                stale_app_profile_count += 1
+                continue
+            lazy_app_profile_count += 1
+            for app, profile in (overlay.get("apps") or {}).items():
+                if isinstance(profile, dict) and profile.get("source_file"):
+                    authored_app_kinds.add(app)
+        except Exception:
+            invalid_app_profiles.append(theme_name)
+
+    repository_metadata_count = 0
     wallpaper_max = 0
+    own_wallpaper_count = 0
+    borrowed_wallpaper_count = 0
+    semantic_wallpaper_count = 0
+    solid_fallback_count = 0
+    invalid_wallpaper_sources = []
     for theme_path in cached_files:
         try:
             with open(theme_path, "r", encoding="utf-8") as theme_file:
                 theme_data = json.load(theme_file)
             wallpaper_count = len((theme_data.get("assets") or {}).get("wallpapers") or [])
             wallpaper_max = max(wallpaper_max, wallpaper_count)
-            wallpaper_theme_count += int(wallpaper_count > 0)
+            repository_metadata_count += int(wallpaper_count > 0)
+
+            theme_name = os.path.splitext(os.path.basename(theme_path))[0]
+            info = resolve_omarchy_wallpaper_source_info(theme_name, theme_data)
+            source_name = info.get("source_name")
+            source_theme = info.get("source_theme")
+            if not source_name or not isinstance(source_theme, dict):
+                solid_fallback_count += 1
+                continue
+            source_count = len((source_theme.get("assets") or {}).get("wallpapers") or [])
+            if source_count <= 0:
+                invalid_wallpaper_sources.append(str(source_name))
+                continue
+            kind = str(info.get("kind") or "")
+            if kind == "own":
+                own_wallpaper_count += 1
+            elif kind == "semantic":
+                semantic_wallpaper_count += 1
+            else:
+                borrowed_wallpaper_count += 1
         except Exception:
-            pass
-    wallpaper_ok = wallpaper_ok and wallpaper_max <= 5
+            invalid_wallpaper_sources.append(os.path.basename(theme_path))
+
+    upstream_root = os.path.expanduser("~/.local/share/theme/wallpapers/upstream")
+    hydrated_repository_count = 0
+    if os.path.isdir(upstream_root):
+        for entry in os.listdir(upstream_root):
+            directory = os.path.join(upstream_root, entry)
+            if not os.path.isdir(directory):
+                continue
+            if any(
+                os.path.isfile(os.path.join(directory, filename))
+                and os.path.splitext(filename)[1].lower() in {".png", ".jpg", ".jpeg", ".webp"}
+                for filename in os.listdir(directory)
+            ):
+                hydrated_repository_count += 1
+
+    shared_mapping_count = 0
+    try:
+        with open(os.path.expanduser("~/.local/share/theme/wallpapers/manifest.json"), "r", encoding="utf-8") as handle:
+            shared_mapping_count = len((json.load(handle).get("themes") or {}))
+    except (OSError, json.JSONDecodeError, TypeError):
+        pass
+
+    wallpaper_ok = wallpaper_ok and not invalid_wallpaper_sources
+    # Repository images are intentionally lazy and are not count-capped. Missing
+    # local upstream bytes are healthy because first use hydrates only that repository.
+    # The shared Wallhaven manifest is historical maintenance data, not a runtime source.
     hooks_dir = os.path.expanduser("~/.config/theme/hooks.d")
     hooks_ok = os.path.isdir(hooks_dir)
     hook_count = 0
@@ -166,7 +269,24 @@ def main():
     print(f"  btop:                   {status_label(btop_ok)}")
     print(f"  Cava:                   {status_label(cava_ok, '(visualizer)')}")
     print(f"  Rofi:                   {status_label(rofi_ok)}")
-    print(f"  Theme Wallpapers:       {status_label(wallpaper_ok, f'({wallpaper_theme_count}/{total_count} themes; max {wallpaper_max})')}")
+    wallpaper_note = (
+        f"({own_wallpaper_count} own Omarchy; {borrowed_wallpaper_count} exact/alias donors; "
+        f"{semantic_wallpaper_count} semantic donors; {solid_fallback_count} solid fallback; "
+        f"{hydrated_repository_count} hydrated; "
+        f"{shared_mapping_count} historical shared mappings; largest repo set {wallpaper_max})"
+    )
+    if invalid_wallpaper_sources:
+        wallpaper_note += f" invalid={len(invalid_wallpaper_sources)}"
+    print(f"  Theme Wallpapers:       {status_label(wallpaper_ok, wallpaper_note)}")
+    upstream_apps_ok = upstream_apps_helper_ok and not invalid_app_profiles
+    upstream_note = (
+        f"({embedded_app_profile_count} embedded; {lazy_app_profile_count} lazy; "
+        f"{stale_app_profile_count} stale/self-healing; "
+        f"apps={','.join(sorted(authored_app_kinds)) or 'none'})"
+    )
+    if invalid_app_profiles:
+        upstream_note += f" invalid={len(invalid_app_profiles)}"
+    print(f"  Upstream App Profiles:  {status_label(upstream_apps_ok, upstream_note)}")
     print(f"  Hooks:                  {status_label(hooks_ok, f'({hook_count} executable scripts)')}")
 
     # 4. Hardware Display Vibrance & CTM

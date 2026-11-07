@@ -32,8 +32,8 @@
 
 ## 4. Launch methods (all verified working)
 
-1. **Rofi (`Alt+g`):** `~/.local/bin/rofi-games` — `ELDEN RING` (Proton, `DISABLE_LSFGVK=1`, MangoHud), `Steam library`, `Kill game`. (History: the original `elden-ring-launcher` ran bare `prime-run "$@"` with no Proton — silent exit with no args, vanilla-Wine crash with exe arg. Fixed by delegating to `eldenring-run`, later removed with the LSFG entries.)
-2. **Terminal:** `eldenring-run` (auto-switches to ws4, fullscreen, border none per i3 game rules).
+1. **Game menu (`Alt+g`):** `~/.local/bin/rofi-games` → `ELDEN RING (Stable / no LSFG)` → `eldenring-lsfg`. A separate `ELDEN RING + LSFG 4x (experimental)` entry opts in with `ENABLE_LSFG=1`.
+2. **Terminal / Alt+Space desktop entry:** `eldenring-run`, which delegates to the same `eldenring-lsfg` stack. The launcher switches to workspace 4 and defaults to LSFG **off** after the 2026-11-06 session-specific 4x black-screen regression. The full non-Steam ModEngine/Proton mod stack remains active; no native Steam client is started.
 3. **Thunar:** right-click → Play via Proton (§1).
 4. **Steam non-Steam shortcut:** Target `.../Game/eldenring.exe`, Start In `.../Game/`, Compatibility forced **Proton Experimental**, overlay OFF. Working launch options (§5).
 5. **KDE launcher:** `~/.local/share/applications/eldenring.desktop` (fallback session — KDE Plasma itself uninstalled Sep 17, i3-only now).
@@ -50,20 +50,21 @@
 - **`steam://rungameid/<id>` does NOT launch non-Steam shortcuts** (`Unknown GameID type`, silent no-op). Works for real AppIDs (tested with GTA IV `12210`).
 - Absence of `~/steam-<appid>.log` with `PROTON_LOG=1` set = death before Proton init = launch-chain problem, not a game problem.
 
-## 6. LSFG-VK 2.0 frame-gen (dormant)
+## 6. LSFG-VK 2.0 frame-gen
 
-- On `2.0.0-1` (pacman). Removed v1-era shadow copies (`~/.local/lib/liblsfg-vk-layer*.so`, `~/.local/bin/lsfg-vk-{cli,ui}`); `lsfg-vk-cli healthcheck` clean; tools are `/usr/bin/lsfg-vk-*`.
-- Profile `Elden Ring 2x` in `~/.config/lsfg-vk/conf.toml` (2x, flow 1.0, vsync pacing) has **no `active_in`** — activates only via `LSFGVK_PROFILE` env, so nothing triggers it today.
-- v1 env (`ENABLE_LSFG`/`LSFG_DLL_PATH`/`LSFG_MULTIPLIER`) is dead under v2; v2 honors `LSFGVK_PROFILE`, `DISABLE_LSFGVK=1`, `LSFGVK_CONFIG`, `LSFGVK_ENV=1`.
-- Test runners removed (Sep 17 cleanup). Rofi is LSFG-free.
-- Notes for future use: v2 pacing is Vsync-only (cap base rate ~40 in-game or `DXVK_CONFIG="dxgi.maxFrameRate=40"`); bad frametimes → `ENABLE_GAMESCOPE_WSI=0`; old log spam `(lsfg-vk) [ERROR]: Invalid profiles section` was the v1 conf lacking profiles — resolved by the v2 config.
+- On `2.0.0-1` (pacman). Opt-in `ENABLE_LSFG=1 eldenring-lsfg` exports `LSFGVK_PROFILE="Elden Ring"`; the existing profile uses 4x, flow 0.8, Performance Mode and vsync pacing. Normal launches export `DISABLE_LSFGVK=1` for a verified stable session.
+- `ENABLE_LSFG=0 eldenring-run` / the desktop `Launch without Lossless Scaling` action disables the layer through `DISABLE_LSFGVK=1`.
+- Corrected 2026-11-03 validation explicitly switched Sway to workspace 4 and focused the game node before capture. BORDERLESS + randomizer + CameraFix/Pause + MapForGoblins + LSFG 4x rendered once FasterRevival was omitted; lsfg-vk reported multiplier 4, flow 0.80 and successful half-precision initialization.
+- **2026-11-06 A/B regression:** Current 4x startup remained black (>99.9% black compositor captures) with FasterRevival and MangoHud both absent; same ModEngine/Pause/Camera/Map randomizer profile without LSFG immediately rendered changing frames. Keep frame generation opt-in until isolated further; the earlier 4x success is historical evidence of intermittency, not a reason to default to a black screen.
+- FasterRevival v1.0.0 is independently incompatible with the current stack: full-stack/no-LSFG stayed black while the otherwise identical profile without FasterRevival rendered. Keep that DLL parked.
+- v1 env (`LSFG_DLL_PATH`/`LSFG_MULTIPLIER`) is obsolete under v2; profile selection is the supported path.
 
-## 7. FPS cap (MangoHud) — resolved, limiter retired
+## 7. MangoHud — parked after verified startup freeze
 
-- **Original symptom / fix (history):** FPS rode past 60 because the old global MangoHud `fps_limit=120,60,165` defaulted to its first entry (120) for every rofi-launched game; the per-game `~/.config/MangoHud/eldenring.exe.conf` pinned `fps_limit=60` as the stopgap.
-- **Current state (2026-10-17+):** no `fps_limit` is defined in any active config — the global config, the live ER config (`.../Game/MangoHud.conf` via `MANGOHUD_CONFIGFILE`), and the DS3 config are all limiter-free. Frame pacing is owned by the engine (60 base) and LSFG-VK (`pacing_mode = "vsync"`, 2x → 120).
-- The retired `eldenring.exe.conf` stays on disk as a dormant fallback (it still carries `fps_limit=60`); nothing in the normal launch path reads it.
-- HUD keys: `Alt+3` toggle, `Alt+4` font presets, `Alt+5` position — full list in `docs/gaming/README.md` §5.
+- 2026-11-03 controlled A/B testing isolated MangoHud as the startup-freeze trigger: randomizer alone, randomizer + CameraFix, and randomizer + CameraFix + LSFG rendered; adding MangoHud froze the startup presentation even without CameraFix/LSFG.
+- The failing MangoHud path logs `Present mode is not supported: VK_PRESENT_MODE_FIFO_RELAXED_KHR`. Normal Elden Ring launches therefore write `user_settings = {}` and do **not** inject MangoHud.
+- `Game/MangoHud.conf` and the old HUD hotkeys remain on disk for experiments only. Opt in explicitly with `ELDENRING_MANGOHUD=1 eldenring-run`; expect the current regression until retested after MangoHud/Proton changes.
+- Frame pacing is owned by Elden Ring's 60 FPS base and LSFG-VK 2x/vsync, not by MangoHud.
 
 ## 8. Input-focus FPS drops — RESOLVED, stable 60 FPS
 

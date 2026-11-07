@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Read-only, on-demand audit of optional service boot/startup policies.
+# No root access, monitoring daemon, state mutation or network connection.
+set -uo pipefail
+
+WARNINGS=0
+state() {
+    local scope="$1" unit="$2" property="$3" result
+    if [[ "$scope" == user ]]; then
+        result="$(systemctl --user "$property" "$unit" 2>/dev/null)" || :
+    else
+        result="$(systemctl "$property" "$unit" 2>/dev/null)" || :
+    fi
+    printf '%s' "${result:-not-found}"
+}
+check() {
+    local scope="$1" unit="$2" policy="$3" enabled active note
+    enabled="$(state "$scope" "$unit" is-enabled)"
+    active="$(state "$scope" "$unit" is-active)"
+    note=ok
+    case "$policy" in
+        removed)
+            if [[ "$active" == active || "$enabled" == enabled ]]; then
+                note=UNEXPECTED; WARNINGS=$((WARNINGS + 1))
+            fi
+            ;;
+        disabled-at-boot)
+            if [[ "$enabled" == enabled ]]; then
+                note=UNEXPECTED; WARNINGS=$((WARNINGS + 1))
+            fi
+            if [[ "$active" == active && "$note" == ok ]]; then note='on-demand active'; fi
+            ;;
+        transient)
+            if [[ "$enabled" == enabled ]]; then
+                note=UNEXPECTED; WARNINGS=$((WARNINGS + 1))
+            fi
+            if [[ "$enabled" == transient ]]; then note='transient (expected)'; fi
+            ;;
+    esac
+    printf '%-7s %-29s %-13s %-12s %s\n' "$scope" "$unit" "$enabled" "$active" "$note"
+}
+
+printf 'On-demand service audit (%s)\n' "$(date '+%Y-%m-%d %H:%M')"
+printf '%-7s %-29s %-13s %-12s %s\n' SCOPE UNIT BOOT_STATE RUNNING NOTE
+check system warp-svc.service removed
+check user warp-taskbar.service removed
+check system waydroid-container.service disabled-at-boot
+check user wd-venus.service disabled-at-boot
+check system nano11-qemu.service transient
+check system win10lab-qemu.service transient
+check system libvirtd.service disabled-at-boot
+check system virtqemud.service disabled-at-boot
+check system podman.service disabled-at-boot
+check system docker.service disabled-at-boot
+check user syncthing.service disabled-at-boot
+
+if command -v pacman >/dev/null && pacman -Q cloudflare-warp-bin >/dev/null 2>&1; then
+    printf 'PACKAGE cloudflare-warp-bin installed (cleanup still pending)\n'
+    WARNINGS=$((WARNINGS + 1))
+fi
+printf 'Notes: an active transient VM or Waydroid container may be user-invoked.\n'
+printf 'This audit never kills active workloads and does not inspect unrelated system services.\n'
+printf 'Outstanding lifecycle findings: %d\n' "$WARNINGS"
+if [[ "${1:-}" == --strict && "$WARNINGS" -gt 0 ]]; then exit 1; fi

@@ -1,0 +1,37 @@
+<?xml version="1.1" encoding="UTF-8"?>
+
+<channel name="thunar" version="1.0">
+  <property name="last-view" type="string" value="ThunarDetailsView"/>
+  <property name="last-icon-view-zoom-level" type="string" value="THUNAR_ZOOM_LEVEL_50_PERCENT"/>
+  <property name="last-window-maximized" type="bool" value="false"/>
+  <property name="last-separator-position" type="int" value="210"/>
+  <property name="last-window-width" type="int" value="1176"/>
+  <property name="last-window-height" type="int" value="716"/>
+  <property name="last-sort-column" type="string" value="THUNAR_COLUMN_DATE_MODIFIED"/>
+  <property name="last-sort-order" type="string" value="GTK_SORT_DESCENDING"/>
+  <property name="last-details-view-zoom-level" type="string" value="THUNAR_ZOOM_LEVEL_50_PERCENT"/>
+  <property name="last-details-view-column-widths" type="string" value="340,110,173,150,118,102,50,50,600,50,50,124,50,748"/>
+  <property name="last-show-hidden" type="bool" value="true"/>
+  <property name="last-splitview-separator-position" type="int" value="-1"/>
+  <property name="misc-single-click" type="bool" value="false"/>
+  <property name="last-statusbar-visible" type="bool" value="true"/>
+  <property name="last-menubar-visible" type="bool" value="false"/>
+  <property name="last-toolbar-items" type="string" value="menu:1,back:1,forward:1,open-parent:1,open-home:1,new-tab:0,new-window:0,toggle-split-view:0,undo:0,redo:0,zoom-out:0,zoom-in:0,zoom-reset:0,view-as-icons:0,view-as-detailed-list:0,view-as-compact-list:0,view-switcher:0,location-bar:1,reload:0,search:1"/>
+  <property name="last-details-view-visible-columns" type="string" value="THUNAR_COLUMN_NAME,THUNAR_COLUMN_SIZE,THUNAR_COLUMN_TYPE,THUNAR_COLUMN_DATE_MODIFIED"/>
+  <property name="last-location-bar" type="string" value="ThunarLocationButtons"/>
+  <property name="last-side-pane" type="string" value="THUNAR_SIDEPANE_TYPE_SHORTCUTS"/>
+  <property name="last-image-preview-visible" type="bool" value="true"/>
+  <property name="misc-symbolic-icons-in-sidepane" type="bool" value="true"/>
+  <property name="misc-open-new-windows-in-split-view" type="bool" value="false"/>
+  <property name="misc-always-enable-split-view" type="bool" value="false"/>
+  <property name="last-restore-tabs" type="bool" value="false"/>
+  <property name="last-tabs-left" type="array">
+    <value type="string" value="file:///home/onyx"/>
+    <value type="string" value="file:///home/onyx"/>
+    <value type="string" value="file:///home/onyx"/>
+    <value type="string" value="file:///home/onyx/Downloads"/>
+  </property>
+  <property name="last-focused-tab-left" type="int" value="0"/>
+  <property name="last-focused-tab-right" type="int" value="0"/>
+  <property name="misc-confirm-close-multiple-tabs" type="bool" value="false"/>
+</channel>

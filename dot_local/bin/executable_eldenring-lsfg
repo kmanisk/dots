@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # eldenring-lsfg: Elden Ring Launcher with ModEngine2, EldenModLoader, CameraFix,
-# LSFG-VK (2x frame generation -> 120 FPS), RTX 5050 Mobile dGPU offload,
-# and MangoHud hardware monitoring.
+# optional LSFG-VK 4x frame generation, and RTX 5050 Mobile dGPU offload.
+# MangoHud is diagnostic opt-in only (ELDENRING_MANGOHUD=1); default injection
+# is disabled because it currently freezes Elden Ring's startup presentation.
 set -e
 
 # Steam AppID for Elden Ring
@@ -52,22 +53,33 @@ export PROTON_USE_XALIA=0
 export PROTON_NO_XALIA=1
 export WINEDLLOVERRIDES="dinput8=b"
 
-# Keep outer MangoHud unset so python/runtime wrappers never load it; inner script passes it via user_settings.py
+# Keep outer MangoHud unset so Proton's Python/runtime wrappers never load it.
+# The inner script writes an empty user_settings.py by default; set
+# ELDENRING_MANGOHUD=1 only for explicit diagnostics.
 unset MANGOHUD
 unset MANGOHUD_CONFIG
 
-# LSFG-VK 2.0: Enable the "Elden Ring" profile (2x multiplier: 60 base x 2 -> 120 FPS)
-if [ "${ENABLE_LSFG:-1}" = "1" ] && [ "${DISABLE_LSFGVK:-0}" != "1" ]; then
+# 2026-11-06 A/B: the same randomizer/mod stack freezes at a fully black
+# surface with LSFG 4x enabled but renders changing frames when disabled.
+# Default to the verified playable path. 4x is explicit opt-in while its
+# present hook remains unstable; do not change the shared lsfg-vk config.
+if [ "${ENABLE_LSFG:-0}" = "1" ] && [ "${DISABLE_LSFGVK:-0}" != "1" ]; then
     export LSFGVK_PROFILE="Elden Ring"
     unset DISABLE_LSFGVK
+    LSFG_STATUS="LSFG 4x (experimental)"
 else
     export DISABLE_LSFGVK=1
     unset LSFGVK_PROFILE
+    LSFG_STATUS="LSFG off (stable)"
 fi
 
+# This is a non-Steam game installation. Do not start or wait for the native
+# Steam client here. SteamAppId/SteamGameId and the compatibility paths above
+# are Proton/ModEngine compatibility metadata only; they do not imply that the
+# Steam desktop client should be launched.
+
 # Single-instance guard: a repeat Alt+g pick (or key-repeat double-fire) while the
-# game is up must NOT spawn a second copy — that races the prefix lock and the
-# loser dies silently after the "Launching" notification (the double-pick bug).
+# game is up must not spawn a second copy and race the prefix lock.
 if pgrep -f "^Z:.*eldenring\.exe" >/dev/null 2>&1; then
     notify-send -i input-gaming "ELDEN RING" "Already running — switching to Workspace 4..." 2>/dev/null || true
     if [ -n "$SWAYSOCK" ] || [ -n "$WAYLAND_DISPLAY" ]; then
@@ -84,7 +96,7 @@ trap 'asusctl profile set Balanced >/dev/null 2>&1 || true' EXIT INT TERM
 trap '' HUP
 
 # Focus Workspace 4 automatically (Sway or i3 IPC)
-notify-send -i input-gaming "ELDEN RING" "Launching Elden Ring (120 FPS Locked)..." 2>/dev/null || true
+notify-send -i input-gaming "ELDEN RING" "Launching Elden Ring ($LSFG_STATUS; randomizer + QoL mods)..." 2>/dev/null || true
 if [ -n "$SWAYSOCK" ] || [ -n "$WAYLAND_DISPLAY" ]; then
     swaymsg "workspace number 4" >/dev/null 2>&1 || true
 else

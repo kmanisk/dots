@@ -28,6 +28,8 @@ entries=(
     "Ctrl + L             MPV: Loop entire playlist infinitely:true"
     "Win + Shift + S      OCR text snip from screen region:~/.local/bin/ocr-snip"
     "Win + S              Normal region screenshot to clipboard:~/.local/bin/screenshot-region"
+    "Alt + W              Open Windows desktop (workspace 10):~/.local/bin/nano11 workspace"
+    "Alt + Shift + W      Windows management menu:~/.local/bin/rofi-windows"
     "Win + ?              Open this cheatsheet:~/.local/bin/rofi-cheatsheet"
 )
 

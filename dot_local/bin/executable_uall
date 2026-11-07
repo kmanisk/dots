@@ -4,7 +4,7 @@
 # Phases — auto-accepts every prompt:
 #   1. sudo pacman -Syu --noconfirm   (official repos; snap-pac pre/post
 #      snapshots fire inside the transaction)
-#   2. paru -Syu --noconfirm --noedit (AUR, skip PKGBUILD review)
+#   2. paru -Sua --noconfirm --skipreview (AUR only, skip PKGBUILD review)
 #   3. npm globals                    (graceful skip if none)
 #   4. fish plugins (fisher)          (graceful skip if none)
 # Failure of the repo/AUR phase aborts (safety over silence); aux phases
@@ -13,8 +13,8 @@ set -euo pipefail
 
 echo "==> [1/4] Official repos (pacman -Syu; snap-pac snapshots inside)"
 sudo pacman -Syu --noconfirm
-echo "==> [2/4] AUR (paru -Syu, auto-accepted, review skipped)"
-paru -Syu --noconfirm --skipreview
+echo "==> [2/4] AUR only (paru -Sua, auto-accepted, review skipped)"
+paru -Sua --noconfirm --skipreview
 echo "==> [3/4] npm globals"
 npm update -g 2>/dev/null || echo "    (npm globals skipped)"
 echo "==> [4/4] fish plugins"

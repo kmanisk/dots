@@ -33,4 +33,4 @@ fi
 # Only persist after a successful apply — a bad path can never blank next login.
 echo "$ABS" > "$HOME/.config/current_wallpaper"
 command -v notify-send >/dev/null \
-    && notify-send -i preferences-desktop-wallpaper -t 1500 "Wallpaper" "$(basename "$ABS") ($MODE)"
+    && notify-send -i preferences-desktop-wallpaper -t 1500 "Wallpaper changed"

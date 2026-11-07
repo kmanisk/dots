@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# keep-awake: Inhibit idle lock & lid-sleep, while preserving screen dimming
-# - Active (Default): Dims screen at 120s, DPMS off at 300s. Never locks, never suspends.
+# keep-awake: Inhibit idle lock & lid-sleep; dim only when no media is playing
+# - Active (Default): Dim at 120s, DPMS off at 300s (deferred during playback). No lock/suspend.
 #   Lid close keeps laptop running (start/tasks stay active).
-# - Inactive: Dims at 120s, locks with swaylock at 300s, DPMS off at 600s.
+# - Inactive: Dim at 120s, lock at 300s, DPMS off at 600s (deferred during playback).
 #   Lid close suspends laptop.
 # ==============================================================================
 set -euo pipefail
@@ -50,17 +50,20 @@ enable_keep_awake() {
         --mode=block \
         sleep infinity >/dev/null 2>&1 || true
 
+    # Cancel deferred media-aware idle actions before replacing swayidle.
+    "$HOME/.local/bin/media-idle-action" cancel >/dev/null 2>&1 || true
+
     # Kill any existing swayidle instance
     pkill -KILL -x swayidle 2>/dev/null || true
 
     # Launch keep-awake idle daemon under Sway compositor session
     swaymsg exec "swayidle -w \
-        timeout 120 '$HOME/.local/bin/screen-dim' resume '$HOME/.local/bin/screen-undim' \
-        timeout 300 'swaymsg \"output * dpms off\"' resume 'swaymsg \"output * dpms on\"; $HOME/.local/bin/screen-undim'" >/dev/null 2>&1 || true
+        timeout 120 '$HOME/.local/bin/media-idle-action dim' resume '$HOME/.local/bin/media-idle-action cancel; $HOME/.local/bin/screen-undim' \
+        timeout 300 '$HOME/.local/bin/media-idle-action dpms-off' resume '$HOME/.local/bin/media-idle-action cancel; swaymsg \"output * dpms on\"; $HOME/.local/bin/screen-undim'" >/dev/null 2>&1 || true
 
     if [ "$QUIET" -ne 1 ]; then
         notify-send -a "Screen Keep-Awake" -t 2000 -i display \
-            "Keep-Awake Active" "Screen dims after 2m, off at 5m. Lock & sleep disabled." 2>/dev/null || true
+            "Keep-Awake Active" "No media: dim at 2m, off at 5m. Playback prevents idle dim/off." 2>/dev/null || true
     fi
 }
 
@@ -75,20 +78,23 @@ disable_keep_awake() {
     swaymsg "output * dpms on" >/dev/null 2>&1 || true
     "$HOME/.local/bin/screen-undim" >/dev/null 2>&1 || true
 
+    # Cancel deferred media-aware idle actions before replacing swayidle.
+    "$HOME/.local/bin/media-idle-action" cancel >/dev/null 2>&1 || true
+
     # Kill any existing swayidle instance
     pkill -KILL -x swayidle 2>/dev/null || true
 
     # Launch standard strict security swayidle under Sway compositor session
     swaymsg exec "swayidle -w \
-        timeout 120 '$HOME/.local/bin/screen-dim' resume '$HOME/.local/bin/screen-undim' \
-        timeout 300 'swaylock -f -c 000000; $HOME/.local/bin/bt-katana >/dev/null 2>&1 &' \
-        timeout 600 'swaymsg \"output * dpms off\"' resume 'swaymsg \"output * dpms on\"; $HOME/.local/bin/screen-undim; $HOME/.local/bin/bt-katana >/dev/null 2>&1 &' \
+        timeout 120 '$HOME/.local/bin/media-idle-action dim' resume '$HOME/.local/bin/media-idle-action cancel; $HOME/.local/bin/screen-undim' \
+        timeout 300 '$HOME/.local/bin/media-idle-action lock' resume '$HOME/.local/bin/media-idle-action cancel' \
+        timeout 600 '$HOME/.local/bin/media-idle-action dpms-off' resume '$HOME/.local/bin/media-idle-action cancel; swaymsg \"output * dpms on\"; $HOME/.local/bin/screen-undim; $HOME/.local/bin/bt-katana >/dev/null 2>&1 &' \
         before-sleep 'swaylock -f -c 000000' \
         after-resume 'swaymsg \"output * dpms on\"; $HOME/.local/bin/screen-undim; $HOME/.local/bin/bt-katana >/dev/null 2>&1 &'" >/dev/null 2>&1 || true
 
     if [ "$QUIET" -ne 1 ]; then
         notify-send -a "Screen Keep-Awake" -t 2000 -i display \
-            "Keep-Awake Inactive" "Automatic lock restored (5m lock / 10m sleep). Lid suspends." 2>/dev/null || true
+            "Keep-Awake Inactive" "Idle lock restored (5m); playback defers idle actions. Lid suspends." 2>/dev/null || true
     fi
 }
 
@@ -126,10 +132,10 @@ case "$ACTION" in
         ;;
     status)
         if is_active; then
-            echo "Keep-Awake: ACTIVE (screen dims at 2m, DPMS at 5m; lock/sleep disabled)"
+            echo "Keep-Awake: ACTIVE (dim 2m, DPMS off 5m if no playback; lock/sleep disabled)"
             exit 0
         else
-            echo "Keep-Awake: INACTIVE (screen dims at 2m, locks at 5m; lid suspends)"
+            echo "Keep-Awake: INACTIVE (dim 2m, lock 5m if no playback; lid suspends)"
             exit 1
         fi
         ;;

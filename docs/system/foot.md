@@ -81,7 +81,17 @@ Based on an OCR scan of the screenshot directory (`screenshot-2026-10-17_19-55-4
 
 1. **Memory Discipline:** Foot saves ~108 MB RAM per window. A standard workflow of 5 to 6 terminals saves ~540 MB to ~650 MB of memory.
 2. **GPU Overhead Elimination:** Kitty's ~132 MB footprint is largely driven by OpenGL context creation, GLSL shader compilation, and GPU surface buffers. Foot uses CPU SIMD buffers via Pixman, drawing virtually zero power and preventing dGPU wakeups.
-3. **Dynamic Theming Integration:** Integrated with `theme-set`. Switching themes recompiles `~/.config/foot/foot-colors.ini` atomically and broadcasts XTerm OSC color updates directly to PTYs owned by live Foot windows for instant hot-reload. Foot `SIGUSR1`/`SIGUSR2` are not reload signals: in Foot 1.28 they only switch to the `[colors-dark]` / `[colors-light]` values already cached by the long-lived server, so `theme-set` must not use those signals after regenerating the palette. A zero-resident `~/.local/bin/footclient` exec wrapper injects `-o include=~/.config/foot/foot-colors.ini` into new clients so they receive the current palette even though the server itself remains running.
+3. **Dynamic Theming Integration:** Integrated with `theme-set`. Foot is the workstation's primary terminal target. For Omarchy themes that ship terminal-specific profiles, Foot translates the author's colors with precedence `alacritty.toml` -> `kitty.conf` -> normalized generated palette, per value; Kitty may fill roles Alacritty does not define, such as URL color. This ports background/foreground, cursor, selection, and all ANSI 0-15 colors without importing upstream fonts, padding, keybindings, commands, or window behavior. Switching themes recompiles `~/.config/foot/foot-colors.ini` atomically and broadcasts the same translated XTerm OSC 10/11/12/17/19 plus OSC 4 palette directly to PTYs owned by live Foot windows for instant hot-reload. Foot `SIGUSR1`/`SIGUSR2` are not reload signals: in Foot 1.28 they only switch to the `[colors-dark]` / `[colors-light]` values already cached by the long-lived server, so `theme-set` must not use those signals after regenerating the palette. A zero-resident `~/.local/bin/footclient` exec wrapper injects `-o include=~/.config/foot/foot-colors.ini` into new clients so they receive the current palette even though the server itself remains running.
+
+### 2026-11-07: Foot server PTY hot-reload correction
+
+In the live client/server layout, `/usr/bin/footclient` is an IPC client without a terminal child. The session processes (`fish`, `nvim`, etc.) are spawned directly by `foot --server`; their standard FDs expose `/dev/pts/<n>`. The previous `theme-set` process search also inspected `footclient` children, so existing windows often received **no** OSC palette updates. New Foot windows still loaded the new generated include, producing inconsistent old/new backgrounds across the desktop.
+
+`theme-set` now calls `foot_terminal_ptys()` on **only `foot` PIDs**, examining standard FDs 0, 1 and 2 of their immediate children, and sends one complete palette payload per discovered slave PTY. It sends OSC 10/11/12/17/19 and all 16 OSC 4 colors **before** live Neovim theme RPC, reducing the dark/light mismatch between a terminal's background and the editor redraw. The implementation never writes to unrelated PTYs, sends no terminal clear/reset and does not restart the shared Foot server or any TUI.
+
+Read-only process discovery found live Foot sessions at `/dev/pts/0` and `/dev/pts/1`; a focused write test of the current active palette successfully updated **2/2** live Foot PTYs, with no global theme change. A mocked test verified 21 color commands per PTY and no screen-reset sequences. An optional one-off `THEME_FOOT_TRACE=1 theme-set <theme>` reports updated PTY counts on a **real** theme switch; same-theme no-op updates intentionally skip broadcasting. The failed experimental dark/light round-trip was **not run** because the user changed themes during test setup, and their chosen theme was preserved.
+
+**Limit:** Existing TUI cells painted with explicit 24-bit RGB colors are application-owned, not terminal palette indices. OSC alone cannot recolor those cells; Codex/OpenCode or other fullscreen apps must redraw their own content or refresh their internal theme. Do not force `SIGWINCH`, restart app processes or send `ESC[2J`/RIS globally: these can disrupt active sessions. If an app leaves an artifact after a theme switch, use its own redraw action (often `Ctrl+L`, where supported). This fix guarantees the terminal palette delivery, not arbitrary application-specific theme reloads.
 
 ---
 
@@ -111,3 +121,16 @@ Font state is owned by `~/.config/foot/foot.ini` (chezmoi source: `dot_config/fo
 Use `~/.local/bin/foot-font` (`foot-font` alone prints the current value, `foot-font +0.5`, `foot-font 17`, `foot-font -r` after restarting the server). It writes `foot.ini`, the chezmoi copy, and then validates with `foot --check-config`.
 
 Invariant: `dot_config/sway/config.d/00-variables.conf` must keep a plain `set $term footclient` with no `-o font=` override. Behavior belongs to `foot.ini` so there is one source of truth. `foot-font` therefore only rewrites a `-o font=` override if one already exists on that line, and never injects a new one. Earlier versions spliced the generated override into the following comment line because the insertion regex used `\s+` (which consumed the newline), which produced an invalid `-o` Sway command; the rewrite now anchors on `[^\n]` and restores the variables file if `sway -C` reports a load error.
+
+---
+
+## 6. URL Mode & Link Navigation
+
+- **Activation Keychords:** `Alt+o` or `Ctrl+Shift+o` triggers Foot's URL jump mode, showing alphabet hint badges over links in the terminal viewport.
+- **Smart Launcher (`foot-url-launch`):** Configured via `[url] launch=foot-url-launch ${url}`:
+  - **Web URLs (`http://`, `https://`):** Delegated directly to default browser (`brave-origin`).
+  - **File URLs & Paths (`file://...`):** Extracts file paths and optional line numbers (`#L123` or `:123`).
+  - **Directories:** Opened in file manager (`thunar`).
+  - **Media / Documents:** Image/video/audio/PDF files open in their respective graphical viewers (`imv`, `mpv`, `pdfcraft`).
+  - **Text & Code Files:** Opened directly in a new Foot terminal window running Neovim (`footclient -s $sock -E nvim [+$line] $file`).
+- **Generic XDG Compatibility:** A user desktop entry at `~/.local/share/applications/nvim.desktop` (`Exec=footclient nvim %F`, `Terminal=false`) ensures generic `xdg-open` calls from existing running terminal instances also allocate a terminal window rather than running Neovim as an invisible background process.

@@ -66,10 +66,7 @@ When the laptop enters `s2idle`:
   ```
 - **Rationale:** Bluetooth wakeup is explicitly disabled to prevent rogue wake-loops (e.g. background peripheral reconnects or beacon scans waking the laptop inside a bag).
 - **Mechanism:** During suspend, the Bluetooth radio powers down into low-power D3 state. The BLE connection to the Katana keyboard drops. The keyboard cannot communicate with the host until the host is already awake.
-- **Recovery:** Upon system wake (via mouse or power button), Sway's `after-resume` hook in `~/.config/sway/config.d/60-autostart.conf` automatically reconnects the Katana keyboard within 2 seconds:
-  ```ini
-  after-resume 'swaymsg "output * dpms on"; bluetoothctl connect CC:04:2E:90:66:02'
-  ```
+- **Recovery:** Persistent reconnect ownership is `bt-keyboard-reconnect.service`, a native C `sd-bus`/`sd-event` helper that subscribes to logind `PrepareForSleep` and re-arms Katana connection after resume. The existing `keep-awake`/`bt-katana` after-resume command remains a one-shot fallback, so recovery does not depend on only one path. Bluetooth wake itself remains disabled; these reconnect mechanisms run only after the host is already awake.
 
 ---
 
@@ -126,12 +123,26 @@ To allow headless background execution (e.g. Desktop Commander, AI agents, long 
 
 | Feature | Keep-Awake Active (Default) | Keep-Awake Inactive (`Win + Ctrl + I`) |
 | :--- | :--- | :--- |
-| **Idle 120s (2m)** | Dims backlight to 10% (`screen-dim`) | Dims backlight to 10% (`screen-dim`) |
-| **Idle 300s (5m)** | Powers off screen (`output * dpms off`) | Locks session with `swaylock -f -c 000000` |
-| **Idle 600s (10m)** | Screen remains off (DPMS) | Powers off screen (`output * dpms off`) |
+| **Idle 120s (2m)** | Dims to 10% when no media is playing | Dims to 10% when no media is playing |
+| **Idle 300s (5m)** | Turns off display when no media is playing | Locks session when no media is playing |
+| **Idle 600s (10m)** | Display remains off (DPMS) | Turns off display when no media is playing |
 | **Resume (Key/Mouse)** | Powers on display and restores brightness immediately; **no password prompt** | Powers on display; prompts for password |
 | **Lid Closed** | Powers off `eDP-1` via DPMS; **laptop stays awake** | Powers off screen; **laptop suspends (`s2idle`)** |
 | **Background Tasks** | **100% full speed** (CPU, WiFi, Desktop Commander unaffected) | Suspended upon lid close |
+
+### Playback-aware idle handling
+
+`~/.local/bin/media-idle-action` wraps each idle timeout configured by `~/.local/bin/keep-awake` for both keep-awake modes. It checks MPRIS `playerctl -a status` for `Playing` (including muted videos) and PipeWire's `pw-dump` for running application-owned `Stream/Output/Audio` nodes (including audio-only applications without MPRIS). Internal virtual DSP sink nodes without application ownership are excluded; an idle or paused stream does not hold the display awake.
+
+If playback is running when the 120s dim, 300s DPMS/lock, or 600s DPMS timeout fires, that action is deferred. Only while media is actively playing *past an idle deadline*, a detached lightweight watcher polls every 10 seconds; when playback stops it performs the deferred action. Any mouse/keyboard activity triggers the `swayidle resume` hook to cancel pending actions and restore brightness; switching keep-awake modes also cancels watchers. No new permanent background service is installed. Manual `screen-black` (Super+Alt+L) explicitly cancels these watchers, preserving overnight audio/screen-off mode. This is independent of the systemd sleep/lid inhibitor.
+
+Check detection without changing display settings:
+
+```bash
+media-idle-action check          # playing (exit 0) or idle (exit 1)
+keep-awake status
+pgrep -a swayidle
+```
 
 ### Architecture
 - **Inhibitor Unit:** `keep-awake-inhibitor.service` running `systemd-inhibit --what=idle:sleep:handle-lid-switch --mode=block sleep infinity`.

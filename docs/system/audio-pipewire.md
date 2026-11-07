@@ -55,12 +55,11 @@ Use this document as the single source of truth for all audio routing and latenc
 * **Stages:** Direct convolution using factory Windows DAX3 impulse response (`Dolby_Speaker.irs`), 45 Hz driver excursion protection high-pass filter, 16-band parametric EQ per voicing, and multiband limiter.
 * **Profiles:**
   1. `tuned`: Focused & Natural (default, slev 1.30 spatializer width, clean +11.6 dB presence curve).
-  2. `tuned-old`: Wide staging (slev 1.82 expansive soundstage).
-  3. `custom`: Windows Dolby Access Custom 2 profile (+11.6 dB presence peak).
-  4. `dynamic`: Windows DAX3 default (+9.0 dB makeup gain, slev 1.45, AutoGain Leveler + Spatial).
-  5. `music`: Windows DAX3 Audiophile (+11.0 dB makeup gain, uncompressed natural dynamics).
-  6. `balanced`: Reference Linux baseline (+9.0 dB makeup gain, slev 1.0).
-  7. `experimental`: Tuned curve with pre-convolver harmonic bass enhancement.
+  2. `custom`: Windows Dolby Access Custom 2 profile (+11.6 dB presence peak).
+  3. `dynamic`: Windows DAX3 default (+9.0 dB makeup gain, slev 1.45, AutoGain Leveler + Spatial).
+  4. `music`: Windows DAX3 Audiophile (+11.0 dB makeup gain, uncompressed natural dynamics).
+  5. `balanced`: Reference Linux baseline (+9.0 dB makeup gain, slev 1.0).
+  6. `experimental`: Tuned curve with pre-convolver harmonic bass enhancement.
 * **Control:** Managed via `spk` CLI or `rofi-speaker-dsp`.
 
 ### C. Competitive Gaming Low-Latency Bypass (`30-peace-gaming.conf`)

@@ -9,11 +9,22 @@ CHROME_CONF="$CONFIG_HOME/sway/config.d/99-ui-chrome.conf"
 failures=0
 warnings=0
 
+# A remote shell may have no SWAYSOCK. Use only an unambiguous same-user IPC socket.
+if [ -z "${SWAYSOCK:-}" ]; then
+    shopt -s nullglob
+    sway_sockets=("${XDG_RUNTIME_DIR:-/run/user/$UID}"/sway-ipc."$UID".*.sock)
+    shopt -u nullglob
+    if [ "${#sway_sockets[@]}" -eq 1 ]; then
+        export SWAYSOCK="${sway_sockets[0]}"
+    fi
+fi
+
 ok()   { printf 'OK   %s\n' "$*"; }
 warn() { printf 'WARN %s\n' "$*"; warnings=$((warnings + 1)); }
 fail() { printf 'FAIL %s\n' "$*"; failures=$((failures + 1)); }
 
-if validation="$(sway -C -c "$CONF" 2>&1)"; then
+# Validate with a headless renderer; remote shells cannot acquire the live DRM seat.
+if validation="$(env WLR_BACKENDS=headless WLR_RENDERER=pixman sway -C -c "$CONF" 2>&1)"; then
     ok "Sway config syntax"
 else
     fail "Sway config syntax"

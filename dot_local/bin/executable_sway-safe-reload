@@ -11,7 +11,18 @@ if [ ! -r "$CONF" ]; then
     exit 2
 fi
 
-if ! validation="$(sway -C -c "$CONF" 2>&1)"; then
+# A remote shell may have no SWAYSOCK. Use only an unambiguous same-user IPC socket.
+if [ -z "${SWAYSOCK:-}" ]; then
+    shopt -s nullglob
+    sway_sockets=("${XDG_RUNTIME_DIR:-/run/user/$UID}"/sway-ipc."$UID".*.sock)
+    shopt -u nullglob
+    if [ "${#sway_sockets[@]}" -eq 1 ]; then
+        export SWAYSOCK="${sway_sockets[0]}"
+    fi
+fi
+
+# Validate without acquiring the live graphical seat (works from remote shells).
+if ! validation="$(env WLR_BACKENDS=headless WLR_RENDERER=pixman sway -C -c "$CONF" 2>&1)"; then
     printf 'sway-safe-reload: validation FAILED; current session was not reloaded.\n%s\n' "$validation" >&2
     notify-send -a sway -u critical -t 5000 "Sway reload blocked" "Config validation failed; current session kept intact." 2>/dev/null || true
     exit 1

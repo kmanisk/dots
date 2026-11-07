@@ -25,10 +25,13 @@ else
     export STEAM_FORCE_DESKTOPUI_SCALING="${STEAM_FORCE_DESKTOPUI_SCALING:-1.0}"
 fi
 
-# Disable GPU acceleration for CEF web views under Xwayland to fix
-# unresponsive mouse clicks, invisible cursor, and hit-box coordinate misalignment.
+# Keep Steam CEF hardware acceleration enabled by default. The old unconditional
+# software-rendering workaround made steamwebhelper consume roughly two CPU cores
+# during startup on the current NVIDIA/Wayland stack. Cursor/XWayland fallback
+# handling is now independent above. For emergency regression testing only, opt
+# back into the former behavior with STEAM_CEF_SOFTWARE=1.
 CEF_FLAGS=()
-if ! [[ "$*" =~ "-cef-disable-gpu" ]]; then
+if [ "${STEAM_CEF_SOFTWARE:-0}" = "1" ] && ! [[ "$*" =~ "-cef-disable-gpu" ]]; then
     CEF_FLAGS+=("-cef-disable-gpu" "-cef-disable-gpu-compositing")
 fi
 

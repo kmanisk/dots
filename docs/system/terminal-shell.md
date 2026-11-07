@@ -48,6 +48,33 @@ To eliminate startup delay, reduce token bloat for agents, and enable modular co
 | `fixtether` | `setup-tether-dns` | Restore mobile tethering DNS resolution |
 | `clip` | `clip <text>`, `clip <file> [file ...]`, or `<command> \| clip` | Copy literal text, one or more regular files' contents, or stdin to the Wayland clipboard. Fish globs such as `clip *.rs` expand to multiple files. |
 
+### Waydroid
+| Alias | Command | Purpose |
+| :--- | :--- | :--- |
+| `wd` | `waydroid-launcher` | Start Waydroid on demand and open the full Android UI. |
+| `wds` | `waydroid-stop` | Stop the Waydroid session/container and restore the disabled-at-boot state. |
+| `wdr` | `waydroid-restart` | Perform the same clean stop/start recovery path and reopen the Android UI. |
+
+### Windows VMs: native Fish `win` command
+
+Fish autoloads `~/.config/fish/functions/win.fish` and tab completions from `~/.config/fish/completions/win.fish`. The default target is **Windows 10 X-Lite**; prefix `11` to select Nano11. No aliases, extra daemon or shell-startup work are required.
+
+| Command | Action |
+| :--- | :--- |
+| `win`, `win status` | Read-only status of both VMs |
+| `win start`, `win stop` | Open/focus the default Windows VM; graceful shutdown (ACPI first, guest `wstop.cmd` fallback) |
+| `win force-stop` | Emergency hard poweroff, separate from normal stop; requires typing `FORCE POWER OFF` and risks guest data loss |
+| `win logs` | Follow Windows 10 QEMU logs; exit with Ctrl+C |
+| `win menu` | Open the existing shared Windows Fuzzel/Rofi menu |
+| `win reconnect`, `win here` | Reconnect only the Windows 10 display client; move its window here |
+| `win fps-on`, `win fps-off` | Toggle Windows 10 Looking Glass diagnostic overlay |
+| `win 10 source-status`, `win 10 client-status` | Read-only Windows 10 LGMP transport checks |
+| `win 11 start`, `win 11 stop`, `win 11 logs` | Existing Nano11 lifecycle and logs |
+| `win 11 rdp`, `win 11 restart` | Nano11 fallback RDP and established restart workflow |
+| `win help` | Full command reference |
+
+The shared `win menu` uses four generic, icon-backed entries: **Open Windows**, **Show/Hide Windows FPS / UPS**, **Stop Windows**, and **Restart Windows**. No VM version or high-CPU warning rows appear. The menu controls whichever guest is running; when both are stopped, it defaults to X-Lite. Nano11 remains available through `win 11 ...` and its existing Sway shortcut. `win 10 restart` still routes through the menu rather than resetting the guest. An explicit `win stop` briefly resumes a paused X-Lite guest *only to request ACPI/guest-keyboard graceful shutdown*; if Windows ignores ACPI, it types the short command `wstop` to launch the source-managed `C:\Windows\wstop.cmd` one-shot (installed while the VM was offline), rather than typing the full shutdown command. If Windows still ignores it, execution is re-paused instead of force-killing QEMU. The separate `win force-stop` action is confirmation-gated, cuts guest power via QEMU quit (with verified-PID SIGTERM fallback), and must not be mistaken for a clean shutdown. Opening a paused guest remains confirmation-gated. Paused-VM safeguards are enforced by the underlying `win10lab` launcher. The old redundant `nano11.fish` function wrapper was removed from both source and live Fish paths; the actual `~/.local/bin/nano11` and `win10lab` binaries remain available because Sway and menus use them. Other Fish functions and aliases are preserved.
+
 ---
 
 ## 3. Terminal Emulators: Alacritty & Kitty
@@ -75,8 +102,9 @@ To eliminate startup delay, reduce token bloat for agents, and enable modular co
 | `sysmem` | Audits true idle baseline memory (Kernel, root daemons, Sway, background services, hidden scratchpads). |
 | `theme-set` | Core Schema 1 theme compiler and atomic distributor. |
 | `theme-sync` | Compiles raw themes into active cache manifests. |
+| `uall` | Runs one official-repository upgrade with `pacman -Syu`, then an AUR-only `paru -Sua` pass, followed by npm globals and Fish plugin updates. It does not repeat the repository upgrade in the Paru phase. |
 | `rofi-theme` | Pure NvChad Base46 theme picker with live swatches and FZF sorting. |
-| `rofi-pkill` | Application-level process aggregator and terminator (triggered via `Caps + w`). |
+| `rofi-pkill` | Minimal application process aggregator and terminator via Fuzzel dmenu (triggered via `Caps + w`). |
 | `toggle-cursor-theme` | Toggles Gruvbox Material Dark vs Light cursor across Sway, GSettings, GTK, and Xresources. |
 | `adjust-cursor-size` | Scales cursor size up or down in 2px increments (`16px`–`64px`). |
 | `toggle-btop` | Toggles floating system monitor scratchpad (`Ctrl + Shift + Esc`). |

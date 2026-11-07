@@ -7,3 +7,16 @@ python
 uv
 mold
 ccache
+
+# On-demand Nano11 VM: native QEMU/KVM with SPICE and Intel VFIO
+qemu-system-x86
+qemu-img
+qemu-hw-display-virtio-gpu
+qemu-hw-display-virtio-vga
+qemu-ui-spice-core
+qemu-audio-spice
+qemu-chardev-spice
+swtpm
+freerdp
+tigervnc
+simde

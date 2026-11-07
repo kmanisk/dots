@@ -1,0 +1,163 @@
+{
+  "version": 1,
+  "policy": "artistic-first-semantic-omarchy",
+  "semantic_fallback": true,
+  "rank_weight": 1.0,
+  "keyword_priority": [
+    "terminal_technical",
+    "synth_technical",
+    "technical_blueprint",
+    "natural_art",
+    "artistic_oil"
+  ],
+  "keywords": {
+    "terminal_technical": [
+      "terminal",
+      "console",
+      "shell",
+      "matrix",
+      "hack",
+      "hacker",
+      "code",
+      "github",
+      "vscode",
+      "vim",
+      "neovim",
+      "laser"
+    ],
+    "synth_technical": [
+      "synth",
+      "neon",
+      "cyber",
+      "retro",
+      "vhs",
+      "wave",
+      "electric",
+      "futur",
+      "digital",
+      "laser",
+      "radium",
+      "flouromachine",
+      "waveform",
+      "slatewave"
+    ],
+    "technical_blueprint": [
+      "blueprint",
+      "windows",
+      "circuit",
+      "arch",
+      "static",
+      "industrial",
+      "cobalt",
+      "carbon",
+      "slate",
+      "steel",
+      "oxide"
+    ],
+    "natural_art": [
+      "forest",
+      "garden",
+      "jade",
+      "ever",
+      "leaf",
+      "spring",
+      "autumn",
+      "tundra",
+      "mountain",
+      "aquarium",
+      "ocean",
+      "blossom",
+      "earth",
+      "nature",
+      "grove",
+      "orchard",
+      "everforest",
+      "everblush",
+      "oceanic"
+    ],
+    "artistic_oil": [
+      "rose",
+      "pastel",
+      "horizon",
+      "sunset",
+      "gold",
+      "coffee",
+      "chocolate",
+      "ember",
+      "burn",
+      "sepia",
+      "ashes",
+      "ash",
+      "zenburn",
+      "wombat",
+      "star",
+      "starlight"
+    ]
+  },
+  "donor_pools": {
+    "artistic_oil": [
+      "van-gogh",
+      "turner",
+      "winslow",
+      "golden-brown",
+      "starry-night",
+      "the-odyssey",
+      "sunset",
+      "nujabes"
+    ],
+    "light_artistic": [
+      "venice-from-above",
+      "quattrocento-light",
+      "coffee-latte",
+      "roseofdune",
+      "whitegold",
+      "snow",
+      "solarized-light",
+      "tokyo-day",
+      "quicksilver"
+    ],
+    "natural_art": [
+      "forest-green",
+      "green-garden",
+      "evergarden",
+      "temerald",
+      "xenobotany-lab-no-7",
+      "turner",
+      "winslow",
+      "the-odyssey",
+      "autumn",
+      "spring"
+    ],
+    "terminal_technical": [
+      "omarchy-hackerman",
+      "matrix",
+      "omatrix",
+      "circuit-horizon",
+      "xenobotany-lab-no-7",
+      "ghostwire",
+      "windows-dark-mode"
+    ],
+    "technical_blueprint": [
+      "windows-dark-mode",
+      "circuit-horizon",
+      "cathedral-of-static",
+      "archwave",
+      "futurist",
+      "ghostwire",
+      "waveform-dark"
+    ],
+    "synth_technical": [
+      "synthwave84",
+      "waveform-dark",
+      "neon-dusk",
+      "retro-bloom",
+      "vhs80",
+      "cyber-ember",
+      "futurism",
+      "futurist",
+      "ghostwire",
+      "omarchy-retro-82",
+      "omarchy-tokyo-night"
+    ]
+  }
+}

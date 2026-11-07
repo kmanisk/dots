@@ -19,7 +19,8 @@
       "backgrounds/02-blueprint-window.png",
       "backgrounds/03-minimal-core.png",
       "backgrounds/04-omarchy-frame.png",
-      "backgrounds/05-windowstorm.png"
+      "backgrounds/05-windowstorm.png",
+      "backgrounds/06-green-pulse-window.png"
     ]
   },
   "authored": {
@@ -66,7 +67,7 @@
     "BASE01": "#121212",
     "BASE02": "#152532",
     "BASE03": "#616161",
-    "BASE04": "#616161",
+    "BASE04": "#666666",
     "BASE05": "#ffffff",
     "BASE06": "#ffffff",
     "BASE07": "#ffffff",
@@ -77,7 +78,7 @@
     "BASE0C": "#4daafc",
     "BASE0D": "#0078d4",
     "BASE0E": "#c586c0",
-    "BASE0F": "#5e4005"
+    "BASE0F": "#8e6108"
   },
   "base_30": {
     "baby_pink": "#c586c0",
@@ -91,8 +92,8 @@
     "green": "#2ea043",
     "grey": "#616161",
     "grey_fg": "#616161",
-    "grey_fg2": "#616161",
-    "light_grey": "#909090",
+    "grey_fg2": "#666666",
+    "light_grey": "#949494",
     "lightbg": "#152532",
     "line": "#142634",
     "nord_blue": "#0078d4",
@@ -155,8 +156,8 @@
       "green": "#2ea043",
       "grey": "#616161",
       "grey_fg": "#616161",
-      "grey_fg2": "#616161",
-      "light_grey": "#909090",
+      "grey_fg2": "#666666",
+      "light_grey": "#949494",
       "lightbg": "#152532",
       "line": "#142634",
       "nord_blue": "#0078d4",
@@ -215,7 +216,7 @@
       "BASE01": "#121212",
       "BASE02": "#152532",
       "BASE03": "#616161",
-      "BASE04": "#616161",
+      "BASE04": "#666666",
       "BASE05": "#ffffff",
       "BASE06": "#ffffff",
       "BASE07": "#ffffff",
@@ -226,7 +227,7 @@
       "BASE0C": "#4daafc",
       "BASE0D": "#0078d4",
       "BASE0E": "#c586c0",
-      "BASE0F": "#5e4005"
+      "BASE0F": "#8e6108"
     }
   },
   "schema": 1,
@@ -255,14 +256,14 @@
     "warning": "#bb8009"
   },
   "source": {
-    "author": "oldjobobo",
+    "author": "OldJobobo",
     "branch": "master",
     "commit": "d21208fe6973f1fe9bbe9bfc5eee063473cccece",
-    "imported_at": "2026-11-01T02:03:10.143688",
+    "imported_at": "2026-11-01T23:44:27.612392",
     "provider": "omarchy",
     "registry": "https://omarchy.org/themes/",
     "registry_listed": true,
-    "repository": "https://github.com/oldjobobo/omarchy-windows-dark-mode-theme"
+    "repository": "https://github.com/OldJobobo/omarchy-windows-dark-mode-theme"
   },
   "type": "dark"
 }

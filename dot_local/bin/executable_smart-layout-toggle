@@ -7,6 +7,7 @@ Seamlessly toggles between Tiling (splith) and Tabbed mode (horizontal left-and-
 - When in Tabbed mode: converts to Tiling (splith side-by-side).
 - Tab navigation is handled cleanly via Alt+Shift+j (next tab) and Alt+Shift+k (prev tab).
 - Instant, hot-reloaded in place without switching workspaces or reopening windows.
+- Prevents redundant nested split/tab containers and eliminates orphaned wrapper geometry.
 """
 import json
 import os
@@ -67,6 +68,24 @@ def find_parent_container(root, target_id):
     return None
 
 
+def get_ancestor_containers(ws, target_id):
+    """Return all container nodes between ws (exclusive) and target (inclusive)."""
+    ancestors = []
+
+    def walk(curr):
+        for child in curr.get("nodes", []) + curr.get("floating_nodes", []):
+            if child.get("id") == target_id:
+                ancestors.append(child)
+                return True
+            if walk(child):
+                ancestors.append(child)
+                return True
+        return False
+
+    walk(ws)
+    return ancestors
+
+
 def get_tiled_leaves(node):
     leaves = []
     # Only consider non-floating windows.
@@ -96,6 +115,26 @@ def is_workspace_tabbed(ws, leaves):
     return False
 
 
+def flatten_single_window(ws, leaf, focused_id):
+    """If a single window is wrapped in nested single-child containers, flatten to a clean container."""
+    ws_name = ws.get("name")
+    if not ws_name:
+        return
+    leaf_id = leaf["id"]
+    p = find_parent_container(ws, leaf_id)
+    if not p:
+        return
+    p2 = find_parent_container(ws, p["id"])
+    if p2 and p2.get("type") != "workspace":
+        cmds = [
+            f'[con_id="{leaf_id}"] move to workspace __flatten_tmp',
+            f'[con_id="{leaf_id}"] move to workspace {ws_name}',
+            f'[con_id="{leaf_id}"] layout tabbed',
+            f'[con_id="{leaf_id}"] focus',
+        ]
+        i3_msg(*cmds)
+
+
 def main():
     tree = get_tree()
     focused = find_focused(tree)
@@ -110,6 +149,9 @@ def main():
     leaves = get_tiled_leaves(ws)
     n = len(leaves)
 
+    if n == 0:
+        sys.exit(0)
+
     already_tabbed = is_workspace_tabbed(ws, leaves)
 
     if already_tabbed:
@@ -117,47 +159,45 @@ def main():
         p = find_parent_container(ws, leaves[0]["id"]) if n >= 1 else None
         cur_layout = p.get("layout") if p else ws.get("layout")
         if cur_layout == "stacked":
-            # Switch directly to tabbed (horizontal left-right tabs)
-            if p:
-                i3_msg(f'[con_id="{p["id"]}"] layout tabbed', f'[con_id="{focused_id}"] focus')
-            else:
-                i3_msg("layout tabbed")
+            i3_msg(f'[con_id="{focused_id}"] focus, layout tabbed')
             sys.exit(0)
 
         # ======================================================================
         # CURRENTLY TABBED -> Switch to TILING (splith)
         # ======================================================================
-        if n <= 1:
-            if n == 1:
-                cmds = [f'[con_id="{leaves[0]["id"]}"] layout splith']
-                if p and p.get("type") != "workspace":
-                    cmds.append(f'[con_id="{p["id"]}"] layout splith')
-                i3_msg(*cmds)
-            else:
-                i3_msg("layout splith")
-        else:
-            if p:
-                i3_msg(f'[con_id="{p["id"]}"] layout splith', f'[con_id="{focused_id}"] focus')
-            else:
-                i3_msg("layout splith")
+        i3_msg(f'[con_id="{focused_id}"] focus, layout splith')
     else:
         # ======================================================================
         # CURRENTLY TILING -> Switch to TABBED (horizontal side-by-side tabs)
         # ======================================================================
-        if n <= 1:
-            if n == 1:
-                i3_msg(f'[con_id="{leaves[0]["id"]}"] layout tabbed')
+        if n == 1:
+            p = find_parent_container(ws, leaves[0]["id"])
+            p2 = find_parent_container(ws, p["id"]) if p else None
+            if p2 and p2.get("type") != "workspace":
+                flatten_single_window(ws, leaves[0], focused_id)
             else:
-                i3_msg("layout tabbed")
+                i3_msg(f'[con_id="{focused_id}"] focus, layout tabbed')
         else:
-            root_leaf = leaves[0]
-            cmds = [f'[con_id="{root_leaf["id"]}"] mark --add "_tab_root"']
-            for other in leaves[1:]:
-                cmds.append(f'[con_id="{other["id"]}"] move to mark "_tab_root"')
-            cmds.append(f'[con_id="{root_leaf["id"]}"] unmark "_tab_root"')
-            cmds.append(f'[con_id="{root_leaf["id"]}"] focus, focus parent, layout tabbed')
-            cmds.append(f'[con_id="{focused_id}"] focus')
-            i3_msg(*cmds)
+            parents = [find_parent_container(ws, leaf["id"]) for leaf in leaves]
+            parent_ids = {p["id"] for p in parents if p}
+            if len(parent_ids) == 1:
+                # All leaves already share a common parent. Setting focused leaf to layout tabbed
+                # seamlessly makes the common parent tabbed without creating any nested containers.
+                cmds = [f'[con_id="{focused_id}"] focus, layout tabbed']
+                ancestors = get_ancestor_containers(ws, parents[0]["id"])
+                for anc in ancestors:
+                    if anc["id"] != parents[0]["id"] and anc.get("layout") in ("tabbed", "stacked"):
+                        cmds.append(f'[con_id="{anc["id"]}"] layout splith')
+                i3_msg(*cmds)
+            else:
+                # Scattered across different containers. Consolidate into root leaf's container.
+                root_leaf = leaves[0]
+                cmds = []
+                for other in leaves[1:]:
+                    cmds.append(f'[con_id="{other["id"]}"] move to con_id {root_leaf["id"]}')
+                cmds.append(f'[con_id="{root_leaf["id"]}"] focus, layout tabbed')
+                cmds.append(f'[con_id="{focused_id}"] focus')
+                i3_msg(*cmds)
 
 
 if __name__ == "__main__":

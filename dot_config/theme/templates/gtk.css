@@ -32,36 +32,110 @@ window.thunar .sidebar,
 window.thunar .sidebar treeview,
 window.thunar .sidebar .view {
   background-color: {{black}};
-  color: {{accent}};
+  color: {{white}};
 }
 
 .thunar .sidebar treeview:hover,
 .thunar .sidebar .view:hover {
+  background-color: {{one_bg}};
   color: {{white}};
+  border-radius: 4px;
 }
 
 .thunar .sidebar treeview:selected,
 .thunar .sidebar .view:selected {
-  background-color: {{one_bg}};
+  background-color: {{one_bg2}};
   color: {{white}};
+  border-radius: 4px;
 }
 
 /* Thunar main file view selection */
+.thunar view,
+.thunar treeview,
+window.thunar view,
+window.thunar treeview {
+  background-color: {{black}};
+  color: {{white}};
+}
+
+.thunar view:hover,
+.thunar treeview:hover,
+window.thunar view:hover,
+window.thunar treeview:hover {
+  background-color: {{one_bg}};
+}
+
 .thunar view:selected,
 .thunar treeview:selected,
 window.thunar view:selected,
 window.thunar treeview:selected {
+  background-color: {{one_bg2}};
+  color: {{white}};
+  border-radius: 4px;
+}
+
+/* Thunar Location Bar Buttons (Breadcrumb Pathbar) */
+.thunar .location-bar button,
+window.thunar .location-bar button,
+.thunar button.location-button,
+window.thunar button.location-button {
   background-color: {{one_bg}};
+  color: {{white}};
+  border: 1px solid {{one_bg2}};
+  border-radius: 4px;
+  padding: 2px 6px;
+  margin: 1px 2px;
+}
+
+.thunar .location-bar button:hover,
+window.thunar .location-bar button:hover,
+.thunar button.location-button:hover,
+window.thunar button.location-button:hover {
+  background-color: {{one_bg2}};
+  color: {{white}};
+}
+
+.thunar .location-bar button:checked,
+window.thunar .location-bar button:checked,
+.thunar button.location-button:checked,
+window.thunar button.location-button:checked,
+.thunar .location-bar button:active,
+window.thunar .location-bar button:active,
+.thunar button.location-button:active,
+window.thunar button.location-button:active {
+  background-color: {{one_bg2}};
+  color: {{white}};
+  border-color: {{accent}};
+}
+
+.thunar .location-bar button:checked label,
+window.thunar .location-bar button:checked label,
+.thunar button.location-button:checked label,
+window.thunar button.location-button:checked label,
+.thunar .location-bar button:active label,
+window.thunar .location-bar button:active label,
+.thunar button.location-button:active label,
+window.thunar button.location-button:active label {
   color: {{white}};
 }
 
 /* Thunar-only font: Iosevka Nerd Font */
-.thunar, .thunar *, window.thunar, window.thunar * {
+window.thunar, .thunar {
   font-family: "Iosevka Nerd Font Mono", monospace;
-  font-size: 16.5pt;
+  font-size: 13.5pt;
+}
+
+/* Compact TreeView rows */
+.thunar treeview {
+  -GtkTreeView-vertical-separator: 1;
+  -GtkTreeView-horizontal-separator: 3;
+}
+
+.thunar treeview cell {
+  padding: 2px 4px;
 }
 
 /* File Chooser & Portal Dialogs */
-filechooser, filechooser *, .file-chooser, .file-chooser *, window.dialog, window.dialog * {
-  font-size: 16.5pt;
+filechooser, .file-chooser, window.dialog {
+  font-size: 13.5pt;
 }

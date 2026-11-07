@@ -52,6 +52,10 @@ This document specifies the architecture, keybindings, and plugin layer for the 
 
 ---
 
+## Verified light-theme background behavior, 2026-11-01
+
+NvChad theme polarity is owned by Base46 rather than a fixed editor option. Dark system themes retain the existing transparent terminal-backed editor background; light system themes disable Base46 transparency so `Normal` receives the generated light `base00` background. `lua/options.lua` intentionally does not assign `vim.o.background`, because Base46's compiled `defaults` cache sets it from the selected theme type. `theme-set` updates `nvconfig.base46.transparency` together with the theme name for live RPC reloads and headless cache repair. This prevents a correct light Base46 palette from appearing black either through transparency or through a later hardcoded `background=dark` override.
+
 ## 2. Zed-Compatible Keybindings (`mappings.lua`)
 
 ### Navigation, Windows & Splits

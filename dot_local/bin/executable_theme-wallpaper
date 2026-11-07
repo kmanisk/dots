@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch and cycle up to five wallpapers shipped by the active Omarchy theme.
+"""Fetch and cycle repository-scoped wallpapers for the active theme.
 
 No daemon and no eager gallery-wide downloads. Wallpaper metadata comes from the
 canonical theme JSON; image bytes are cached only when the user asks for them.
@@ -20,16 +20,24 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from pathlib import Path
 
-MAX_WALLPAPERS = 5
+sys.path.insert(0, os.path.expanduser("~/.local/lib"))
+from theme_engine.wallpaper_policy import (
+    repository_wallpapers_are_authoritative,
+    resolve_omarchy_wallpaper_source,
+    resolve_omarchy_wallpaper_source_info,
+    wallpaper_path_allowed,
+)
+from theme_engine.importer import select_wallpaper_candidates
+
 FETCH_WORKERS = 5
 MAX_IMAGE_BYTES = 50 * 1024 * 1024
+REPOSITORY_DISCOVERY_VERSION = 3
 THEME_CACHE = Path(os.path.expanduser("~/.cache/theme/themes"))
 WALLPAPER_ROOT = Path(os.path.expanduser("~/.local/share/theme/wallpapers"))
 WALLPAPER_CACHE = WALLPAPER_ROOT / "upstream"
-LIBRARY_MANIFEST = WALLPAPER_ROOT / "manifest.json"
-LIBRARY_HELPER = Path(os.path.expanduser("~/.local/bin/theme-wallpaper-library"))
 STATE_DIR = Path(os.path.expanduser("~/.local/state/theme/wallpaper"))
 ACTIVE_THEME = Path(os.path.expanduser("~/.local/state/theme/name"))
+THEME_MUTATION_LOCK = Path(os.path.expanduser("~/.local/state/theme/.lock"))
 CURRENT_WALLPAPER = Path(os.path.expanduser("~/.config/current_wallpaper"))
 WSET = Path(os.path.expanduser("~/.local/bin/wset"))
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
@@ -61,6 +69,37 @@ def notify(title: str, body: str) -> None:
 
 def normalized_name(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+
+
+@contextmanager
+def hydration_owner(theme_name: str):
+    """Allow only one detached hydration worker per selected palette."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    lock_path = STATE_DIR / f".hydrate-{normalized_name(theme_name)}.lock"
+    with lock_path.open("a+", encoding="utf-8") as handle:
+        os.chmod(lock_path, 0o600)
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def theme_apply_lock():
+    """Serialize the final background apply with theme-set, not the network fetch."""
+    THEME_MUTATION_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    with THEME_MUTATION_LOCK.open("a+", encoding="utf-8") as handle:
+        os.chmod(THEME_MUTATION_LOCK, 0o600)
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def active_theme_name() -> str:
@@ -116,8 +155,6 @@ def theme_candidates(theme: dict) -> list[str]:
             continue
         seen.add(key)
         result.append(path)
-        if len(result) >= MAX_WALLPAPERS:
-            break
     return result
 
 
@@ -141,53 +178,81 @@ def cache_dir(theme_name: str) -> Path:
     return WALLPAPER_CACHE / theme_name
 
 
+def repository_identity(theme: dict) -> tuple[str, str]:
+    source = theme.get("source") or {}
+    repository = str(source.get("repository") or "").rstrip("/")
+    ref = str(source.get("commit") or source.get("branch") or "main")
+    return repository, ref
+
+
+def discover_repository_candidates(theme: dict) -> list[str]:
+    """Discover the full wallpaper set from the repository tree without blobs.
+
+    Conventional background/wallpaper paths are authoritative. Miscellaneous
+    non-UI images are considered only when the repository has no conventional
+    wallpaper path, matching the importer without cloning image payloads.
+    """
+    repository, ref = repository_identity(theme)
+    parsed = urllib.parse.urlparse(repository)
+    if parsed.scheme != "https" or parsed.hostname not in {"github.com", "www.github.com"}:
+        raise RuntimeError("repository discovery supports only HTTPS GitHub repositories")
+
+    git = which("git")
+    if not git:
+        raise RuntimeError("git is required for repository wallpaper discovery")
+
+    with tempfile.TemporaryDirectory(prefix="theme-wallpaper-tree-") as tmp:
+        commands = [
+            [git, "-C", tmp, "init", "-q"],
+            [git, "-C", tmp, "remote", "add", "origin", repository],
+            [git, "-C", tmp, "fetch", "--quiet", "--depth", "1", "--filter=blob:none", "origin", ref],
+        ]
+        for command in commands:
+            result = subprocess.run(
+                command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30, check=False
+            )
+            if result.returncode != 0:
+                detail = result.stderr.strip() or result.stdout.strip() or f"exit status {result.returncode}"
+                raise RuntimeError(f"repository tree discovery failed: {detail}")
+
+        result = subprocess.run(
+            [git, "-C", tmp, "ls-tree", "-r", "--name-only", "FETCH_HEAD"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10, check=False
+        )
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip() or f"exit status {result.returncode}"
+            raise RuntimeError(f"repository tree listing failed: {detail}")
+        paths = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+    explicit: list[str] = []
+    fallback: list[str] = []
+    ui_tokens = (
+        "preview", "screenshot", "thumbnail", "thumb", "logo", "icon",
+        "badge", "avatar", "banner", "social", "readme", "unlock",
+        "lockscreen", "lock-screen", "lock_screen", "splash",
+    )
+    for path in paths:
+        normalized = path.replace("\\", "/").lstrip("./")
+        if not wallpaper_path_allowed(theme, normalized):
+            continue
+        low = normalized.lower()
+        if Path(normalized).suffix.lower() not in IMAGE_SUFFIXES:
+            continue
+        if any(token in low for token in ("preview", "screenshot", "thumbnail", "thumb")):
+            continue
+        if any(token in low for token in ("background", "wallpaper", "bg/")):
+            explicit.append(normalized)
+            continue
+        if not any(token in low for token in ui_tokens):
+            fallback.append(normalized)
+
+    pool = explicit if explicit else fallback
+    return select_wallpaper_candidates(pool)
+
+
 def state_file(theme_name: str) -> Path:
     return STATE_DIR / theme_name
 
-
-def load_library_manifest() -> dict:
-    try:
-        return json.loads(LIBRARY_MANIFEST.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-
-
-def library_entry(theme_name: str) -> tuple[dict, dict] | None:
-    manifest = load_library_manifest()
-    entry = (manifest.get("themes") or {}).get(theme_name)
-    if not isinstance(entry, dict):
-        return None
-    return manifest, entry
-
-
-def library_images(theme_name: str) -> list[Path]:
-    resolved = library_entry(theme_name)
-    if not resolved:
-        return []
-    manifest, entry = resolved
-    assets = manifest.get("assets") or {}
-    result: list[Path] = []
-    for asset_id in entry.get("assets") or []:
-        asset = assets.get(asset_id)
-        if not isinstance(asset, dict):
-            continue
-        relative = str(asset.get("file") or "")
-        path = WALLPAPER_ROOT / relative
-        if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES:
-            result.append(path)
-    return result[:MAX_WALLPAPERS]
-
-
-def hydrate_library(theme_name: str, force: bool = False) -> list[Path]:
-    if not LIBRARY_HELPER.is_file():
-        die(f"missing wallpaper library helper: {LIBRARY_HELPER}")
-    command = [str(LIBRARY_HELPER), "fetch", theme_name]
-    if force:
-        command.append("--force")
-    result = subprocess.run(command, check=False)
-    if result.returncode != 0:
-        die(f"failed to hydrate centralized wallpaper library for {theme_name}")
-    return library_images(theme_name)
 
 
 @contextmanager
@@ -342,31 +407,55 @@ def load_manifest(theme_name: str) -> dict:
         return {}
 
 
-def cached_images(theme_name: str) -> list[Path]:
-    curated = library_images(theme_name)
-    if curated:
-        return curated
+def repository_discovery_current(theme_name: str, theme: dict) -> bool:
+    manifest = load_manifest(theme_name)
+    repository, ref = repository_identity(theme)
+    return (
+        manifest.get("discovery_version") == REPOSITORY_DISCOVERY_VERSION
+        and str(manifest.get("repository") or "").rstrip("/") == repository
+        and str(manifest.get("ref") or "") == ref
+    )
 
+
+def upstream_images(theme_name: str, theme: dict | None = None) -> list[Path]:
     manifest = load_manifest(theme_name)
     files: list[Path] = []
     for item in manifest.get("files", []):
         filename = item.get("file") if isinstance(item, dict) else None
+        source_path = item.get("source") if isinstance(item, dict) else None
         if not filename:
+            continue
+        if theme is not None and source_path and not wallpaper_path_allowed(theme, str(source_path)):
             continue
         path = cache_dir(theme_name) / filename
         if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES:
             files.append(path)
     if files:
-        return files[:MAX_WALLPAPERS]
+        return files
     return sorted(
         path
         for path in cache_dir(theme_name).glob("*")
         if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
-    )[:MAX_WALLPAPERS]
+    )
 
 
-def fetch(theme_name: str, theme: dict, force: bool = False) -> list[Path]:
-    candidates = theme_candidates(theme)
+def cached_images(theme_name: str, theme: dict | None = None) -> list[Path]:
+    # Runtime wallpapers are never selected from the generic shared library.
+    # Use only the theme's own Omarchy repository or its strict Omarchy donor.
+    if theme is None:
+        return []
+    source = resolve_omarchy_wallpaper_source(theme_name, theme)
+    return upstream_images(source[0], source[1]) if source else []
+
+
+def fetch(
+    theme_name: str,
+    theme: dict,
+    force: bool = False,
+    candidates_override: list[str] | None = None,
+    discovery_version: int | None = None,
+) -> list[Path]:
+    candidates = list(candidates_override) if candidates_override is not None else theme_candidates(theme)
     if not candidates:
         die(f"{theme.get('display_name') or theme_name} has no upstream wallpaper candidates")
     owner, repository, ref = github_raw_base(theme)
@@ -378,15 +467,27 @@ def fetch(theme_name: str, theme: dict, force: bool = False) -> list[Path]:
         "ref": ref,
         "candidates": candidates,
     }
+    if discovery_version is not None:
+        expected_signature["discovery_version"] = int(discovery_version)
 
     # Only the explicit wallpaper action enters this path. Theme import/theme-set
     # remain metadata-only and network-free. Serialize concurrent keypresses here,
-    # then fetch the <=5 independent assets in parallel inside the single owner.
+    # then fetch the repository assets with bounded parallelism in parallel inside the single owner.
     with fetch_lock(theme_name):
         current = load_manifest(theme_name)
         signature_matches = all(current.get(key) == value for key, value in expected_signature.items())
+        repository_matches = (
+            str(current.get("repository") or "").rstrip("/")
+            == str(expected_signature.get("repository") or "").rstrip("/")
+            and str(current.get("ref") or "") == str(expected_signature.get("ref") or "")
+        )
+        current_sources = {
+            str(item.get("source")): str(item.get("file"))
+            for item in current.get("files", [])
+            if isinstance(item, dict) and item.get("source") and item.get("file")
+        }
         if not force and signature_matches:
-            existing = cached_images(theme_name)
+            existing = upstream_images(theme_name, theme)
             if len(existing) == len(current.get("files", [])) and existing:
                 return existing
 
@@ -405,12 +506,19 @@ def fetch(theme_name: str, theme: dict, force: bool = False) -> list[Path]:
                 f"https://raw.githubusercontent.com/{urllib.parse.quote(owner, safe='')}/"
                 f"{urllib.parse.quote(repository, safe='')}/{quoted_ref}/{quoted_path}"
             )
-            # A changed commit/candidate signature must refresh an existing file;
-            # otherwise an old image with the same filename could survive forever.
-            if force or not signature_matches or not destination.is_file():
-                work.append((index, relative, destination, url))
-            else:
+            # Legacy manifests may contain only the retired first five candidates.
+            # Reuse any byte whose repository/ref, source path, and deterministic
+            # filename still match; only newly discovered or changed files download.
+            reusable = (
+                not force
+                and repository_matches
+                and current_sources.get(relative) == filename
+                and destination.is_file()
+            )
+            if reusable:
                 results[index] = (True, None)
+            else:
+                work.append((index, relative, destination, url))
 
         if work:
             # libcurl's parallel transfer path avoids the long cold-start stalls
@@ -453,11 +561,11 @@ def fetch(theme_name: str, theme: dict, force: bool = False) -> list[Path]:
         if not files:
             die("none of the upstream wallpaper candidates could be fetched")
 
-        payload = {"theme": theme_name, **expected_signature, "files": files[:MAX_WALLPAPERS]}
+        payload = {"theme": theme_name, **expected_signature, "files": files}
         temp = manifest_path(theme_name).with_suffix(".json.tmp")
         temp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         os.replace(temp, manifest_path(theme_name))
-        return cached_images(theme_name)
+        return upstream_images(theme_name, theme)
 
 
 def selected_image(theme_name: str, images: list[Path]) -> Path | None:
@@ -502,37 +610,67 @@ def apply(theme_name: str, path: Path, position: int, total: int) -> None:
     print(f"Applied {position}/{total}: {path}")
 
 
-def ensure_images(theme_name: str, theme: dict, force: bool = False) -> list[Path]:
-    if library_entry(theme_name):
-        images = library_images(theme_name)
-        if force or not images:
-            notify("Theme wallpaper", f"Hydrating curated library for {theme.get('display_name') or theme_name}")
-            images = hydrate_library(theme_name, force=force)
+def ensure_images(theme_name: str, theme: dict, force: bool = False, notify_fetch: bool = True) -> list[Path]:
+    source = resolve_omarchy_wallpaper_source(theme_name, theme)
+    if not source:
+        die(
+            f"{theme.get('display_name') or theme_name} has no usable Omarchy wallpaper source; "
+            "this theme uses its solid palette background"
+        )
+
+    source_name, source_theme = source
+    images = upstream_images(source_name, source_theme)
+    manifest = load_manifest(source_name)
+    manifest_files = [item for item in manifest.get("files", []) if isinstance(item, dict) and item.get("file")]
+    complete = bool(images) and len(images) == len(manifest_files)
+    discovery_current = repository_discovery_current(source_name, source_theme)
+
+    if discovery_current and complete and not force:
         return images
 
-    images = cached_images(theme_name)
-    if force or not images:
-        notify("Theme wallpaper", f"Fetching upstream backgrounds for {theme.get('display_name') or theme_name}")
-        images = fetch(theme_name, theme, force=force)
-    return images
+    donor = source_theme.get("display_name") or source_name
+    if notify_fetch:
+        notify("Theme wallpaper", f"Fetching Omarchy backgrounds from {donor}")
+
+    try:
+        candidates = discover_repository_candidates(source_theme)
+        if not candidates:
+            raise RuntimeError("repository contains no usable wallpaper images")
+        return fetch(
+            source_name,
+            source_theme,
+            force=force,
+            candidates_override=candidates,
+            discovery_version=REPOSITORY_DISCOVERY_VERSION,
+        )
+    except Exception as exc:
+        # Keep a working existing cache usable if GitHub discovery is temporarily
+        # unavailable. With no cache, fall back to canonical metadata so first use
+        # can still succeed for already-imported themes.
+        print(f"[WARN] repository wallpaper discovery for {source_name}: {exc}", file=sys.stderr)
+        if images and not force:
+            return images
+        return fetch(source_name, source_theme, force=force)
 
 
 def usage() -> None:
     print("""Usage: theme-wallpaper [command] [theme]
 
 Commands:
-  next [theme]       Apply next palette-matched wallpaper (default)
-  prev [theme]       Apply previous palette-matched wallpaper
+  next [theme]       Apply next theme-scoped wallpaper (default)
+  prev [theme]       Apply previous theme-scoped wallpaper
   random [theme]     Apply a random mapped wallpaper
-  set N [theme]      Apply wallpaper N (1..5)
-  fetch [theme]      Hydrate mapped library assets, or upstream fallback assets
-  refresh [theme]    Re-download the mapped/local source set
-  list [theme]       Show library mapping, upstream fallback and local state
+  set N [theme]      Apply wallpaper N (1..available)
+  fetch [theme]      Fetch the theme's exact Omarchy wallpaper source
+  hydrate [theme]    Fetch in worker mode; apply only if theme is still active
+  refresh [theme]    Re-download that Omarchy wallpaper source
+  list [theme]       Show wallpaper policy, source candidates and local state
   current [theme]    Show the remembered wallpaper for a theme
 
-Theme defaults to the currently active theme. The centralized persistent library
-lives under ~/.local/share/theme/wallpapers/. Network access occurs only when a
-mapped asset is missing or an explicit fetch/refresh is requested.
+Theme defaults to the currently active theme. Omarchy themes use only wallpapers
+shipped by their own GitHub repository. Non-Omarchy palettes resolve exact/alias matches
+first, then an artistic/technical semantic Omarchy donor scored against the palette.
+Solid color is the last fallback. Network access occurs only for the resolved repository.
 """)
 
 
@@ -543,7 +681,7 @@ def main() -> int:
         return 0
 
     command = args[0] if args else "next"
-    valid = {"next", "prev", "random", "set", "fetch", "refresh", "list", "current"}
+    valid = {"next", "prev", "random", "set", "fetch", "hydrate", "refresh", "list", "current"}
     if command not in valid:
         die(f"unknown command: {command}; use --help")
 
@@ -551,37 +689,54 @@ def main() -> int:
     theme_arg: str | None = None
     if command == "set":
         if len(args) < 2:
-            die("set requires an index from 1 to 5")
+            die("set requires a wallpaper index")
         try:
             index_arg = int(args[1])
         except ValueError:
-            die("set index must be an integer from 1 to 5")
+            die("set index must be an integer")
         theme_arg = args[2] if len(args) > 2 else None
     else:
         theme_arg = args[1] if len(args) > 1 else None
 
     theme_name, theme = load_theme(theme_arg)
-    candidates = theme_candidates(theme)
+    cycle_command = command in {"next", "prev", "random"}
+    # A solid-only palette has no image to cycle. Do not even consult donors,
+    # spawn a hydration worker, call wset or notify on hotkey presses.
+    if cycle_command and (theme.get("assets") or {}).get("background_mode") == "solid":
+        return 0
+    source_info = resolve_omarchy_wallpaper_source_info(theme_name, theme)
+    source_name = source_info.get("source_name")
+    source_theme = source_info.get("source_theme")
+    candidates = theme_candidates(source_theme) if isinstance(source_theme, dict) else []
+    if source_name and isinstance(source_theme, dict) and repository_discovery_current(str(source_name), source_theme):
+        discovered = load_manifest(str(source_name)).get("candidates") or []
+        if isinstance(discovered, list):
+            candidates = [str(item) for item in discovered]
 
     if command == "list":
         print(f"Theme: {theme.get('display_name') or theme_name} ({theme_name})")
-        resolved = library_entry(theme_name)
-        if resolved:
-            manifest, entry = resolved
-            print(f"Curated library: {len(entry.get('assets') or [])} mapped asset(s), bucket {entry.get('bucket') or 'unknown'}")
-            assets = manifest.get("assets") or {}
-            scores = entry.get("match_scores") or {}
-            for index, asset_id in enumerate(entry.get("assets") or [], 1):
-                asset = assets.get(asset_id) or {}
-                score = scores.get(asset_id)
-                score_text = f" score={float(score):.1f}" if isinstance(score, (int, float)) else ""
-                print(f"  {index}. {asset_id}{score_text} {asset.get('page_url') or ''}")
-        print(f"Repository fallback: {(theme.get('source') or {}).get('repository') or 'none'}")
-        print(f"Upstream fallback candidates: {len(candidates)}/{MAX_WALLPAPERS}")
+        kind = str(source_info.get("kind") or "none")
+        if source_theme is None:
+            print("Wallpaper policy: solid-color fallback (no usable Omarchy donor)")
+        elif kind == "own":
+            print("Wallpaper policy: repository-authoritative (own Omarchy repository)")
+        elif kind == "alias":
+            print(f"Wallpaper policy: explicit Omarchy alias donor {source_name} (palette remains {theme_name})")
+        elif kind == "identity":
+            print(f"Wallpaper policy: exact Omarchy identity donor {source_name} (palette remains {theme_name})")
+        elif kind == "semantic":
+            style = source_info.get("style") or "artistic"
+            score = source_info.get("score")
+            score_text = f", palette score={score:.2f}" if isinstance(score, (int, float)) else ""
+            print(f"Wallpaper policy: semantic Omarchy donor {source_name} (style={style}{score_text}; palette remains {theme_name})")
+        else:
+            print(f"Wallpaper policy: Omarchy donor {source_name} (palette remains {theme_name})")
+        print(f"Repository: {((source_theme or {}).get('source') or {}).get('repository') or 'none'}")
+        print(f"Repository candidates: {len(candidates)}")
         for index, item in enumerate(candidates, 1):
             print(f"  {index}. {item}")
-        images = cached_images(theme_name)
-        print(f"Local: {len(images)}/{MAX_WALLPAPERS}")
+        images = cached_images(theme_name, theme)
+        print(f"Local: {len(images)}")
         selected = selected_image(theme_name, images)
         for index, path in enumerate(images, 1):
             marker = " *" if selected == path else ""
@@ -589,25 +744,84 @@ def main() -> int:
         return 0
 
     if command == "current":
-        images = cached_images(theme_name)
+        images = cached_images(theme_name, theme)
         print(selected_image(theme_name, images) or "none")
         return 0
 
     if command == "fetch":
         images = ensure_images(theme_name, theme)
-        location = WALLPAPER_ROOT if library_entry(theme_name) else cache_dir(theme_name)
-        print(f"Available {len(images)} wallpaper(s) under {location}")
+        assert source_name is not None
+        print(f"Available {len(images)} wallpaper(s) under {cache_dir(source_name)}")
+        return 0
+
+    if command == "hydrate":
+        with hydration_owner(theme_name) as owner:
+            if not owner:
+                return 0
+            try:
+                active = ACTIVE_THEME.read_text(encoding="utf-8").strip()
+            except OSError:
+                active = ""
+            if active != theme_name:
+                return 0
+
+            try:
+                images = ensure_images(theme_name, theme, notify_fetch=False)
+            except SystemExit as exc:
+                notify("Theme wallpaper", f"Background hydration failed for {theme.get('display_name') or theme_name}")
+                return int(exc.code or 1)
+            if not images:
+                return 1
+
+            # Network I/O happened outside the global theme lock. Serialize only
+            # the final compositor mutation and re-check active identity while
+            # holding it, so a slow old download can never win after a newer theme.
+            with theme_apply_lock():
+                try:
+                    active = ACTIVE_THEME.read_text(encoding="utf-8").strip()
+                except OSError:
+                    active = ""
+                if active != theme_name:
+                    return 0
+                target = selected_image(theme_name, images) or images[0]
+                try:
+                    current = Path(CURRENT_WALLPAPER.read_text(encoding="utf-8").strip()).resolve()
+                except OSError:
+                    current = None
+                try:
+                    target_resolved = target.resolve()
+                except OSError:
+                    target_resolved = target
+                if current == target_resolved:
+                    remember(theme_name, target)
+                    return 0
+                apply(theme_name, target, images.index(target) + 1, len(images))
         return 0
 
     if command == "refresh":
         images = ensure_images(theme_name, theme, force=True)
-        location = WALLPAPER_ROOT if library_entry(theme_name) else cache_dir(theme_name)
-        print(f"Refreshed {len(images)} wallpaper(s) under {location}")
+        assert source_name is not None
+        print(f"Refreshed {len(images)} wallpaper(s) under {cache_dir(source_name)}")
         return 0
 
-    images = ensure_images(theme_name, theme)
+    # Interactive cycling is strictly local when a valid scoped cache exists.
+    # Repository discovery/repair belongs to detached hydration, never the hotkey
+    # critical path. This also makes polluted legacy monorepo manifests harmless:
+    # cached_images() filters them to this theme's canonical wallpaper subtree.
+    images = cached_images(theme_name, theme)
+    # Zero/one locally cached image cannot produce a different wallpaper.
+    # For an empty cache, the effective repository metadata must enumerate at
+    # least two choices before we even consider network discovery/downloading.
+    # Keep explicit `fetch`/`refresh` available for users to populate a cache.
+    if cycle_command and (len(images) == 1 or (not images and len(candidates) <= 1)):
+        return 0
+    if not images:
+        images = ensure_images(theme_name, theme)
     if not images:
         die("no cached wallpapers available")
+    # Even a partial fetch that yields only one image must not reapply it.
+    if cycle_command and len(images) == 1:
+        return 0
     selected = selected_image(theme_name, images)
 
     if command == "set":

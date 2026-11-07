@@ -176,7 +176,16 @@ install_all() {
 }
 
 remove_pkgs() {
-  local query="$*"
+  local force_cascade=0
+  local args=()
+  for arg in "$@"; do
+    case "$arg" in
+      -c|--cascade) force_cascade=1 ;;
+      *) args+=("$arg") ;;
+    esac
+  done
+
+  local query="${args[*]}"
   local q_arg=()
   [[ -n "$query" ]] && q_arg=(-q "$query")
 
@@ -185,19 +194,20 @@ remove_pkgs() {
     "${q_arg[@]}" \
     --multi \
     --prompt="🗑️  Remove> " \
-    --header="[Tab] Select | [Enter] Remove (paru -Rns) | [Alt-a] Show all (inc. deps) | [Alt-e] Explicit only" \
+    --header="[Tab] Select | [Enter] Smart Remove (-Rns/-Rcns) | [Alt-a] All installed | [Alt-e] Explicit only" \
     --preview="pacman --color=always -Qi {} 2>/dev/null || paru -Qi {} 2>/dev/null" \
     --preview-window="right,60%,wrap,<100(down,60%)" \
-    --preview-label="[Alt-f] View files | [Alt-i] View info | [Alt-p] Toggle preview" \
+    --preview-label="[Alt-r] Dependents tree | [Alt-f] Files | [Alt-i] Info | [Alt-p] Toggle preview" \
     --preview-label-pos="bottom" \
     --border=rounded \
     --bind 'alt-p:toggle-preview' \
     --bind 'alt-d:preview-half-page-down,alt-u:preview-half-page-up' \
     --bind 'alt-k:preview-up,alt-j:preview-down' \
+    --bind 'alt-r:change-preview(pactree -r {} 2>/dev/null || pacman -Qi {} 2>/dev/null)' \
     --bind 'alt-f:change-preview(pacman -Ql {} | head -n 300)' \
     --bind 'alt-i:change-preview(pacman --color=always -Qi {} 2>/dev/null || paru -Qi {} 2>/dev/null)' \
-    --bind 'alt-a:reload(pacman -Qq)+change-prompt(🗑️  Remove (All Installed)> )+change-header([Tab] Select | [Enter] Remove | [Alt-e] Explicit only | [Alt-p] Preview)' \
-    --bind 'alt-e:reload(pacman -Qqe)+change-prompt(🗑️  Remove> )+change-header([Tab] Select | [Enter] Remove | [Alt-a] Show all | [Alt-p] Preview)' \
+    --bind 'alt-a:reload(pacman -Qq)+change-prompt(🗑️  Remove (All Installed)> )+change-header([Tab] Select | [Enter] Smart Remove | [Alt-e] Explicit only | [Alt-p] Preview)' \
+    --bind 'alt-e:reload(pacman -Qqe)+change-prompt(🗑️  Remove> )+change-header([Tab] Select | [Enter] Smart Remove | [Alt-a] Show all | [Alt-p] Preview)' \
     --color="$COLOR_REMOVE" \
     "${COMMON_FZF_ARGS[@]}"
   ) || true
@@ -210,7 +220,64 @@ remove_pkgs() {
     echo "  • $p"
   done
   echo
-  paru -Rns "${pkgs[@]}"
+
+  if [[ $force_cascade -eq 1 ]]; then
+    paru -Rcns "${pkgs[@]}"
+    return $?
+  fi
+
+  # Smart dependency check: detect if any installed package depends on the selection
+  local all_cascade dependents
+  all_cascade=$(pacman -Rc "${pkgs[@]}" -p --print-format %n 2>/dev/null | sort -u || true)
+  if [[ -n "$all_cascade" ]]; then
+    dependents=$(comm -23 <(echo "$all_cascade") <(printf "%s\n" "${pkgs[@]}" | sort -u) | sed '/^$/d')
+  else
+    dependents=""
+  fi
+
+  if [[ -n "$dependents" ]]; then
+    echo -e "\e[33m⚠️  Dependency notice: Other installed packages depend on your selection:\e[0m"
+    while IFS= read -r dep; do
+      echo -e "  \e[36m•\e[0m $dep"
+    done <<< "$dependents"
+    echo
+    echo -e "\e[1mRemoving this selection requires cascading removal (-Rcns) to remove dependent packages as well.\e[0m"
+    read -r -p "Cascade-remove all dependent packages as well? [Y/n] " ans
+    ans="${ans,,}"
+    if [[ -z "$ans" || "$ans" == "y" || "$ans" == "yes" ]]; then
+      echo
+      paru -Rcns "${pkgs[@]}"
+    else
+      echo -e "\e[33mRemoval cancelled.\e[0m"
+      return 1
+    fi
+  else
+    # No reverse dependencies; execute standard recursive removal (-Rns)
+    if ! paru -Rns "${pkgs[@]}"; then
+      echo
+      echo -e "\e[33mStandard removal (-Rns) failed. Checking for cascading dependencies...\e[0m"
+      all_cascade=$(pacman -Rc "${pkgs[@]}" -p --print-format %n 2>/dev/null | sort -u || true)
+      if [[ -n "$all_cascade" ]]; then
+        dependents=$(comm -23 <(echo "$all_cascade") <(printf "%s\n" "${pkgs[@]}" | sort -u) | sed '/^$/d')
+      fi
+      if [[ -n "$dependents" ]]; then
+        echo -e "\e[33mDependent packages detected:\e[0m"
+        while IFS= read -r dep; do
+          echo -e "  \e[36m•\e[0m $dep"
+        done <<< "$dependents"
+        echo
+        read -r -p "Cascade-remove these dependent packages as well (paru -Rcns)? [Y/n] " ans
+        ans="${ans,,}"
+        if [[ -z "$ans" || "$ans" == "y" || "$ans" == "yes" ]]; then
+          echo
+          paru -Rcns "${pkgs[@]}"
+        else
+          echo -e "\e[33mRemoval cancelled.\e[0m"
+          return 1
+        fi
+      fi
+    fi
+  fi
 }
 
 clean_orphans() {

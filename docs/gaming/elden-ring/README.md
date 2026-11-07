@@ -14,47 +14,69 @@
 |---|---|---|
 | **DirectX 12 / VKD3D** | **WORKING** | `VKD3D_CONFIG="no_upload_hvv,force_host_cached"` and `PROTON_ENABLE_NVAPI=0` for Blackwell RTX 5050 stability. |
 | **GPU Offloading** | **WORKING** | Direct PRIME offload (`__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optimus=NVIDIA_only`). |
-| **LSFG-VK 2.0 (Frame Gen)** | **WORKING** | 2x multiplier via `LSFGVK_PROFILE="Elden Ring"` (`multiplier = 2` in `~/.config/lsfg-vk/conf.toml`, managed as chezmoi template): 60 FPS base → 120 generated FPS (held at or under the 165Hz panel per §9), `pacing_mode = "vsync"`, `override_present_mode = true`. |
-| **MangoHud Hardware Monitor** | **WORKING** | Custom per-game config in `Game/MangoHud.conf`: top-left compact HUD (CPU/GPU thermals + wattage, VRAM/RAM, `LSFG 120 (2x)` / `Base 60` status; hidden by default — `Alt+3` toggles; `Alt+4` font presets, `Alt+5` position — see `docs/gaming/README.md` §5). Passed to Wine via `user_settings.py` in the prefix (NOT exported in outer bash — outer export makes Proton's Python runtime hook MangoHud and SIGABRT on startup). |
-| **DLL Mod Loader** | **WORKING** | EldenModLoader (`dinput8.dll`) hooks on boot with `WINEDLLOVERRIDES="dinput8=n,b"`. |
+| **LSFG-VK 2.0 (Frame Gen)** | **EXPERIMENTAL OPT-IN** | The unchanged 4x profile (`flow_scale=0.8`, Performance Mode, vsync pacing) rendered in November 3/5 tests but produced a persistent fully black frame on November 6. In a same-session controlled A/B test, `ENABLE_LSFG=0` rendered changing frames with identical randomizer/QoL DLLs. Normal launches therefore disable LSFG; use `ENABLE_LSFG=1 eldenring-lsfg` only to re-test 4x. |
+| **MangoHud Hardware Monitor** | **PARKED BY DEFAULT** | 2026-11-03 A/B testing proved MangoHud injection freezes Elden Ring on the startup presentation surface under the current Proton/VKD3D stack; logs report unsupported `VK_PRESENT_MODE_FIFO_RELAXED_KHR`. Normal launches write an empty `user_settings.py`. Diagnostic-only opt-in: `ELDENRING_MANGOHUD=1 eldenring-run`. |
+| **DLL Mod Loader** | **WORKING** | EldenModLoader (`dinput8.dll`) hooks on boot with `WINEDLLOVERRIDES="dinput8=b"`. |
 | **Camera Fix Mod** | **WORKING** | `CameraFix.dll` disables auto-rotation and target lock camera snaps. |
 | **ModEngine 2 & Randomizer** | **WORKING** | ModEngine 2 loads randomized assets dynamically from `randomizer/`. .NET 8.0 Desktop Runtime installed in prefix for Randomizer GUI. |
-| **Rofi Game Menu (`Alt + g`)** | **WORKING** | Single unified entry `ELDEN RING + LSFG (120 FPS)` and dedicated GUI entry `ER Randomizer Config (GUI)`. |
+| **Randomizer QoL DLL stack** | **WORKING** | Managed `config_randomizer_stack.toml`: RandomizerCrashFix + Map for Goblins v2.1.6 directly through ModEngine, with CameraFix + PauseTheGame loaded after 7 seconds by `DelayedModLoader`. Faster Revival v1.0.0 is parked because it reproducibly causes the persistent black startup surface. |
+| **Rofi Game Menu (`Alt + g`)** | **WORKING** | `ELDEN RING (Stable / no LSFG)` is the default; `ELDEN RING + LSFG 4x (experimental)` remains optional, with existing randomizer GUI entries retained. |
 
 ---
 
 ## 2. Mod Inventory & Directory Structure
 
 ### Mod Roster
-1. **[Elden Mod Loader v3.2](https://www.nexusmods.com/eldenring/mods/117)**
-   - **Path:** `/mnt/Games/NonSteamGames/ELDEN RING/Game/dinput8.dll`
-   - **Config:** `/mnt/Games/NonSteamGames/ELDEN RING/Game/mod_loader_config.ini`
-   - **Purpose:** Automatically loads DLL mods inside `Game/mods/` upon game start.
-2. **[Fix The Camera v3.0](https://www.nexusmods.com/eldenring/mods/118)**
-   - **Path:** `/mnt/Games/NonSteamGames/ELDEN RING/Game/mods/CameraFix.dll`
-   - **Config:** `/mnt/Games/NonSteamGames/ELDEN RING/Game/mods/CameraFix/config.ini`
-   - **Settings:** `disable_camera_auto_rotate = 1`, `disable_camera_reset = 1`. Eliminates unwanted automatic camera centering and target lock resets.
-3. **[Mod Engine 2.1.0.0](https://github.com/soulsmods/ModEngine2/releases)**
-   - **Path:** `/mnt/Games/NonSteamGames/ELDEN RING/ModEngine2/ModEngine-2.1.0.0-win64/`
-   - **Config:** `/mnt/Games/NonSteamGames/ELDEN RING/ModEngine2/ModEngine-2.1.0.0-win64/config_eldenring.toml`
-   - **Configuration:** Linked to load `randomizer` assets dynamically without modifying original base game `.bdt` archives.
-4. **[Elden Ring Item and Enemy Randomizer v0.12.2](https://www.nexusmods.com/eldenring/mods/428)**
-   - **Path:** `/mnt/Games/NonSteamGames/ELDEN RING/randomizer/EldenRingRandomizer.exe`
-   - **Launcher:** `~/.local/bin/eldenring-randomizer-gui`
-   - **Runtimes Required:** Microsoft .NET 8.0 Windows Desktop Runtime (`windowsdesktop-runtime-8.0-win-x64.exe`) and .NET 6.0 Desktop Runtime installed into prefix `2703476723`.
-5. **[RemoveChromaticAberration v3.0 / RemoveVignette v3.0 / SkipTheIntro v4.0](https://www.nexusmods.com/eldenring/mods/179)**
-   - **Type:** EldenModLoader DLLs in `Game/mods/` (`RemoveChromaticAberration.dll`, `RemoveVignette.dll`, `SkipTheIntro.dll` + `SkipTheIntro/config.ini`), registered in `Game/mod_loader_config.ini` `[loadorder]` (CameraFix=1, SkipTheIntro=2, Chromatic=3, Vignette=4). Note: RandomizerCrashFix already fast-boots past the logos; SkipTheIntro additionally hides the white screen.
-7. **[ERFPS — First Person Souls v1.2.2](https://www.nexusmods.com/eldenring/mods/3266)** — PARKED (boot caused black screen under Proton, see §9-era notes)
-   - **Files:** `Game/mods/erfps.dll` + `erfps_settings.ini` on disk but **removed from `[loadorder]`**. Hold-lock-on first-person stays available by re-adding `erfps.dll = 5`.
-   - **Caveat:** 2023 build; author states Linux unsupported. It hooks the DirectX present path, which also suppresses the MangoHud overlay — prime suspect for the black-screen stretch alongside the 2022 HUD gfx.
-8. **Minimal HUD v1.2.3 (translucent) + My HUD Tweaks 1.08.1**
-   - **Deploy:** ModEngine2 `hud/menu/*.gfx` (OPTION 2 Translucent base, tweak's `01_000_fe.gfx` over it). Wired via hand-managed `config_custom.toml` (randomizer + hud). To switch to Normal backgrounds, swap in OPTION 1's `menu/` folder.
-9. **[IMCO — Improved Melee Combat Overhaul SOTE v4.01](https://www.nexusmods.com/eldenring/mods/2177)** — PARKED (2026-10-16)
-   - Files staged (not loaded) in `ModEngine2/.../imco/` (`regulation.bin`, `chr/*.anibnd.dcx`, `param/systemparam/systemparam.parambnd.dcx`).
-   - Merge attempted via the randomizer's built-in "Merge other mod": crashed with `NullReferenceException` in `CharacterWriter.getStat` — IMCO's Oct-2024 regulation lacks rows the current randomizer expects (version desync), exactly the flagged risk.
-   - Fallback active per plan: `config_imco.toml` renamed to `config_imco.toml.disabled`, launcher falls back to `config_eldenringrandomizer.toml` (randomizer-only, boot-verified). To retry IMCO solo later, re-enable the file (IMCO wins, randomizer placement dormant).
-5. **[Lossless Scaling LSFG-VK 2.0](https://github.com/Kars45/lsfg-vk)**
-   - **Config:** `~/.config/lsfg-vk/conf.toml` (`[[profile]] name = "Elden Ring"`, `active_in = "eldenring.exe"`, `multiplier = 4`, `pacing_mode = "vsync"`; chezmoi template).
+
+1. **Mod Engine 2.1.0.0 + Item/Enemy Randomizer v0.12.2 — ACTIVE**
+   - ModEngine: `/mnt/Games/NonSteamGames/ELDEN RING/ModEngine2/ModEngine-2.1.0.0-win64/`
+   - Randomizer output: `/mnt/Games/NonSteamGames/ELDEN RING/randomizer/`
+   - The Randomizer GUI owns `randomizer/config_eldenringrandomizer.toml`; the stable Linux launcher instead selects the managed `~/.config/eldenring/config_randomizer_stack.toml`, which points at the same randomized output directory and layers runtime-only DLLs around it.
+   - `RandomizerCrashFix.dll` remains the first external DLL. The current `randomizer/regulation.bin` and generated event/map files remain the randomized gameplay source.
+
+2. **Map for Goblins DLL v2.1.6 — ACTIVE**
+   - Canonical DLL/config: `ModEngine2/.../natives/MapForGoblins/MapForGoblins.dll` and `MapForGoblins.ini`.
+   - Official vanilla release from `VirusAlex/ERR-MapForGoblins-DLL`; DLL SHA-256 `ea287c547a5431aac332dce8ed6cb636d2397ad6d1b5dce01351ffdff3b3f8ca`.
+   - Randomizer integration is enabled (`live_loot_flags`, `live_loot_labels`, `live_loot_icons`). `anonymous_loot = true` keeps randomized item identity spoiler-free while retaining useful `?` map locations. `menu_render_mode = native` avoids a separate DX/ImGui overlay on the LSFG presentation path.
+   - Live verification on game v2.7.0.0 registered the map integration and mapped 7,376 randomized markers.
+
+3. **Faster Revival v1.0.0 — PARKED**
+   - Canonical DLL/config remain on disk at `ModEngine2/.../natives/FasterRevival/FasterRevival.dll` and `FasterRevival.ini`; they are no longer referenced by the managed launch profile.
+   - Built from the public `ALR2310/EldenRingMods` source with the required `x86_64-pc-windows-msvc` ABI; DLL SHA-256 `8910431b347b15d8c6cf3995c173e151b0e1a8b1f5c713b22cce3f443788378b`.
+   - 2026-11-03 controlled A/B testing isolated this DLL as the current black-screen trigger: the full stack remained black even with LSFG disabled, while the identical stack without FasterRevival rendered. Keep it parked until a rebuilt/newer version is separately revalidated.
+
+4. **Fix The Camera v3.0 — ACTIVE**
+   - `Game/mods/CameraFix.dll`, with `disable_camera_auto_rotate = 1` and `disable_camera_reset = 1`.
+   - Loaded by the managed `DelayedModLoader` after 7 seconds rather than by EldenModLoader during early process startup.
+
+5. **PauseTheGame — ACTIVE**
+   - `Game/mods/PauseTheGame.dll`.
+   - Loaded alongside CameraFix by `DelayedModLoader` after startup; verified mapped in the live non-Steam randomizer session.
+
+6. **Elden Mod Loader v3.2 — BOOTSTRAP ONLY**
+   - `Game/dinput8.dll` remains enabled through `WINEDLLOVERRIDES="dinput8=b"`.
+   - `Game/mod_loader_config.ini` intentionally has an empty `[loadorder]`; its source of truth is `~/.config/eldenring/mod_loader_config.ini`, synchronized by `eldenring-launch-inner` when bytes differ. This prevents duplicate DLL injection because the managed ModEngine stack owns all active runtime DLLs.
+
+7. **DelayedModLoader — ACTIVE HELPER**
+   - Source: `~/.local/share/chezmoi/dot_local/lib/eldenring/delayed_mod_loader.c`.
+   - Live DLL: `ModEngine2/.../natives/DelayedModLoader/DelayedModLoader.dll`.
+   - ModEngine loads this helper at process initialization; it waits 7 seconds, then loads CameraFix and PauseTheGame after Elden Ring has completed enough startup for their scans/hooks.
+
+8. **LSFG-VK 2.0 — INSTALLED, OPT-IN**
+   - `~/.config/lsfg-vk/conf.toml`: the historical 4x profile remains intact (`multiplier=4`, `flow_scale=0.8`, Performance Mode, vsync pacing) for optional re-testing, but LSFG is **disabled by default** after the 2026-11-06 black-screen regression. Previous November 3/5 launches rendered with 4x; that does not establish reliability on the current session.
+
+### Parked / not in the active profile
+
+- RemoveChromaticAberration, RemoveVignette and SkipTheIntro remain on disk but are not loaded.
+- ERFPS / First Person Souls remains parked because its present-path hook previously black-screened under Proton.
+- Minimal HUD / My HUD Tweaks remain in the disabled custom ModEngine profile.
+- IMCO remains disabled because its old `regulation.bin` could not be merged safely with the current randomizer.
+
+### Candidate QoL mods not installed
+
+- **Transmogrify Armor 2.4.14:** official source was evaluated, but its pinned Windows-oriented `elden-x` dependency does not cross-build cleanly with the Linux clang-cl/MSVC compatibility toolchain (`std::span` over forward-declared game-state types). Do not patch those game-memory structures merely to force a Linux build; install the official Windows/Nexus binary when available locally.
+- **Adaptive Bar Scaling compatibility port:** the current 1.17 / exe 2.7.0.0 build is distributed through Nexus, but no corresponding public source was found in the author's repositories and Nexus file delivery requires authenticated binary access. No mirror was substituted.
+- **Glorious Merchant:** intentionally not installed.
 
 ---
 
@@ -65,14 +87,10 @@
 - **Inner supervision:** `eldenring-launch-inner` runs `modengine2_launcher.exe` in the foreground, then `wineserver -w`, so the supervisor lives for the whole session and `asusctl` restores Balanced only after exit.
 - **SIGHUP-proof:** `trap '' HUP` in both scripts + `nohup` in `rofi-games`, so closing the Alt+g menu can't kill the game.
 - **Workspace Navigation:** Automatically activates **Workspace 4** upon launch.
-- **MangoHud delivery:** written to `$STEAM_COMPAT_DATA_PATH/user_settings.py` by the inner script:
-  ```python
-  user_settings = {
-      "MANGOHUD": "1",
-      "MANGOHUD_CONFIGFILE": "/mnt/Games/NonSteamGames/ELDEN RING/Game/MangoHud.conf",
-  }
-  ```
-- **MangoHud keys:** `Alt+3` HUD on/off | `Alt+4` font presets (hidden 15 / 20 / 30) | `Alt+5` position cycle (one anchor per press; visible as top/middle/bottom row changes) | `Alt+6` reset FPS metrics | `Alt+7` frame-cap toggle (no cap defined — no-op) | `Alt+8` reload config. Hotkeys debounce ~0.4 s: pause between presses — rapid taps count once.
+- **Non-Steam launch:** the game is launched directly through the dedicated Proton prefix and ModEngine 2. `SteamAppId`/`SteamGameId` plus `STEAM_COMPAT_*` remain compatibility metadata only; the launcher does not start, wait for, or depend on the native Steam desktop client.
+- **Managed randomizer/QoL profile:** `~/.config/eldenring/config_randomizer_stack.toml` is copied into ModEngine2 only when changed. It keeps the randomizer-generated directory intact while loading RandomizerCrashFix, DelayedModLoader and Map for Goblins exactly once. FasterRevival remains installed but is intentionally omitted after the 2026-11-03 black-screen A/B.
+- **DLL ownership:** `~/.config/eldenring/mod_loader_config.ini` deliberately leaves EldenModLoader's `[loadorder]` empty. CameraFix/Pause are loaded only by DelayedModLoader; Map for Goblins is loaded only as a ModEngine external DLL. FasterRevival is parked. This avoids both duplicate injection and the verified black-screen regression.
+- **MangoHud default:** disabled. `eldenring-launch-inner` writes `user_settings = {}` because MangoHud is the verified 2026-11-03 startup-freeze trigger. For diagnostics only, `ELDENRING_MANGOHUD=1 eldenring-run` restores the per-game `Game/MangoHud.conf` injection; do not make that the default until the present-mode regression is re-tested.
 - **Power Policy:** `asusctl profile set Performance` on launch, restored to Balanced on exit via `EXIT/INT/TERM` trap.
 - **Audio:** follows the system default output (whatever `Alt+Shift+o` / `toggle-audio-sink` selected). The launcher deliberately does NOT force `sink.peace_gaming` — forced routing bypassed the selected device and went silent when the gaming chain sat idle-suspended. `Alt+Shift+o` moves live game streams on switch. Alt+g logs to `/tmp/eldenring-lsfg.log` for diagnosis.
 
@@ -89,7 +107,7 @@
 2. Ensure the game directory points to `Z:\mnt\Games\NonSteamGames\ELDEN RING\Game\eldenring.exe`.
 3. Choose your desired item and enemy settings or randomize seeds.
 4. Click **"Randomize items and enemies"**.
-5. Close the GUI and launch the game via `Alt + g` -> **`ELDEN RING + LSFG (120 FPS)`**. ModEngine 2 automatically injects the newly generated files.
+5. Close the GUI and launch via `Alt + g` -> **`ELDEN RING (Stable / no LSFG)`**. ModEngine 2 loads the newly generated files and the existing QoL DLLs. The separate LSFG 4x entry is experimental.
 
 ---
 
@@ -138,13 +156,29 @@ IMCO SOTE v4.01 ships its own `regulation.bin` (Oct 2024); the randomizer ships 
 
 **Fallback (active):** `config_imco.toml` → `config_imco.toml.disabled`; launcher uses randomizer-only. IMCO files stay staged for a future solo run (re-enable the file = IMCO wins, randomizer dormant).
 
-## 9. LSFG Multiplier Saga — 2x Verified, Stay ≤ Panel Rate (2026-10-16)
+## 9. LSFG 4x Verified Profile for 165 Hz (corrected 2026-11-03)
 
-- 2x (60→120) is the verified-good setting (Church of Elleh era + tonight's clean boots).
-- 4x was tried for the 165Hz panel; the attempts coincided with a black-screen stretch, but the stretch was confounded (2022 HUD gfx + erfps DirectX hook were also in play, since removed). 4x briefly rendered fine later.
-- **Rule of thumb adopted:** keep generated fps ≤ panel refresh (165Hz). 3x (180) and 4x (240) overshoot into vsync-pacing chaos; 2x (120) divides cleanly. Back on 2x.
-- **LSFG hot-reloads live:** editing `conf.toml` (or the lsfg-vk-ui) applies to a running game within seconds (`Configuration file has changed, reloading...`). BUT rapid successive edits once landed the layer in a `(Disabled)` state mid-game — change once, wait 10s, judge. And never toggle the UI mid-fight.
-- **Config drift warning:** lsfg-vk-ui writes the live `conf.toml` directly, which then disagrees with the chezmoi template. After settling a multiplier, sync the template (`dot_config/lsfg-vk/conf.toml.tmpl`) and commit, or the next `chezmoi apply` silently reverts you. Live + template are both 2x as of `5650025`/`e7df29f`/`72bfc10`.
+- The active profile is 4x with `flow_scale = 0.8`, `performance_mode = true`, `pacing_mode = "vsync"`, `override_present_mode = true`, and `preserve_swapchain_image_count = false`.
+- The black-screen diagnosis was initially confounded by captures taken while the Elden Ring workspace was not visible. The corrected test explicitly switched Sway to workspace 4, focused the `ELDEN RING™` node, and verified `visible=true` / `focused=true` before each capture.
+- With FasterRevival omitted, the original BORDERLESS graphics mode plus LSFG 4x progressed from a 99.99% black startup frame to two distinct rendered frames. lsfg-vk reported multiplier 4, flow scale 0.80, Performance Mode enabled, and successful half-precision initialization.
+- Controlled no-LSFG testing separately showed that the full stack containing FasterRevival can remain black, while the same randomizer + DelayedModLoader + MapForGoblins stack without FasterRevival renders. The DLL is therefore the actual current regression and is parked.
+- `preserve_swapchain_image_count = true` remains a compatibility quirk rather than a performance optimization; keep it off unless a future regression proves it necessary.
+- An NVIDIA-only `VK_DRIVER_FILES` test and a Vulkan-loader driver filter did not provide a useful fix and are not persisted. The installed stable `lsfg-vk 2.0.0-1` also has no supported per-profile `gpu` key.
+- The chezmoi template is authoritative. If `lsfg-vk-ui` changes the live file, synchronize only a verified profile back into `dot_config/lsfg-vk/conf.toml.tmpl` before a later `chezmoi apply` can revert it.
+
+### 2026-11-05 runtime source/live drift repair
+
+The local chezmoi working tree already contained the corrected (currently untracked) `dot_config/eldenring/config_randomizer_stack.toml` without FasterRevival, but `~/.config/eldenring/config_randomizer_stack.toml` and its copy inside ModEngine still contained `natives/FasterRevival/FasterRevival.dll`. The running launcher re-copied the **stale live profile** into ModEngine, reintroducing the known black-screen regression. Re-synchronized the source to both live Elden Ring files (`config_randomizer_stack.toml`, `mod_loader_config.ini`); the next normal launcher invocation copied the corrected profile into ModEngine automatically. The active external DLL list is now exactly RandomizerCrashFix, DelayedModLoader and MapForGoblins. FasterRevival binaries remain installed but are not injected.
+
+Validation: the normal `eldenring-lsfg` / Proton / ModEngine launch started `eldenring.exe`, initialized LSFG-VK 2.0.0 at 4x with `flow_scale=0.8` and Performance Mode, and on **visible/focused workspace 4** successive compositor captures changed from nearly black to non-black rendered frames with distinct hashes. The game process was still alive after 128 seconds. Synced the older live 2x labels in `eldenring-lsfg` and `rofi-games` from their already-correct source versions (only text/comments changed). No native Steam client, randomizer content, game saves or unrelated mods were modified. Chezmoi's targeted apply was blocked by an unrelated `nvim.desktop` source/template collision, so only the confirmed source-to-live Elden Ring files were installed directly after a diff and with `/tmp` backups; reconcile that collision separately before relying on a future broad `chezmoi apply`.
+
+### November 6, 2026 — Intermittent LSFG black presentation reproduced and isolated
+
+On the live RTX 5050 / Sway session, the current `eldenring.exe` stayed in a fullscreen, visible, focused black window for more than two minutes despite using the **correct** managed 3-DLL randomizer stack; `FasterRevival` was absent, and MangoHud's Proton `user_settings.py` was empty. Two compositor captures separated by four seconds were each 99.98% black, and the game ignored a normal WM close. Its mapped modules contained LSFG-VK, RandomizerCrashFix, DelayedModLoader, MapForGoblins, CameraFix, and PauseTheGame. ModEngine logs were normal and matched the earlier successful launch.
+
+After targeted termination of only the hung game (no saves or randomizer files changed), `swaymsg exec env ENABLE_LSFG=0 ~/.local/bin/eldenring-lsfg` restarted the **same** ModEngine profile. The environment explicitly contained `DISABLE_LSFGVK=1`, LSFG was absent from the process's mapped libraries, and the focused workspace-4 image rendered; two captures seven seconds apart were about 23% black with substantially different actual frames (average channel difference 3.187). This isolates LSFG-enabled presentation as the current session-specific trigger but does **not** prove which LSFG-VK setting or driver interaction is responsible. No global LSFG profile, NVIDIA driver, randomizer assets, prefixes, or saves were altered.
+
+Mitigation: default `${ENABLE_LSFG:-0}` in `eldenring-lsfg`; the menu now exposes separate stable no-LSFG and experimental 4x choices. Launch command `ENABLE_LSFG=1 eldenring-lsfg` retains the old configuration on demand. Preserve the earlier verified 4x evidence as historical, not current reliability. Re-test experimental 4x separately before restoring it as the default; do not disturb a working game just to reproduce the intermittent bug.
 
 ## 10. Double-Pick Bug — Alt+g Needed Two Tries (2026-10-16)
 
@@ -157,10 +191,47 @@ IMCO SOTE v4.01 ships its own `regulation.bin` (Oct 2024); the randomizer ships 
 - Stale-wineserver reap before launch: a SIGKILLed session's lingering server (no game behind it) made fresh boots attach to a dead server and exit early.
 - Alt+g launch log now appends timestamped entries (`/tmp/eldenring-lsfg.log`) instead of overwriting, so a failed first attempt leaves evidence.
 
-## 11. Current Clean Baseline (2026-10-16) — Do Not Drift Without Reason
+## 11. Current Clean Baseline (2026-11-03) — Do Not Drift Without Reason
 
-- **Launcher:** `eldenring-lsfg` → `eldenring-launch-inner`, unpinned (`exec`, no taskset), `trap '' HUP` + `nohup`, asusctl Performance→Balanced, WS4 focus, single-instance guard, stale-server reap.
-- **Config:** `config_eldenringrandomizer.toml` (randomizer-only). Parked: `config_custom.toml.disabled` (hud), `config_imco.toml.disabled` (IMCO).
-- **DLLs:** CameraFix only (`mod_loader_config.ini`). Out: erfps (2023 build hooks present path → black screen + kills MangoHud overlay under Proton), SkipTheIntro/Chromatic/Vignette (parked with the bad stretch, reintroduce one-by-one if wanted).
-- **Graphics:** LSFG 2x + vsync pacing, MangoHud `LSFG 120 (2x)` via `user_settings.py`, audio on system default.
-- **Menu:** `ELDEN RING + LSFG (120 FPS)` in Alt+g, per-launch logs appended.
+- **Launcher:** `eldenring-lsfg` → `eldenring-launch-inner`, unpinned (`exec`, no taskset), `trap '' HUP` + `nohup`, asusctl Performance→Balanced, WS4 focus, single-instance guard and stale-server reap; no native Steam client startup or readiness gate.
+- **Config:** managed `~/.config/eldenring/config_randomizer_stack.toml` points at the current Randomizer v0.12.2 output and loads RandomizerCrashFix + DelayedModLoader + Map for Goblins v2.1.6. Faster Revival v1.0.0 is installed but parked after the verified black-screen regression. Also parked: `config_custom.toml.disabled` (HUD files), `config_imco.toml.disabled` (IMCO).
+- **DLL ownership:** Map for Goblins loads directly through ModEngine; DelayedModLoader loads CameraFix and PauseTheGame after 7 seconds. Managed `mod_loader_config.ini` has an empty `[loadorder]`, preventing duplicate injection. FasterRevival, ERFPS and SkipTheIntro/Chromatic/Vignette remain parked.
+- **Graphics:** verified LSFG 4x profile (`flow_scale=0.8`, Performance Mode, `preserve_swapchain_image_count=false`) with vsync pacing against the 165.004 Hz panel. MangoHud is **off by default**; `user_settings.py` is neutral. Audio follows the system default.
+- **Menu:** Alt+g defaults to `ELDEN RING (Stable / no LSFG)` and includes an explicit experimental LSFG 4x entry. The Alt+Space desktop entry already starts without LSFG; both share `eldenring-run`/`eldenring-lsfg` and the same mods.
+
+## 12. MangoHud Startup Freeze — Fixed 2026-11-03
+
+**Symptom:** the non-Steam randomizer launch created an `ELDEN RING™` fullscreen window but remained on a black/white presentation surface indefinitely. The process stayed alive at high CPU, so this was not a crash.
+
+**A/B result on the same prefix, Proton runner, randomizer seed and game binary:**
+
+| Stack | Result |
+|---|---|
+| Vanilla `eldenring.exe`, no ModEngine/overlays | Renders |
+| ModEngine 2 with empty diagnostic config | Renders |
+| Randomizer + `RandomizerCrashFix.dll`, no DLL loader/overlays | Renders |
+| Randomizer + CameraFix/EldenModLoader, no MangoHud | Renders |
+| Randomizer + **MangoHud**, no CameraFix or LSFG | **Freezes on startup surface** |
+| Randomizer + CameraFix + MangoHud, no LSFG | **Freezes on startup surface** |
+| Randomizer + CameraFix + LSFG 2x, **no MangoHud** | Renders; LSFG reaches `Initializing lsfg-vk instance with half precision enabled` |
+
+MangoHud logs on the failing path repeatedly report `Present mode is not supported: VK_PRESENT_MODE_FIFO_RELAXED_KHR`. The verified root cause is MangoHud injection itself under the current Elden Ring Proton/VKD3D presentation stack; the unsupported-present warning is retained as the strongest correlated runtime clue, not treated as a standalone proof of MangoHud internals.
+
+**Fix:** normal launch writes a neutral `user_settings.py` and does not inject MangoHud. `ELDENRING_MANGOHUD=1` is retained only as an explicit diagnostic opt-in. LSFG, RandomizerCrashFix, CameraFix, ModEngine 2, and the Blackwell VKD3D flags are unchanged. Final live validation through the real shared launcher produced changing compositor frames, an active RTX 5050 Vulkan workload, and a healthy LSFG 2x initialization.
+## 13. FasterRevival Black-Screen Regression — Fixed 2026-11-03
+
+**Symptom:** the real shared launcher could leave `ELDEN RING™` on a persistent black surface even though the process stayed alive and LSFG initialized normally.
+
+**Controlled A/B, same Proton prefix and game data:**
+
+| Stack | Result |
+|---|---|
+| ModEngine empty profile, LSFG disabled | Renders |
+| Randomizer + RandomizerCrashFix, LSFG disabled | Renders |
+| Randomizer + DelayedModLoader + MapForGoblins, LSFG disabled | Renders |
+| Full managed stack including FasterRevival, LSFG disabled | **Black screen** |
+| Randomizer + DelayedModLoader + MapForGoblins + LSFG 4x, FasterRevival omitted | **Renders** |
+
+The final 4x verification explicitly switched Sway to workspace 4 and focused the game node before capture (`visible=true`, `focused=true`). Captures progressed from the normal black startup frame to distinct visible rendered frames while lsfg-vk reported multiplier 4, flow scale 0.80, Performance Mode enabled and successful half-precision initialization. CameraFix, PauseTheGame, MapForGoblins and RandomizerCrashFix were all mapped in the process; FasterRevival was absent.
+
+**Fix:** remove FasterRevival v1.0.0 from managed `config_randomizer_stack.toml`. Keep its DLL and INI on disk for future rebuild/version testing, but do not inject it in normal launches. LSFG 4x remains enabled with the verified profile.

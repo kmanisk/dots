@@ -1,0 +1,2 @@
+# Keep batch scripts CRLF on disk, LF in Git for whitespace-clean diffs.
+dot_local/share/win10lab/*.cmd text eol=crlf

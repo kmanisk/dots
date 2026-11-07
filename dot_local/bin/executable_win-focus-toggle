@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Caps+Tab: switch between the current Linux workspace and the already
+# running Windows/Looking Glass client on workspace 5.
+# No VM startup, guest input injection, background daemon, or state file.
+set -euo pipefail
+
+export PATH="$HOME/.local/bin:$PATH"
+runtime="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+exec 9>"$runtime/win-focus-toggle.lock"
+flock -w 1 9 || exit 1
+
+focused_ws="$(swaymsg -r -t get_workspaces | jq -er '.[] | select(.focused) | .num')"
+if [ "$focused_ws" = 5 ]; then
+    # Sway's own history recalls the actual previous Linux workspace,
+    # including when Windows was entered via Alt+W instead of this chord.
+    swaymsg -q 'workspace back_and_forth'
+    exit 0
+fi
+
+# The chord should not boot an unavailable VM or acquire an Intel VF.
+if ! win10lab status | grep -q 'qemu_state=running, mode=intel-vfio-lgmp'; then
+    notify-send -a Windows 'Windows is not running' 'Start it with Alt+W first.' 2>/dev/null || :
+    exit 1
+fi
+
+client_id="$(swaymsg -r -t get_tree |
+    jq -er '[.. | objects | select(.app_id? == "win10lab-looking-glass") | .id][0] // empty')" || {
+    notify-send -a Windows 'Looking Glass unavailable' 'Use Alt+W to open its client.' 2>/dev/null || :
+    exit 1
+}
+
+swaymsg -q 'workspace number 5'
+swaymsg -q "[con_id=$client_id] focus"
+# Looking Glass captureOnFocus=yes acquires guest input on this focus event.

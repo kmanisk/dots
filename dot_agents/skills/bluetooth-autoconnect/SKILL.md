@@ -1,7 +1,7 @@
 ---
 name: bluetooth-autoconnect
 description: Bluetooth auto-connect and refusal on this machine - the three dialers (bt-autoconnect, bt-auto-trust, blueman AutoConnect plugin), BlueZ block semantics, the audio-device refusal toggle (Win+Shift+Enter), and the bt-select TUI picker. Use when debugging Bluetooth reconnects, auto-connect behavior, block state, refusal, or device selection.
-version: 1.6.0
+version: 1.7.0
 ---
 
 ## Authority and freshness
@@ -24,7 +24,7 @@ Verified 2026-10-19 against live system (BlueZ 5.87, kernel 7.2.11-cachyos).
 
 The user asked for no background services. `bt-autoconnect.service` and `bt-auto-trust.service` were disabled, removed from `~/.config/systemd/user/`, and forgotten from chezmoi. No process dials devices now; the TUI runs in the foreground and nothing survives it. The scripts `~/.local/bin/bt-autoconnect` and `bt-auto-trust` remain on disk as manual tools only. `blueman-applet` is not running and its AutoConnect `services` list is empty, so the plugin is inert even if launched. A checked (unblocked) device can still reconnect itself when powered on, because BlueZ accepts incoming connections; block it to prevent that.
 
-Re-confirmed 2026-10-29 for audio devices: no audio watcher was added; a proposed tiny D-Bus dialer was declined, so audio-device management stays foreground-only. Device-initiated reconnect is NOT reliable for the Boult BassBox: it stayed disconnected through a 45 s watch until `bt-select` or `Win+Shift+Enter` dialed it. The Katana keyboard is different: as of 2026-11-01 it relies on BlueZ's native BLE HID reconnect policy, not a custom resident Python daemon.
+Re-confirmed 2026-10-29 for audio devices: no audio watcher was added; a proposed tiny D-Bus dialer was declined, so audio-device management stays foreground-only. Device-initiated reconnect is NOT reliable for the Boult BassBox: it stayed disconnected through a 45 s watch until `bt-select` or `Win+Shift+Enter` dialed it. The Katana keyboard is different: BlueZ native BLE HID retry remains the first layer, but live testing on 2026-11-02 showed its retry window can expire after extended keyboard sleep. The dedicated Katana reconnect service was therefore restored and is now implemented as a native C `sd-bus`/`sd-event` helper rather than a resident Python/GLib process.
 
 Historical behavior, kept for debugging if a dialer ever comes back:
 
@@ -55,14 +55,13 @@ Historical behavior, kept for debugging if a dialer ever comes back:
 - Refused state = every selected device has `Blocked: yes` -> pressing allows: unblock all + non-blocking background connect each (zero UI lag, and no external `timeout` wrapper so the dial ends at the BlueZ page timeout instead of being killed mid-page). Anything else -> pressing refuses: block all + disconnect each. Notification lists the device names.
 - Keyboard auto-connect: Katana S K2 (`CC:04:2E:90:66:02`) uses BLE HID over GATT (HoGP UUID `00001812-0000-1000-8000-00805f9b34fb`). As a BLE peripheral, it advertises when awake. Auto-connect relies on:
   1. `/etc/udev/rules.d/50-bluetooth-power.rules`: keeps the Realtek RTL8852 Bluetooth radio available for wake advertisements.
-  2. `/etc/bluetooth/main.conf.d/10-autoconnect.conf`: BlueZ native reconnect is the single owner. The live policy includes HID in `ReconnectUUIDs`, `ReconnectAttempts=7`, backoff `1,2,4,8,16,32,64`, and the configured LE auto-connect scan window.
-  3. `xremap.service`: runs `--watch=config,device`, so it dynamically discovers input devices without an external restart daemon.
+  2. `~/.local/bin/bt-keyboard-reconnect` & `bt-keyboard-reconnect.service`: Native C `sd-bus`/`sd-event` daemon. The managed source is `~/.local/bin/bt-keyboard-reconnect.c`; the tiny launcher content-addresses that source, compiles it only when needed into `~/.cache/bt-keyboard-reconnect/bt-keyboard-reconnect`, then `exec`s the native binary. It catches BlueZ device/adapter events, uses non-blocking async `Device1.Connect()` with 2/5/10/30/60 s backoff, and subscribes to logind resume plus the real session `Unlock` signal. BlueZ native `ReconnectAttempts=7` can expire after extended keyboard sleep, so this daemon keeps reconnect functional without busy-polling.
+  3. `xremap.service`: runs `--watch=config,device`, so it dynamically discovers input devices without requiring full restarts; the reconnect daemon checks `/proc/<pid>/fd` and sysfs for the Katana input node, then uses the user systemd D-Bus `RestartUnit` method only if xremap missed the device.
   4. `/etc/udev/rules.d/99-xremap-keyboard.rules`: retained as a hardware-level attachment backstop for newly added keyboards.
-  5. `~/.local/bin/bt-katana`: one-shot manual/login/resume fallback only. It no longer restarts xremap after a connection because device watching/udev already own attachment.
-  The former `bt-keyboard-reconnect.service` and `~/.local/bin/bt-keyboard-reconnect` were removed on 2026-11-01 after live logs showed duplicate retry attempts colliding with BlueZ (`Operation already in progress`) and periodic retry wakeups while BlueZ already had native reconnect enabled.
+  5. `~/.local/bin/bt-katana`: one-shot manual/login/resume fallback without external timeout wrappers (which previously caused `br-connection-busy`).
 - Safety: the selection is intersected with `audio_devices()`, so the Katana S K2 (or any input-only device) is never blocked or disconnected even if its MAC is hand-added to `selection.txt`.
 - `bt-refuse-toggle --dry-run` previews without changing state. Notifications via mako (`x-canonical-private-synchronous:bt-refuse`).
-- Verified 2026-11-01: audio auto-dialer services and the former keyboard reconnect daemon are all stopped/removed; no custom Bluetooth daemon process remains. TUI/manual audio controls remain foreground-only, while the Katana keyboard uses BlueZ native reconnect and xremap device watching.
+- Verified 2026-11-02: audio auto-dialer services remain completely absent and foreground-only (`bt-select` / `bt-refuse-toggle`). The Katana native reconnect daemon was A/B tested live: an explicit disconnect produced `Connected=false`, the 2 s reconnect timer issued `Device1.Connect()`, the keyboard returned connected, and xremap remained attached. A separate test stopped xremap; the daemon detected the missing attachment and restored `xremap.service` through user D-Bus. The native process settled around 3.5 MiB RSS / 0.4 MiB PSS and dormant `do_epoll_wait`.
 
 ## Debugging quickies
 

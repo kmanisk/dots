@@ -2,12 +2,19 @@
 # rofi-games / game launcher menu (Alt+g) powered by fuzzel.
 export PATH="$HOME/.local/bin:$PATH"
 
-options="Counter-Strike 2\nELDEN RING + LSFG (120 FPS)\nELDEN RING Randomizer (Reroll Seed)\nELDEN RING Fog Gate Randomizer (GUI)\nGrand Theft Auto IV + LSFG (165 FPS)\nDARK SOULS III + LSFG\nDS3 Randomizer Config (GUI)\nSteam library\nConfigure LSFG (GUI)\nKill game"
+options="Bloodborne (bbport)\nBloodborne Settings (GUI)\nCounter-Strike 2\nELDEN RING (Stable / no LSFG)\nELDEN RING + LSFG 4x (experimental)\nELDEN RING Randomizer (Reroll Seed)\nELDEN RING Fog Gate Randomizer (GUI)\nSteam library\nConfigure LSFG (GUI)\nKill game"
 REG="$HOME/.config/rofi/epic-games.list"
 if [ -f "$REG" ]; then
     while IFS='|' read -r title _ _; do
         [ -n "$title" ] && options="$options\n$title"
     done < "$REG"
+fi
+
+CUSTOM_REG="$HOME/.config/rofi/custom-games.list"
+if [ -f "$CUSTOM_REG" ]; then
+    while IFS='|' read -r title _ _; do
+        [ -n "$title" ] && options="$options\n$title"
+    done < "$CUSTOM_REG"
 fi
 
 chosen=$(echo -e "$options" | fuzzel --dmenu --prompt "❯ " --width 38 --lines 12)
@@ -24,14 +31,23 @@ if [ -f "$REG" ]; then
     fi
 fi
 
+# Custom Proton / Wine games registry hit? Dispatch generic runner.
+if [ -f "$CUSTOM_REG" ]; then
+    CMD="$(awk -F'|' -v sel="$chosen" '$1==sel{print $2; exit}' "$CUSTOM_REG")"
+    if [ -n "$CMD" ]; then
+        ( nohup bash -c "exec $CMD" >/dev/null 2>&1 & )
+        exit 0
+    fi
+fi
+
 case "$chosen" in
+    *"Bloodborne (bbport)"*) ( nohup bash -c 'echo "=== $(date "+%F %T") Alt+g Bloodborne launch ===" >>/tmp/bloodborne.log; exec bloodborne-run >>/tmp/bloodborne.log 2>&1' & ) ;;
+    *"Bloodborne Settings"*) ( nohup bash -c 'exec bloodborne-run --config >>/tmp/bloodborne-config.log 2>&1' & ) ;;
     *"Counter-Strike 2"*)   ( nohup env STEAM_DGPU=1 steam steam://rungameid/730 >/dev/null 2>&1 & ) ;;
-    *"ELDEN RING + LSFG"*) ( nohup bash -c 'echo "=== $(date "+%F %T") Alt+g launch ===" >>/tmp/eldenring-lsfg.log; exec eldenring-lsfg >>/tmp/eldenring-lsfg.log 2>&1' & ) ;;
+    *"ELDEN RING (Stable / no LSFG)"*) ( nohup bash -c 'echo "=== $(date "+%F %T") Alt+g stable launch (LSFG disabled) ===" >>/tmp/eldenring-lsfg.log; exec env ENABLE_LSFG=0 eldenring-lsfg >>/tmp/eldenring-lsfg.log 2>&1' & ) ;;
+    *"ELDEN RING + LSFG 4x (experimental)"*) ( nohup bash -c 'echo "=== $(date "+%F %T") Alt+g experimental LSFG 4x launch ===" >>/tmp/eldenring-lsfg.log; exec env ENABLE_LSFG=1 eldenring-lsfg >>/tmp/eldenring-lsfg.log 2>&1' & ) ;;
     *"Fog Gate"*)          ( nohup eldenring-fog-gui >/dev/null 2>&1 & ) ;;
     *"ELDEN RING Randomizer"*|*"ER Randomizer"*) ( nohup eldenring-randomizer-gui >/dev/null 2>&1 & ) ;;
-    *"Grand Theft Auto IV"*) ( nohup env STEAM_DGPU=1 steam steam://rungameid/12210 >/dev/null 2>&1 & ) ;;
-    *"DARK SOULS III + LSFG"*) ( nohup bash -c 'echo "=== $(date "+%F %T") Alt+g DS3 launch ===" >>/tmp/darksouls3.log; exec darksouls3-run >>/tmp/darksouls3.log 2>&1' & ) ;;
-    *"DS3 Randomizer"*) ( nohup ds3-randomizer-gui >/dev/null 2>&1 & ) ;;
     *"Steam"*)          ( nohup env STEAM_DGPU=1 steam-workspace >/dev/null 2>&1 & ) ;;
     *"Configure LSFG"*) ( nohup ~/.local/bin/lsfg-vk-ui >/dev/null 2>&1 & ) ;;
     *"Kill"*)           killgame ;;

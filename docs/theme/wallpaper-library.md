@@ -1,15 +1,14 @@
 # Central Theme Wallpaper Library
 
-This document owns the curated wallpaper layer used by the system theme engine.
-It is intentionally separate from palette compilation: `theme-set` stays network-free,
-while wallpaper discovery and downloading are explicit maintenance operations.
+This document owns wallpaper source selection for the system theme engine. Palette compilation remains separate and no resident downloader exists. Runtime wallpaper selection is Omarchy-repository-only: repository-backed Omarchy themes use their own artwork, while non-Omarchy palettes use exact/alias identity first and then an artistic/technical semantic Omarchy donor. The older shared curated library remains maintenance/audit data and is not consumed by runtime switching.
 
 ## Goals
 
-- Every exposed system theme has local wallpaper choices.
-- Wallpapers are high resolution and suitable for the 1920x1200 panel.
-- Automated selection is conservative about generative-AI provenance.
-- Images are stored once and shared across themes instead of duplicated per theme.
+- Repository-backed Omarchy themes use only artwork from their own theme scope. Discovery version 3 derives canonical wallpaper roots from recorded candidates, so shared-monorepo built-ins cannot see sibling themes' backgrounds.
+- Non-Omarchy palettes may borrow wallpapers only from Omarchy repositories; their colors/theme identity remain unchanged.
+- Exact normalized name/display matches are automatic, known naming differences live in `~/.config/theme/wallpaper-aliases.json`, and unmatched palettes use `~/.config/theme/wallpaper-preferences.json` for artistic/technical semantic donor selection.
+- Semantic ranking is artistic-first, preserves light/dark polarity, and scores theme accent/background/Base16 colors inside the chosen style pool. Solid palette background is only the final fallback, never a generic or stale image.
+- Wallpapers remain suitable for the 1920x1200 panel; shared-library automated selection remains conservative about generative-AI provenance.
 - Source/provenance metadata is durable in chezmoi; image binaries are not committed to Git.
 - No resident service, watcher, polling loop, or background downloader is introduced.
 
@@ -18,19 +17,28 @@ while wallpaper discovery and downloading are explicit maintenance operations.
 ```text
 ~/.local/share/theme/wallpapers/
 ├── manifest.json       # theme mapping + source/provenance metadata; chezmoi-managed
-├── assets/             # curated shared WebP assets
-└── upstream/           # preserved Omarchy/repository wallpapers used as fallback
+├── assets/             # curated shared WebP assets for explicit matched-library use
+└── upstream/           # repository-authoritative per-theme images (Omarchy/GitHub)
 ```
 
 The former `~/.cache/theme/wallpapers/` tree was migrated into `upstream/` and is no longer
 the active storage location. `~/.local/state/theme/wallpaper/<theme>` still stores the
 selected filename and `~/.config/current_wallpaper` remains the session-persistence pointer.
 
+## Runtime source precedence
+
+**Explicit opt-out takes precedence:** For a curated color-only theme with `assets.background_mode="solid"`, `theme_engine.wallpaper_policy` returns `kind=none` before any own/alias/identity/semantic image matching. `theme-set` applies the theme's own `BASE00` as a Sway solid background instead of downloading or showing wallpaper imagery. Existing themes without this marker continue to use the precedence rules below; see [`curated-solid-palettes.md`](curated-solid-palettes.md).
+
+1. If the theme is a GitHub-backed Omarchy community import or official Omarchy built-in, `upstream/<theme>/` is authoritative. Runtime cycling additionally filters manifest entries through the theme's canonical wallpaper roots; for a shared monorepo such as `omacom/omarchy`, `omarchy-everforest` therefore sees only `themes/everforest/backgrounds/`, never sibling theme directories. The global curated mapping is ignored even if legacy `manifest.json` entries exist.
+2. Import/update treats conventional `backgrounds/`, `wallpapers/`, or `bg/` paths as authoritative and preserves every image in those sets before deleting the temporary clone; Omarchy repository wallpapers have no numeric count cap. Non-UI images elsewhere in the repository are used only when no conventional wallpaper path exists, so lock-screen/README/support artwork is not mixed into a valid background set.
+3. Older imports and caches are repaired lazily from that exact GitHub repository by an on-demand detached one-shot worker. A manifest without repository discovery version 3 triggers a blobless Git tree scan, reuses matching local images, and fetches only newly discovered backgrounds; this upgrades retired five-item caches without a fleet-wide blocking refresh. `theme-set` never waits for network I/O, repeated workers for the same palette are deduplicated, and a completed result is applied only if the same theme is still active. There is no resident fetcher or polling daemon.
+4. For a non-Omarchy palette, `theme_engine.wallpaper_policy` resolves exact normalized theme/display identity and explicit aliases first. Unmatched palettes are classified by name plus palette characteristics into `artistic_oil`, `light_artistic`, `natural_art`, `terminal_technical`, `technical_blueprint`, or `synth_technical`; the donor pool and ranking bias are declared in `~/.config/theme/wallpaper-preferences.json`.
+5. Semantic donor choice filters to repository-backed Omarchy themes with real wallpaper candidates, prefers the same light/dark polarity, then scores accent/background/Base16 color distance plus a small configured aesthetic rank. The donor's `upstream/<donor>/` images are used without replacing the active palette.
+6. Shared `assets/` / Wallhaven mappings are ignored by `theme-set` and `theme-wallpaper`. They remain available only to `theme-wallpaper-library` maintenance/audit commands. If no usable Omarchy donor exists, `theme-set` uses the theme background as a Sway `solid_color` and removes the stale `current_wallpaper` pointer.
+
 ## Curated source policy
 
-Automated curation currently uses Wallhaven's public API because it provides searchable
-resolution/aspect/color metadata plus per-wallpaper tags and source attribution.
-The maintenance helper uses:
+The **shared matched library only** uses Wallhaven's public API because it provides searchable resolution/aspect/color metadata plus per-wallpaper tags and source attribution. This policy does not replace artwork bundled by repository-authoritative Omarchy themes. The maintenance helper uses:
 
 - category: General only;
 - purity: SFW only;
@@ -49,9 +57,7 @@ sync never selects them.
 
 ## Palette matching and deduplication
 
-The 327-theme fleet still uses Wallhaven's discrete color buckets for conservative source
-discovery, but bucket membership is no longer authoritative for theme assignment. After assets
-are local, `theme-wallpaper-library sync` profiles the actual image pixels with a small
+The shared-library maintenance manifest still uses Wallhaven's discrete color buckets for conservative source discovery, but bucket membership is not authoritative for assignment and the resulting mapping is ignored by repository-authoritative Omarchy themes. After assets are local, `theme-wallpaper-library sync` profiles the actual image pixels with a small
 ImageMagick histogram and records dominant/chromatic colors, mean luminance, and mean saturation.
 Each theme is then scored globally against all vetted assets using:
 
@@ -116,9 +122,11 @@ theme-wallpaper set 1 <theme>
 theme-wallpaper list <theme>
 ```
 
-`theme-wallpaper` prefers the curated library. If a theme has no curated mapping, its repository
-wallpapers under `upstream/` remain a compatibility fallback. `theme-set` only reads already-local
-files and never invokes the network.
+Wallpaper notifications are intentionally terse: normal wallpaper application shows only `Wallpaper changed`; implementation details such as source filename, image format, and Sway fill mode are not exposed in the desktop toast. Automatic first-use hydration is silent while downloading, so it does not add a progress toast; manual fetch operations and actionable failures remain diagnostic.
+
+**No-op on singleton/solid wallpapers (2026-11-07):** The three interactive cycling commands (`theme-wallpaper next`, `prev`, `random`) return successfully and silently when the active theme explicitly declares `assets.background_mode="solid"`, when exactly one valid scoped cached image exists, or when no valid cache exists and the effective repository candidate set contains at most one image. These paths never start Git discovery, downloader, `wset`/Sway reapplication or a notification, and do not update the wallpaper pointer. Even if an incomplete multi-image fetch yields just one cached file, cycling leaves it alone. Explicit `theme-wallpaper fetch`/`refresh` still downloads on request, and themes with two or more images continue cycling normally; the normal `theme-set` hydration lifecycle is separate from this shortcut. This is a local fast-path guard, not a network check.
+
+`theme-wallpaper` is semantic-identity-aware: Omarchy/GitHub themes use only `upstream/<theme>/`; non-Omarchy palettes use only `upstream/<donor>/` from exact/alias/identity or semantic Omarchy resolution. `theme-set` is always network-free on its critical path. If donor bytes are missing, it temporarily uses `solid_color` and launches `theme-wallpaper hydrate <theme>` as a detached one-shot job. That worker downloads outside the global lock and acquires the lock only to verify the theme is still active and apply the finished image. It never substitutes a shared-library image.
 
 ## Verified state, 2026-11-01
 
@@ -145,9 +153,7 @@ audit:                       PASS
 All 63 selected assets are pre-2022 and passed the stored explicit-AI tag/source check. The fleet
 contains uploads from 2014 through 2021 only.
 
-Live Sway cycling was verified on `waffle-cat`: `next` switched to curated slot 2/3 and `set 1`
-returned to slot 1/3 with successful Sway IPC. `~/.config/current_wallpaper` points into
-`~/.local/share/theme/wallpapers/assets/`, and the obsolete cache path was not recreated.
+The shared-library audit above remains valid for its 327 historical mapping entries, but those entries are no longer runtime authority for any theme. Repository-authoritative behavior was separately verified on 2026-11-01: `windows-dark-mode` preserved all 6/6 files from `OldJobobo/omarchy-windows-dark-mode-theme`, ignored its legacy Wallhaven mapping, and applied `upstream/windows-dark-mode/01-01-midnight-ninja-cat.jpg`; an uncached `alberta` theme fetched exactly its four repository backgrounds and exposed no curated asset as local state.
 
 ## Source of truth and Git policy
 
@@ -167,7 +173,7 @@ keeps the dotfiles repository small while preserving enough metadata to rebuild 
   manifest has been written.
 - The currently displayed wallpaper is preserved during pruning even if a catalog refresh no
   longer references it, preventing a broken `current_wallpaper` path mid-session.
-- Existing Omarchy/repository wallpapers remain under `upstream/` as a local fallback.
+- Omarchy/repository wallpapers under `upstream/` are authoritative for those themes; a shared curated asset is never substituted for them.
 
 ## Rebuild
 
@@ -175,9 +181,9 @@ After restoring the chezmoi repository on a new installation:
 
 ```bash
 theme-sync
+omarchy-import --catalog
 theme-wallpaper-library sync
 theme-wallpaper-library audit
 ```
 
-The first command reconstructs the theme fleet; the second reconstructs the central wallpaper
-assets from the managed provenance manifest/source policy; the third verifies complete coverage.
+`omarchy-import --catalog` reconstructs repository-authoritative Omarchy caches while each temporary clone is available. The shared-library commands rebuild/audit the historical curated pool; runtime theme switching does not consume it. Older imported metadata/cache state self-heals lazily on first use through the discovery-versioned repository manifest, so the runtime can expose the full current recorded repository background set without a bulk catalog download.

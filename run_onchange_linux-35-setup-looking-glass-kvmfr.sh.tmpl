@@ -1,0 +1,64 @@
+{{- if eq .chezmoi.os "linux" -}}
+#!/usr/bin/env bash
+set -euo pipefail
+
+DRY_RUN="${CHEZMOI_DRY_RUN:-0}"
+
+# Looking Glass KVMFR: one 64 MiB static framebuffer for the Nano11 1920x1200
+# SDR guest. This is a kernel module/device only; no userspace daemon is added.
+if ! pacman -Q looking-glass-module-dkms >/dev/null 2>&1; then
+    exit 0
+fi
+
+MODPROBE_FILE="/etc/modprobe.d/kvmfr.conf"
+MODULES_FILE="/etc/modules-load.d/kvmfr.conf"
+UDEV_FILE="/etc/udev/rules.d/99-kvmfr.rules"
+
+MODPROBE_CONTENT='options kvmfr static_size_mb=64'
+MODULES_CONTENT='kvmfr'
+UDEV_CONTENT='SUBSYSTEM=="kvmfr", KERNEL=="kvmfr0", GROUP="video", MODE="0660"'
+
+write_root_file() {
+    local path="$1" content="$2"
+    local current=""
+    [ -r "$path" ] && current="$(cat "$path")"
+    [ "$current" = "$content" ] && return 1
+    if [ "$DRY_RUN" -eq 0 ]; then
+        printf '%s\n' "$content" | sudo install -Dm0644 /dev/stdin "$path"
+    else
+        echo "[DRY-RUN] Would write $path"
+    fi
+    return 0
+}
+
+write_root_file "$MODPROBE_FILE" "$MODPROBE_CONTENT" || true
+write_root_file "$MODULES_FILE" "$MODULES_CONTENT" || true
+write_root_file "$UDEV_FILE" "$UDEV_CONTENT" || true
+
+if [ "$DRY_RUN" -eq 0 ]; then
+    sudo udevadm control --reload-rules
+    if ! lsmod | grep -q '^kvmfr '; then
+        sudo modprobe kvmfr
+    fi
+    sudo udevadm trigger --subsystem-match=kvmfr || true
+
+    if [ ! -c /dev/kvmfr0 ]; then
+        echo "ERROR: kvmfr loaded but /dev/kvmfr0 was not created" >&2
+        exit 1
+    fi
+    # Never unload shared memory while QEMU/a client may be using it. A loaded
+    # older allocation must be resized deliberately with Windows shut down.
+    python3 - <<'PY'
+import fcntl
+import os
+
+fd = os.open('/dev/kvmfr0', os.O_RDONLY)
+try:
+    size = fcntl.ioctl(fd, 0x7544)  # KVMFR_DMABUF_GETSIZE, _IO('u', 0x44)
+finally:
+    os.close(fd)
+if size != 64 * 1024 * 1024:
+    raise SystemExit('ERROR: stop Nano11 and reload kvmfr with static_size_mb=64; do not unload it while in use')
+PY
+fi
+{{ end }}

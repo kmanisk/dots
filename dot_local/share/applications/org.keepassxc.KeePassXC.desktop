@@ -1,0 +1,17 @@
+[Desktop Entry]
+Name=KeePassXC
+GenericName=Password Manager
+Comment=KeePassXC with on-demand vault synchronization
+Exec=sh -c "exec ~/.local/bin/keepassxc-sync"
+TryExec=sh
+Icon=keepassxc
+StartupWMClass=keepassxc
+StartupNotify=false
+Terminal=false
+Type=Application
+Version=1.5
+Categories=Utility;Security;Qt;
+MimeType=application/x-keepass2;
+SingleMainWindow=true
+X-GNOME-SingleWindow=true
+Keywords=security;privacy;password-manager;yubikey;password;keepass;

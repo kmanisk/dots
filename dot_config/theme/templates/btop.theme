@@ -2,34 +2,34 @@
 # Theme: nvchad (compiled from {{name}})
 
 # Main background, empty for terminal default, or hex code
-theme[main_bg]=""
+theme[main_bg]="{{btop_main_bg}}"
 
 # Main text color
-theme[main_fg]="{{fg}}"
+theme[main_fg]="{{btop_main_fg}}"
 
 # Title color for boxes
-theme[title]="{{fg}}"
+theme[title]="{{btop_title}}"
 
 # Highlight color for keyboard shortcuts
-theme[hi_fg]="{{accent}}"
+theme[hi_fg]="{{btop_hi_fg}}"
 
 # Background color of selected item in processes box
-theme[selected_bg]="{{one_bg2}}"
+theme[selected_bg]="{{btop_selected_bg}}"
 
 # Foreground color of selected item in processes box
-theme[selected_fg]="{{bright_fg}}"
+theme[selected_fg]="{{btop_selected_fg}}"
 
 # Color of inactive/disabled text
-theme[inactive_fg]="{{grey_fg}}"
+theme[inactive_fg]="{{btop_inactive_fg}}"
 
 # Color of text appearing on top of graphs, i.e uptime and current network graph scaling
-theme[graph_text]="{{grey_fg}}"
+theme[graph_text]="{{btop_graph_text}}"
 
 # Background color of the percentage meters (battery, memory, CPU bars)
 theme[meter_bg]="{{meter_bg}}"
 
 # Misc colors for processes box including mini cpu graphs, details memory graph and details status text
-theme[proc_misc]="{{accent}}"
+theme[proc_misc]="{{btop_proc_misc}}"
 
 # Cpu box outline color
 theme[cpu_box]="{{btop_cpu_box}}"

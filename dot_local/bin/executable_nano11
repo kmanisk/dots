@@ -1,0 +1,644 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Native QEMU/KVM Nano11 launcher. No Dockur or Podman runtime.
+BASE="${NANO11_BASE:-/mnt/Games/VirtualMachines/dockur-nano11}"
+STORAGE="$BASE/storage"
+SHARED="$BASE/shared"
+DISK="$STORAGE/data.qcow2"
+RDP_HOST="127.0.0.1"
+RDP_PORT="3389"
+RDP_USER="${NANO11_RDP_USER:-$(id -un)}"
+RDP_TITLE="FreeRDP: ${RDP_HOST}"
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+RDP_LOCK="$RUNTIME_DIR/nano11-rdp.lock"
+VM_LOCK="$RUNTIME_DIR/nano11-vm.lock"
+LG_LOCK="$RUNTIME_DIR/nano11-looking-glass.lock"
+LG_SHM="/dev/kvmfr0"
+SPICE_DIR="$RUNTIME_DIR/nano11-spice"
+SPICE_SOCKET="$SPICE_DIR/spice.sock"
+QEMU_DIR="$RUNTIME_DIR/nano11-qemu"
+QEMU_PIDFILE="$QEMU_DIR/qemu.pid"
+QEMU_MONITOR="$QEMU_DIR/monitor.sock"
+TPM_SOCKET="$QEMU_DIR/swtpm.sock"
+TPM_PIDFILE="$QEMU_DIR/swtpm.pid"
+QEMU_LOG="$HOME/.local/state/nano11/qemu.log"
+LG_TITLE="Nano11"
+LG_APP_ID="nano11-looking-glass"
+LG_CLIENT="$HOME/.local/bin/looking-glass-client-idd"
+LG_WORKSPACE="10"
+INTEL_PF="0000:00:02.0"
+INTEL_VF="0000:00:02.1"
+
+native_requirements() {
+    local bin
+    for bin in qemu-system-x86_64 swtpm python3 sudo; do
+        command -v "$bin" >/dev/null 2>&1 || {
+            echo "nano11: required native command unavailable: $bin" >&2
+            return 127
+        }
+    done
+    [ -f "$DISK" ] && [ -s "$STORAGE/windows_secure.rom" ] &&
+      [ -s "$STORAGE/windows_secure.vars" ] &&
+      [ -s "$STORAGE/windows_secure.tpm" ] || {
+        echo "nano11: disk or OVMF/TPM state missing. Restore the saved VM; do NOT initialize it." >&2
+        return 1
+    }
+    [ -c /dev/kvm ] && [ -r /dev/kvm ] && [ -w /dev/kvm ] || {
+        echo "nano11: KVM inaccessible." >&2; return 1;
+    }
+    [ -c "$LG_SHM" ] && [ -r "$LG_SHM" ] && [ -w "$LG_SHM" ] || {
+        echo "nano11: 64 MiB KVMFR device missing or inaccessible: $LG_SHM" >&2
+        return 1
+    }
+    local kvmfr_bytes
+    kvmfr_bytes="$(python3 - <<'PYKVM'
+import os,fcntl
+fd=os.open('/dev/kvmfr0',os.O_RDONLY)
+try: print(fcntl.ioctl(fd,0x7544))
+finally: os.close(fd)
+PYKVM
+)" || return 1
+    [ "$kvmfr_bytes" = 67108864 ] || {
+        echo "nano11: KVMFR size is $kvmfr_bytes, expected 67108864 bytes" >&2
+        return 1
+    }
+}
+
+vm_pid() {
+    local pid
+    [ -r "$QEMU_PIDFILE" ] || return 1
+    read -r pid <"$QEMU_PIDFILE" || return 1
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+    kill -0 "$pid" 2>/dev/null || return 1
+    [ -r "/proc/$pid/cmdline" ] || return 1
+    # Match the actual guest disk instead of trusting a possibly stale pidfile.
+    tr '\0' '\n' <"/proc/$pid/cmdline" | grep -Fx "file=$DISK,id=data3,format=qcow2,cache=none,aio=native,discard=unmap,detect-zeroes=on,if=none" >/dev/null || return 1
+    printf '%s\n' "$pid"
+}
+
+running() {
+    vm_pid >/dev/null 2>&1
+}
+
+stop_tpm() {
+    local pid
+    if [ -r "$TPM_PIDFILE" ]; then
+        read -r pid <"$TPM_PIDFILE" || pid=""
+        if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null || true
+        fi
+    fi
+    rm -f "$TPM_PIDFILE" "$TPM_SOCKET"
+}
+
+start_tpm() {
+    rm -f "$TPM_SOCKET"
+    swtpm socket -t -d --tpm2 \
+        --tpmstate "backend-uri=file://$STORAGE/windows_secure.tpm" \
+        --ctrl "type=unixio,path=$TPM_SOCKET" \
+        --pid "file=$TPM_PIDFILE"
+    for _ in $(seq 1 50); do
+        [ -S "$TPM_SOCKET" ] && return 0
+        sleep 0.1
+    done
+    echo "nano11: swtpm control socket did not start" >&2
+    return 1
+}
+
+prepare_intel_vf() {
+    local numvfs driver group group_count
+
+    [ -r "/sys/bus/pci/devices/$INTEL_PF/sriov_numvfs" ] || {
+        echo "nano11: Intel SR-IOV PF is unavailable: $INTEL_PF" >&2
+        return 1
+    }
+
+    numvfs="$(cat "/sys/bus/pci/devices/$INTEL_PF/sriov_numvfs")"
+    if [ "$numvfs" = "0" ]; then
+        echo 1 | sudo tee "/sys/bus/pci/devices/$INTEL_PF/sriov_numvfs" >/dev/null
+    elif [ "$numvfs" != "1" ]; then
+        echo "nano11: expected exactly one Intel VF, found $numvfs" >&2
+        return 1
+    fi
+
+    [ -e "/sys/bus/pci/devices/$INTEL_VF" ] || {
+        echo "nano11: Intel VF did not appear: $INTEL_VF" >&2
+        return 1
+    }
+
+    sudo modprobe vfio-pci
+    driver="$(basename "$(readlink -f "/sys/bus/pci/devices/$INTEL_VF/driver" 2>/dev/null || true)")"
+    if [ "$driver" != "vfio-pci" ]; then
+        if [ -L "/sys/bus/pci/devices/$INTEL_VF/driver" ]; then
+            echo "$INTEL_VF" | sudo tee "/sys/bus/pci/devices/$INTEL_VF/driver/unbind" >/dev/null
+        fi
+        echo vfio-pci | sudo tee "/sys/bus/pci/devices/$INTEL_VF/driver_override" >/dev/null
+        echo "$INTEL_VF" | sudo tee /sys/bus/pci/drivers/vfio-pci/bind >/dev/null
+    fi
+
+    group="$(basename "$(readlink -f "/sys/bus/pci/devices/$INTEL_VF/iommu_group")")"
+    group_count="$(find "/sys/kernel/iommu_groups/$group/devices" -mindepth 1 -maxdepth 1 -printf . | wc -c)"
+    [ "$group_count" = "1" ] || {
+        echo "nano11: refusing VFIO attach; IOMMU group $group has $group_count devices" >&2
+        return 1
+    }
+
+    VFIO_GROUP_NODE="/dev/vfio/$group"
+    [ -c "$VFIO_GROUP_NODE" ] || {
+        echo "nano11: VFIO group node missing: $VFIO_GROUP_NODE" >&2
+        return 1
+    }
+    sudo chgrp video "$VFIO_GROUP_NODE"
+    sudo chmod 0660 "$VFIO_GROUP_NODE"
+    [ -r "$VFIO_GROUP_NODE" ] && [ -w "$VFIO_GROUP_NODE" ] || {
+        echo "nano11: current user cannot access $VFIO_GROUP_NODE" >&2
+        return 1
+    }
+}
+
+start_vm_locked() {
+    if running; then
+        echo "nano11: already running (native QEMU, pid $(vm_pid))"
+        return 0
+    fi
+    native_requirements
+    mkdir -p "$QEMU_DIR" "$SPICE_DIR" "$HOME/.local/state/nano11"
+    chmod 0700 "$QEMU_DIR" "$SPICE_DIR" "$HOME/.local/state/nano11"
+    # Never attach the existing disk twice (e.g. an accidentally restarted Dockur VM).
+    if command -v fuser >/dev/null 2>&1 && fuser -s "$DISK" 2>/dev/null; then
+        echo "nano11: guest disk is in use; refusing concurrent VM access" >&2
+        return 1
+    fi
+    # Restore stale state only after verifying no QEMU owns this guest.
+    rm -f "$QEMU_PIDFILE" "$QEMU_MONITOR" "$SPICE_SOCKET"
+    prepare_intel_vf
+    # Remote execution has a 1.5 GiB memory cgroup. Detached QEMU processes
+    # inherit it and get OOM killed. Start an on-demand systemd system unit
+    # running as this user but with sufficient native VM memory and memlock.
+    if ! sudo -n systemd-run --unit=nano11-qemu --collect --no-block \
+        --property="User=$(id -un)" \
+        --property="Group=$(id -gn)" \
+        --property=SupplementaryGroups=video \
+        --property=LimitMEMLOCK=infinity \
+        --property="Environment=XDG_RUNTIME_DIR=$RUNTIME_DIR" \
+        --property="Environment=HOME=$HOME" \
+        -- "$0" __run_instance; then
+        echo "nano11: cannot start on-demand VM systemd unit" >&2
+        return 1
+    fi
+    for _ in $(seq 1 150); do
+        if running && [ -S "$SPICE_SOCKET" ]; then
+            echo "nano11: native QEMU running (pid $(vm_pid)); no Dockur/Podman"
+            return 0
+        fi
+        if sudo -n systemctl is-failed --quiet nano11-qemu.service 2>/dev/null; then
+            echo "nano11: VM unit failed; see $QEMU_LOG and journalctl -u nano11-qemu" >&2
+            return 1
+        fi
+        sleep 0.1
+    done
+    echo "nano11: native QEMU startup timed out; see $QEMU_LOG" >&2
+    return 1
+}
+
+run_instance() {
+    # Runs as the regular user in the temporary systemd VM unit. The unit
+    # owns both QEMU and the short-lived TPM helper, cleaning up after exit.
+    trap 'stop_tpm' EXIT
+    start_tpm
+    local net
+    net="user,id=hostnet0,ipv4=on,ipv6=off,hostfwd=tcp:127.0.0.1:3389-:3389,hostfwd=udp:127.0.0.1:3389-:3389"
+    local -a qemu=(
+        -nodefaults
+        -name "Windows,process=windows"
+        -machine "type=q35,smm=on,graphics=off,vmport=off,dump-guest-core=off,hpet=off,accel=kvm"
+        -enable-kvm -global "kvm-pit.lost_tick_policy=discard"
+        -cpu "host,kvm=on,l3-cache=on,+hypervisor,migratable=no,-vmx,+invtsc,hv_passthrough"
+        -smp "12,sockets=1,dies=1,cores=6,threads=2" -m 4G
+        -pidfile "$QEMU_PIDFILE"
+        -monitor "unix:$QEMU_MONITOR,server=on,wait=off,nodelay=on"
+        -serial none
+        -device "qemu-xhci,id=xhci,p2=7,p3=7" -device usb-tablet
+        -netdev "$net"
+        -device "virtio-net-pci,id=net0,netdev=hostnet0,romfile=,mac=$(cat "$STORAGE/windows.mac")"
+        -drive "file=$DISK,id=data3,format=qcow2,cache=none,aio=native,discard=unmap,detect-zeroes=on,if=none"
+        -object "iothread,id=io2"
+        -device "virtio-scsi-pci,id=data3,bus=pcie.0,addr=0xa,iothread=io2,hotplug=off"
+        -device "scsi-hd,drive=data3,bus=data3.0,channel=0,scsi-id=0,lun=0,rotation_rate=1,bootindex=3"
+        -rtc "base=localtime"
+        -global "ICH9-LPC.disable_s3=1" -global "ICH9-LPC.disable_s4=1"
+        -global "driver=cfi.pflash01,property=secure,value=on"
+        -drive "file=$STORAGE/windows_secure.rom,if=pflash,unit=0,format=raw,readonly=on"
+        -drive "file=$STORAGE/windows_secure.vars,if=pflash,unit=1,format=raw"
+        -chardev "socket,id=chrtpm,path=$TPM_SOCKET"
+        -tpmdev "emulator,id=tpm0,chardev=chrtpm"
+        -device "tpm-tis,tpmdev=tpm0"
+        -object "rng-random,id=objrng0,filename=/dev/urandom"
+        -device "virtio-rng-pci,rng=objrng0,id=rng0,bus=pcie.0"
+        -fw_cfg "name=opt/org.tianocore/UninstallMemAttrProtocol,string=y"
+        -object "memory-backend-file,id=looking-glass,mem-path=$LG_SHM,size=64M,share=on"
+        -device "ivshmem-plain,id=shmem0,memdev=looking-glass"
+        -spice "unix=on,addr=$SPICE_SOCKET,disable-ticketing=on,max-refresh-rate=165"
+        -audiodev "spice,id=spiceaudio"
+        -device intel-hda -device "hda-duplex,audiodev=spiceaudio"
+        -device "vfio-pci,host=$INTEL_VF,rombar=0"
+    )
+
+    # The Intel VF supplies Windows D3D and Looking Glass capture. Keep the
+    # VirtIO device as a simple recovery VGA without EGL, Vulkan or Venus.
+    qemu+=(-display none -device virtio-vga)
+
+    : >"$QEMU_LOG"
+    taskset -c 0-11 qemu-system-x86_64 "${qemu[@]}" >>"$QEMU_LOG" 2>&1
+}
+
+start_vm() {
+    flock -x -o "$VM_LOCK" "$0" __start_locked
+}
+
+send_powerdown() {
+    python3 - "$QEMU_MONITOR" <<'PYHMP'
+import socket,sys
+s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+s.settimeout(2)
+s.connect(sys.argv[1])
+try: s.recv(4096)
+except socket.timeout: pass
+s.sendall(b'system_powerdown\n')
+s.close()
+PYHMP
+}
+
+stop_vm_locked() {
+    if ! running; then
+        echo "nano11: already stopped"
+        stop_tpm
+        return 0
+    fi
+    local pid
+    pid="$(vm_pid)" || return 1
+    send_powerdown || {
+        echo "nano11: ACPI monitor unavailable; refusing force stop" >&2
+        return 1
+    }
+    for _ in $(seq 1 120); do
+        if ! running; then
+            stop_tpm
+            echo "nano11: clean Windows ACPI shutdown complete"
+            return 0
+        fi
+        sleep 1
+    done
+    echo "nano11: guest did not shut down; leaving VM running rather than risking disk corruption" >&2
+    return 1
+}
+
+stop_vm() {
+    flock -x -o "$VM_LOCK" "$0" __stop_locked
+}
+
+status_vm() {
+    if running; then
+        echo "nano11: native QEMU running; pid $(vm_pid); SPICE=$SPICE_SOCKET; RDP=127.0.0.1:3389"
+    else
+        echo "nano11: native QEMU stopped (no resident VM process)"
+    fi
+}
+
+open_recovery() {
+    # Dockur's extra web server is removed. Use the existing RDP recovery path.
+    start_vm
+    open_rdp
+}
+
+sway_socket() {
+    if [ -z "${SWAYSOCK:-}" ] && command -v systemctl >/dev/null 2>&1; then
+        SWAYSOCK="$(systemctl --user show-environment 2>/dev/null | sed -n 's/^SWAYSOCK=//p' | head -n1)"
+        [ -n "$SWAYSOCK" ] && export SWAYSOCK
+    fi
+}
+
+lg_window_id() {
+    local id
+    command -v swaymsg >/dev/null 2>&1 || return 1
+    command -v jq >/dev/null 2>&1 || return 1
+    sway_socket
+    id="$(swaymsg -t get_tree 2>/dev/null \
+        | jq -r --arg app "$LG_APP_ID" --arg title "$LG_TITLE" \
+          '.. | objects | select((.app_id? == $app) or (.name? == $title)) | .id' \
+        | head -n1)"
+    [ -n "$id" ] && [ "$id" != "null" ] || return 1
+    printf '%s\n' "$id"
+}
+
+focus_glass() {
+    local id
+    id="$(lg_window_id)" || return 1
+    swaymsg "[con_id=$id] focus" >/dev/null 2>&1 || return 1
+}
+
+wait_spice() {
+    for _ in $(seq 1 960); do
+        [ -S "$SPICE_SOCKET" ] && return 0
+        running || return 1
+        sleep 0.125
+    done
+    echo "nano11: SPICE socket did not become ready: $SPICE_SOCKET" >&2
+    return 1
+}
+
+open_glass() {
+    local client_pid log="$RUNTIME_DIR/nano11-looking-glass.log" ready=no
+    if focus_glass; then
+        echo "nano11: Looking Glass window focused"
+        return 0
+    fi
+
+    exec 7>"$LG_LOCK"
+    if ! flock -n 7; then
+        for _ in $(seq 1 80); do
+            if focus_glass; then
+                echo "nano11: Looking Glass window focused"
+                return 0
+            fi
+            sleep 0.125
+        done
+        echo "nano11: Looking Glass client is already starting" >&2
+        return 0
+    fi
+
+    if focus_glass; then
+        echo "nano11: Looking Glass window focused"
+        return 0
+    fi
+
+    [ -x "$LG_CLIENT" ] || {
+        echo "nano11: matching Looking Glass IDD client is unavailable: $LG_CLIENT" >&2
+        return 127
+    }
+    [ -r "$LG_SHM" ] && [ -w "$LG_SHM" ] || {
+        echo "nano11: Looking Glass shared memory is unavailable: $LG_SHM" >&2
+        return 1
+    }
+    wait_spice || return 1
+
+    env \
+        XDG_RUNTIME_DIR="$RUNTIME_DIR" \
+        WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-1}" \
+        "$LG_CLIENT" \
+            "lgmp:shmDevice=$LG_SHM" \
+            lgmp:allowDMA=yes \
+            "win:title=$LG_TITLE" \
+            "win:appId=$LG_APP_ID" \
+            win:fullScreen=yes \
+            win:setGuestRes=no \
+            win:fpsMin=-1 \
+            win:showFPS=no \
+            input:escapeKey=KEY_RIGHTCTRL \
+            input:captureOnStart=yes \
+            input:captureOnFocus=yes \
+            input:rawMouse=no \
+            spice:enable=yes \
+            "spice:host=$SPICE_SOCKET" \
+            spice:port=0 \
+            spice:input=yes \
+            spice:captureOnStart=yes \
+            spice:clipboard=yes \
+            spice:audio=yes >"$log" 2>&1 &
+    client_pid=$!
+
+    # A SPICE connection or a local FPS counter does not prove guest video.
+    # This client logs Format only after receiving an actual transport frame.
+    for _ in $(seq 1 120); do
+        if grep -q ' | .* | Format: ' "$log"; then
+            ready=yes
+            break
+        fi
+        kill -0 "$client_pid" 2>/dev/null || break
+        sleep 0.25
+    done
+    if [ "$ready" != yes ]; then
+        kill "$client_pid" 2>/dev/null || true
+        wait "$client_pid" 2>/dev/null || true
+        exec 7>&-
+        echo "nano11: no Looking Glass video frame; see $log" >&2
+        return 1
+    fi
+    # Once a real frame arrived, closing the client leaves Windows running.
+    wait "$client_pid" || true
+
+}
+
+move_glass_to_workspace() {
+    local id workspace="$1" fullscreen="${2:-no}"
+    id="$(lg_window_id || rdp_window_id)" || return 1
+    sway_socket >/dev/null 2>&1 || return 1
+    swaymsg "[con_id=$id] move container to workspace number $workspace" >/dev/null 2>&1 || return 1
+    swaymsg "workspace number $workspace" >/dev/null 2>&1 || return 1
+    if [ "$fullscreen" = "yes" ]; then
+        swaymsg "[con_id=$id] fullscreen enable, focus" >/dev/null 2>&1 || return 1
+    else
+        swaymsg "[con_id=$id] fullscreen disable, focus" >/dev/null 2>&1 || return 1
+    fi
+}
+
+windows_workspace() {
+    sway_socket >/dev/null 2>&1 && swaymsg "workspace number $LG_WORKSPACE" >/dev/null 2>&1 || true
+    launch_vm
+}
+
+move_glass_here() {
+    local ws
+    sway_socket >/dev/null 2>&1 || return 1
+    ws="$(swaymsg -t get_workspaces 2>/dev/null | jq -r '.[] | select(.focused == true) | .num' | head -n1)"
+    [ -n "$ws" ] && [ "$ws" != "null" ] || return 1
+    if ! { lg_window_id || rdp_window_id; } >/dev/null 2>&1; then
+        launch_vm &
+        for _ in $(seq 1 1440); do
+            { lg_window_id || rdp_window_id; } >/dev/null 2>&1 && break
+            sleep 0.125
+        done
+    fi
+    move_glass_to_workspace "$ws" no
+}
+
+rdp_window_id() {
+    local id
+    command -v swaymsg >/dev/null 2>&1 || return 1
+    command -v jq >/dev/null 2>&1 || return 1
+
+    if [ -z "${SWAYSOCK:-}" ] && command -v systemctl >/dev/null 2>&1; then
+        SWAYSOCK="$(systemctl --user show-environment 2>/dev/null | sed -n 's/^SWAYSOCK=//p' | head -n1)"
+        [ -n "$SWAYSOCK" ] && export SWAYSOCK
+    fi
+
+    id="$(
+        swaymsg -t get_tree 2>/dev/null             | jq -r --arg title "$RDP_TITLE"                 '.. | objects | select(.name? == $title) | .id'             | head -n1
+    )"
+    [ -n "$id" ] && [ "$id" != "null" ] || return 1
+    printf '%s\n' "$id"
+}
+
+focus_rdp() {
+    local id
+    id="$(rdp_window_id)" || return 1
+    swaymsg "[con_id=$id] focus" >/dev/null 2>&1 || return 1
+    return 0
+}
+
+wait_rdp() {
+    if python3 - "$RDP_HOST" "$RDP_PORT" <<'PYRDP'
+import socket
+import sys
+import time
+
+host = sys.argv[1]
+port = int(sys.argv[2])
+request = bytes.fromhex("030000130ee000000000000100080003000000")
+deadline = time.monotonic() + 150
+
+while time.monotonic() < deadline:
+    try:
+        with socket.create_connection((host, port), timeout=1.0) as sock:
+            sock.settimeout(1.0)
+            sock.sendall(request)
+            response = sock.recv(64)
+            if len(response) >= 11 and response[:2] == b"\x03\x00" and response[5] == 0xD0:
+                raise SystemExit(0)
+    except OSError:
+        pass
+    time.sleep(0.25)
+
+raise SystemExit(1)
+PYRDP
+    then
+        return 0
+    fi
+
+    echo "nano11: RDP did not become ready at ${RDP_HOST}:${RDP_PORT}" >&2
+    return 1
+}
+
+open_rdp() {
+    local runtime_dir wayland_display
+
+    # A repeated Start/Open action should reveal the existing Windows session,
+    # not create a second RDP client.
+    if focus_rdp; then
+        echo "nano11: RDP window focused"
+        return 0
+    fi
+
+    # Serialize RDP clients. Windows only keeps one interactive RDP session for
+    # this lab account, so two clients racing during login can disconnect each
+    # other. If another client is still connecting, wait briefly for its Sway
+    # surface and focus that instead of spawning a duplicate.
+    exec 9>"$RDP_LOCK"
+    if ! flock -n 9; then
+        for _ in $(seq 1 80); do
+            if focus_rdp; then
+                echo "nano11: RDP window focused"
+                return 0
+            fi
+            sleep 0.125
+        done
+        echo "nano11: RDP client is already starting" >&2
+        return 0
+    fi
+
+    # Close the tiny race between the initial visibility check and taking the
+    # lock.
+    if focus_rdp; then
+        echo "nano11: RDP window focused"
+        return 0
+    fi
+
+    command -v sdl-freerdp3 >/dev/null 2>&1 || {
+        echo "nano11: sdl-freerdp3 is unavailable; install the freerdp package" >&2
+        return 127
+    }
+
+    wait_rdp || return 1
+
+    runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    wayland_display="${WAYLAND_DISPLAY:-wayland-1}"
+
+    # Keep the Windows RDP surface fixed at the panel's native 1920x1200 and
+    # scale it client-side when the Sway window changes size. FreeRDP's dynamic
+    # display-control resize path can leave newly exposed regions black on
+    # Wayland/Sway; smart sizing avoids that server-side surface recreation.
+    # AVC444 is used on this localhost-only LAN-class connection for high image
+    # quality while preserving the lightweight native RDP path.
+    #
+    # The Nano11 lab account intentionally has no password. RDP is published
+    # only on host loopback, and the guest's blank-password remote-logon policy
+    # is enabled specifically for this disposable VM. Feed all FreeRDP options
+    # over stdin so even the empty password does not appear in argv.
+    {
+        printf '%s\n' \
+            "/v:${RDP_HOST}:${RDP_PORT}" \
+            "/u:${RDP_USER}" \
+            "/p:" \
+            "/cert:ignore" \
+            "/size:1920x1200" \
+            "+smart-sizing" \
+            "/gfx:AVC444:on" \
+            "+clipboard" \
+            "/sound:sys:pulse" \
+            "/network:lan" \
+            "/drive:shared,${SHARED}"
+    } | env \
+        XDG_RUNTIME_DIR="$runtime_dir" \
+        WAYLAND_DISPLAY="$wayland_display" \
+        LANG=en_US.utf8 \
+        LC_ALL=en_US.utf8 \
+        sdl-freerdp3 /args-from:stdin
+}
+
+launch_vm() {
+    local recovery_id
+    start_vm
+    sway_socket >/dev/null 2>&1 && swaymsg "workspace number $LG_WORKSPACE" >/dev/null 2>&1 || true
+    # Disconnect recovery RDP before selecting an existing native window too.
+    # The guest task returns its disconnected lab session to the console.
+    if [ -x "$LG_CLIENT" ] && recovery_id="$(rdp_window_id)"; then
+        swaymsg "[con_id=$recovery_id] kill" >/dev/null 2>&1 || true
+    fi
+    if lg_window_id >/dev/null 2>&1; then
+        move_glass_to_workspace "$LG_WORKSPACE" yes
+        return $?
+    fi
+    if [ -x "$LG_CLIENT" ]; then
+        if open_glass; then
+            return 0
+        fi
+    fi
+    echo "nano11: Looking Glass unavailable; falling back to RDP" >&2
+    if command -v sdl-freerdp3 >/dev/null 2>&1; then
+        open_rdp
+        return $?
+    fi
+    open_recovery
+}
+
+case "${1:-launch}" in
+    __start_locked) start_vm_locked ;;
+    __run_instance) run_instance ;;
+    __stop_locked)  stop_vm_locked ;;
+    launch)  launch_vm ;;
+    start)   start_vm ;;
+    stop)    stop_vm ;;
+    restart) stop_vm; start_vm ;;
+    status)  status_vm ;;
+    logs)    exec tail -n 50 -F "$QEMU_LOG" ;;
+    glass)     start_vm; open_glass ;;
+    workspace) windows_workspace ;;
+    here)      move_glass_here ;;
+    rdp)       start_vm; open_rdp ;;
+    open)    open_recovery ;;
+    *)
+        echo "usage: nano11 {launch|start|stop|restart|status|logs|glass|workspace|here|rdp|open}" >&2
+        exit 2
+        ;;
+esac

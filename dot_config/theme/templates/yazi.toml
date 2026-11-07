@@ -19,10 +19,19 @@ tab_inactive = { fg = "{{fg}}", bg = "{{one_bg2}}" }
 border_symbol = "│"
 border_style = { fg = "{{grey}}" }
 
+# Square file indicator edges (Yazi 25.12+); persists through theme changes.
+[indicator]
+padding = { open = "▐", close = "▌" }
+
+# Suppress rounded separators even when tabs are displayed.
+[tabs]
+sep_inner = { open = "", close = "" }
+sep_outer = { open = "", close = "" }
+
+# Use square-edged status blocks rather than rounded powerline caps.
 [status]
-separator_open = ""
-separator_close = ""
-separator_style = { fg = "{{one_bg2}}", bg = "{{one_bg2}}" }
+sep_left = { open = "", close = "" }
+sep_right = { open = "", close = "" }
 
 mode_normal = { fg = "{{black}}", bg = "{{blue}}", bold = true }
 mode_select = { fg = "{{black}}", bg = "{{green}}", bold = true }

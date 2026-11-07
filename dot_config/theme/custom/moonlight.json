@@ -1,0 +1,45 @@
+{
+  "accent": "#40ffff",
+  "assets": {
+    "background_mode": "solid",
+    "preview": null,
+    "wallpaper": null,
+    "wallpapers": []
+  },
+  "base_16": {
+    "BASE00": "#212337",
+    "BASE01": "#403c64",
+    "BASE02": "#596399",
+    "BASE03": "#748cd6",
+    "BASE04": "#a1abe0",
+    "BASE05": "#a3ace1",
+    "BASE06": "#b4a4f4",
+    "BASE07": "#ef43fa",
+    "BASE08": "#ff5370",
+    "BASE09": "#f67f81",
+    "BASE0A": "#ffc777",
+    "BASE0B": "#2df4c0",
+    "BASE0C": "#04d1f9",
+    "BASE0D": "#40ffff",
+    "BASE0E": "#b994f1",
+    "BASE0F": "#ecb2f0"
+  },
+  "capabilities": {
+    "browser": false,
+    "icons": false,
+    "palette": true,
+    "terminal": true,
+    "wallpaper": false
+  },
+  "display_name": "Moonlight",
+  "name": "moonlight",
+  "source": {
+    "author": "Jeremy Swinarton (https://github.com/jswinarton)",
+    "commit": "05e6e6f7e53a2745345ba3658b0172831ff54e9b",
+    "file_sha256": "0b2167add89299c896c24d481d9242278ea36cca2278ddb0103bbabefd29068b",
+    "palette_url": "https://raw.githubusercontent.com/tinted-theming/schemes/05e6e6f7e53a2745345ba3658b0172831ff54e9b/base16/moonlight.yaml",
+    "provider": "curated-base16",
+    "repository": "https://github.com/tinted-theming/schemes"
+  },
+  "type": "dark"
+}

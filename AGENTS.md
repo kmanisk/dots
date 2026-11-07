@@ -80,6 +80,7 @@ Agents operating only through GitHub, without the live workstation or its Git ho
 - Use `$HOME` or `~` rather than hardcoded usernames in portable configuration.
 - Do not hard-reset, clean, overwrite, or broadly reformat unrelated work.
 - Do not add persistent daemons when an on-demand mechanism is sufficient.
+- On every Linux app, virtualization, package or service change, review `docs/system/system-philosophy.md`, run the read-only `system-residency-audit` when the live machine is reachable, and check both `is-enabled` and `is-active` before/after. Default optional services to disabled-at-boot and implement an explicit start/stop lifecycle (or a transient unit); an active user-invoked workload is not an idle daemon. Document any justified exception. Do not stop a user's active VM/Android session solely to improve an audit score, and do not add a persistent audit watcher.
 - Keep documentation, scripts, source, comments, and README files free of emojis.
 
 ## Validation expectations

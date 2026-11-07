@@ -134,8 +134,8 @@ if systemctl --user list-unit-files "sway-session-save.service" &>/dev/null; the
     fi
 fi
 
-# 7. User Services: Bluetooth, Foot Server, and Desktop Commander Remote
-for user_svc in "bt-autoconnect.service" "foot-server.service" "desktop-commander.service"; do
+# 7. User Services: Katana Reconnect, Foot Server, and Desktop Commander Remote
+for user_svc in "bt-keyboard-reconnect.service" "foot-server.service" "desktop-commander.service"; do
     if systemctl --user list-unit-files "$user_svc" &>/dev/null; then
         if ! systemctl --user is-enabled "$user_svc" &>/dev/null; then
             echo "    [User-Service: Enabling] $user_svc..."
@@ -146,6 +146,17 @@ for user_svc in "bt-autoconnect.service" "foot-server.service" "desktop-commande
         fi
     fi
 done
+
+# 8. Syncthing is intentionally on-demand for KeePassXC sync. Keep it out of
+# default.target; keepassxc-sync starts/stops it only around sync windows.
+if systemctl --user list-unit-files "syncthing.service" &>/dev/null; then
+    if systemctl --user is-enabled --quiet "syncthing.service" 2>/dev/null; then
+        echo "    [Syncthing: On-demand] Disabling persistent user autostart..."
+        if [ "$DRY_RUN" -eq 0 ]; then
+            systemctl --user disable "syncthing.service" 2>/dev/null || true
+        fi
+    fi
+fi
 
 echo "==> System & user daemons reconciliation complete."
 {{ end }}

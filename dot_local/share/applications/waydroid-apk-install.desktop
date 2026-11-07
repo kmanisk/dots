@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Install in Waydroid
+Comment=Install Android package (.apk) into Waydroid
+Exec=waydroid-apk-install %F
+Icon=waydroid
+Terminal=false
+Type=Application
+MimeType=application/vnd.android.package-archive;
+Categories=System;Utility;
+Keywords=apk;android;waydroid;install;
+StartupNotify=true
+NoDisplay=false

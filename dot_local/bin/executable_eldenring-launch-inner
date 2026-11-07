@@ -10,15 +10,22 @@ export SteamGameId="1245620"
 export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_COMPAT_CLIENT_INSTALL_PATH:-$HOME/.local/share/Steam}"
 export STEAM_COMPAT_DATA_PATH="${STEAM_COMPAT_DATA_PATH:-$HOME/.local/share/Steam/steamapps/compatdata/2703476723}"
 
-# Ensure MangoHud is passed cleanly to Wine via Proton's user_settings.py
-# rather than exported in outer bash, so python3 never hooks MangoHud or dumps core on exit.
+# MangoHud is intentionally OFF by default for Elden Ring. On 2026-11-03 it
+# reproducibly froze startup at the white/black presentation surface under the
+# current Proton + VKD3D stack, with "VK_PRESENT_MODE_FIFO_RELAXED_KHR" warnings.
+# Keep an explicit diagnostic opt-in without exporting MangoHud into Proton's
+# own Python wrapper process.
 mkdir -p "$STEAM_COMPAT_DATA_PATH"
-cat << 'EOF' > "$STEAM_COMPAT_DATA_PATH/user_settings.py"
+if [ "${ELDENRING_MANGOHUD:-0}" = "1" ]; then
+    cat << 'EOF' > "$STEAM_COMPAT_DATA_PATH/user_settings.py"
 user_settings = {
     "MANGOHUD": "1",
     "MANGOHUD_CONFIGFILE": "/mnt/Games/NonSteamGames/ELDEN RING/Game/MangoHud.conf",
 }
 EOF
+else
+    printf 'user_settings = {\n}\n' > "$STEAM_COMPAT_DATA_PATH/user_settings.py"
+fi
 unset MANGOHUD
 unset MANGOHUD_CONFIG
 export VKD3D_CONFIG="no_upload_hvv,force_host_cached"
@@ -34,6 +41,17 @@ trap '' HUP
 ME2_DIR="/mnt/Games/NonSteamGames/ELDEN RING/ModEngine2/ModEngine-2.1.0.0-win64"
 GAME_DIR="/mnt/Games/NonSteamGames/ELDEN RING/Game"
 GAME_EXE="$GAME_DIR/eldenring.exe"
+
+# Keep EldenModLoader from duplicating DLLs owned by the managed ModEngine stack.
+# The source lives in chezmoi; the game directory itself is on the external NTFS
+# games volume and is synchronized at launch only when bytes differ.
+MOD_LOADER_SOURCE="$HOME/.config/eldenring/mod_loader_config.ini"
+MOD_LOADER_TARGET="$GAME_DIR/mod_loader_config.ini"
+if [ -f "$MOD_LOADER_SOURCE" ]; then
+    if [ ! -f "$MOD_LOADER_TARGET" ] || ! cmp -s "$MOD_LOADER_SOURCE" "$MOD_LOADER_TARGET"; then
+        cp -f "$MOD_LOADER_SOURCE" "$MOD_LOADER_TARGET"
+    fi
+fi
 
 # Select Proton runner
 if [ -f "$HOME/.local/share/Steam/compatibilitytools.d/proton-cachyos-slr/proton" ]; then
@@ -52,8 +70,21 @@ if [ -f "$ME2_DIR/modengine2_launcher.exe" ]; then
     elif [ -f "$ME2_DIR/config_eldenringrandomizer.toml" ]; then
         CONFIG_NAME="config_eldenringrandomizer.toml"
     fi
-    # Hand-managed stack (randomizer + hud, optionally imco). Preferred when present;
-    # the randomizer GUI only regenerates config_eldenringrandomizer.toml.
+
+    # Keep the stable Linux QoL stack outside the Randomizer GUI's generated
+    # config. The GUI may reroll/rewrite its own TOML freely; this profile only
+    # points at the randomizer output directory and layers runtime DLLs around it.
+    STACK_SOURCE="$HOME/.config/eldenring/config_randomizer_stack.toml"
+    STACK_CONFIG="$ME2_DIR/config_randomizer_stack.toml"
+    if [ -f "$STACK_SOURCE" ]; then
+        if [ ! -f "$STACK_CONFIG" ] || ! cmp -s "$STACK_SOURCE" "$STACK_CONFIG"; then
+            cp -f "$STACK_SOURCE" "$STACK_CONFIG"
+        fi
+        CONFIG_NAME="config_randomizer_stack.toml"
+    fi
+
+    # Optional hand-managed experimental stacks remain higher priority when
+    # deliberately enabled. They are currently parked with .disabled suffixes.
     if [ -f "$ME2_DIR/config_custom.toml" ]; then
         CONFIG_NAME="config_custom.toml"
     fi

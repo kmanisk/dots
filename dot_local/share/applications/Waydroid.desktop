@@ -7,8 +7,13 @@ Exec=waydroid-launcher
 TryExec=waydroid-launcher
 Icon=waydroid
 Categories=X-WayDroid-App;Utility;
-Actions=stop;
+Actions=restart;stop;
 X-Purism-FormFactor=Workstation;Mobile;
+
+[Desktop Action restart]
+Name=Restart Waydroid
+Exec=waydroid-restart
+Icon=waydroid
 
 [Desktop Action stop]
 Name=Stop Waydroid

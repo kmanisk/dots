@@ -1,0 +1,45 @@
+{
+  "accent": "#005f87",
+  "assets": {
+    "background_mode": "solid",
+    "preview": null,
+    "wallpaper": null,
+    "wallpapers": []
+  },
+  "base_16": {
+    "BASE00": "#eeeeee",
+    "BASE01": "#c4c4c4",
+    "BASE02": "#9e9e9e",
+    "BASE03": "#858585",
+    "BASE04": "#6b6b6b",
+    "BASE05": "#5e5e5e",
+    "BASE06": "#525252",
+    "BASE07": "#444444",
+    "BASE08": "#d70000",
+    "BASE09": "#d75f00",
+    "BASE0A": "#d75f00",
+    "BASE0B": "#008700",
+    "BASE0C": "#0087af",
+    "BASE0D": "#005f87",
+    "BASE0E": "#8700af",
+    "BASE0F": "#af0000"
+  },
+  "capabilities": {
+    "browser": false,
+    "icons": false,
+    "palette": true,
+    "terminal": true,
+    "wallpaper": false
+  },
+  "display_name": "PaperColor Light",
+  "name": "papercolor-light",
+  "source": {
+    "author": "Jon Leopard (http://github.com/jonleopard), Tinted Theming (https://github.com/tinted-theming), based on PaperColor Theme (https://github.com/NLKNguyen/papercolor-theme)",
+    "commit": "05e6e6f7e53a2745345ba3658b0172831ff54e9b",
+    "file_sha256": "a85ff395951975eb80b434c35500eaa37b9739a36ca875225dcdda771c6c1332",
+    "palette_url": "https://raw.githubusercontent.com/tinted-theming/schemes/05e6e6f7e53a2745345ba3658b0172831ff54e9b/base16/papercolor-light.yaml",
+    "provider": "curated-base16",
+    "repository": "https://github.com/tinted-theming/schemes"
+  },
+  "type": "light"
+}

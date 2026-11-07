@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Focus a running native ChatGPT window; launch only if none exists.
+set -euo pipefail
+
+if swaymsg -t get_tree | jq -e '.. | objects | select(.type? == "con" and .app_id? == "chatgpt") | .id' >/dev/null 2>&1; then
+    exec swaymsg '[app_id="^chatgpt$"] focus'
+fi
+
+exec chatgpt

@@ -262,14 +262,26 @@ def synthesize_derived(palette, theme_type="dark"):
     }
 
 def synthesize_cava(palette, semantic, raw_cava=None):
-    """
-    Builds canonical Cava visualizer theme settings.
-    Uses the most prominent theme accent color across the whole visualizer (gradient = 0)
-    for a clean, unified aesthetic matching Omarchy theme standards.
-    """
+    """Build Cava settings, preserving an authored upstream Cava profile when valid."""
     b16 = palette.get("base_16", {})
-    accent = palette.get("accent") or b16.get("BASE0D") or b16.get("BASE0A") or "#58a6ff"
-    accent = clean_hex(accent)
+    accent = clean_hex(palette.get("accent") or b16.get("BASE0D") or b16.get("BASE0A") or "#58a6ff")
+
+    if isinstance(raw_cava, dict) and raw_cava.get("source") == "cava_theme":
+        colors = [clean_hex(str(value)) for value in (raw_cava.get("colors") or []) if HEX_RE.match(clean_hex(str(value)))]
+        if colors:
+            gradient = 1 if int(raw_cava.get("gradient") or 0) else 0
+            count = min(len(colors), max(1, int(raw_cava.get("gradient_count") or len(colors))))
+            foreground = raw_cava.get("foreground")
+            background = raw_cava.get("background")
+            return {
+                "source": "cava_theme",
+                "source_file": raw_cava.get("source_file"),
+                "gradient": gradient,
+                "gradient_count": count if gradient else 0,
+                "colors": colors[:count] if gradient else colors[:1],
+                "background": clean_hex(str(background)) if background and HEX_RE.match(clean_hex(str(background))) else "default",
+                "foreground": clean_hex(str(foreground)) if foreground and HEX_RE.match(clean_hex(str(foreground))) else colors[0],
+            }
 
     return {
         "source": "accent",

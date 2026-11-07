@@ -1,0 +1,309 @@
+#!/usr/bin/env python3
+"""Manage a separate, keyboard-only queue of expendable Sway utility windows.
+
+Only windows explicitly parked through this script receive a unique Sway mark.
+Never pull arbitrary windows from __i3_scratch: dedicated scratchpads belong to
+other launchers. No background daemon, process termination or polling.
+"""
+import fcntl
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+
+STATE_DIR = Path.home() / ".local/state/scratch"
+STATE_FILE = STATE_DIR / "utility-queue.json"
+MARK_PREFIX = "__utility_queue_"
+
+# Exact application identities, plus known desktop/browser and scratch prefixes.
+PROTECTED = {
+    "scratch-term", "scratch-notes", "scratch-files", "dc-term",
+    "spotify", "concord-term", "tgt-term", "clip-term", "yazi",
+    "foot", "footclient", "alacritty", "kitty", "wezterm", "ghostty",
+    "nvim", "neovim", "neovide", "zed", "code", "code-oss", "codium",
+    "brave", "brave-origin", "chromium", "google-chrome", "firefox", "zen",
+}
+PROTECTED_PREFIXES = ("scratch-", "brave-", "firefox-", "org.mozilla.firefox")
+PROTECTED_TITLE_PARTS = ("nvim", "neovim", "notes.md", "scratch-notes", "scratch-term")
+THUNAR_PROGRESS = ("copying", "moving", "extracting", "progress", "transferring")
+
+
+def children(node):
+    return (node.get("nodes") or []) + (node.get("floating_nodes") or [])
+
+
+def walk(node):
+    yield node
+    for child in children(node):
+        yield from walk(child)
+
+
+def marked(node):
+    return any(str(mark).startswith(MARK_PREFIX) for mark in node.get("marks") or [])
+
+
+def protected(node):
+    # Check descendants too: a floating_con wrapper can have no app_id even
+    # when the child is the user's terminal/editor/dedicated scratchpad.
+    for n in walk(node):
+        if n is not node and marked(n):
+            continue
+        app = (n.get("app_id") or "").lower()
+        props = n.get("window_properties") or {}
+        identifiers = (app, (props.get("class") or "").lower(),
+                       (props.get("instance") or "").lower())
+        title = (n.get("name") or "").lower()
+        if any(p in title for p in PROTECTED_TITLE_PARTS):
+            return True
+        for ident in identifiers:
+            if ident in PROTECTED or any(ident.startswith(p) for p in PROTECTED_PREFIXES):
+                return True
+            # Keep the main Thunar window safe; allow only its named progress
+            # dialogs to be parked. A dedicated scratch-files window remains immune.
+            if ident == "thunar" and not any(p in title for p in THUNAR_PROGRESS):
+                return True
+        # Existing manually/dedicated scratchpad entries are never adopted.
+        # Own managed nodes carry a unique mark and may be shown/hidden again.
+        if (n.get("scratchpad_state") not in (None, "none")
+                and not marked(node) and not marked(n)):
+            return True
+    return False
+
+
+def get_tree():
+    try:
+        return json.loads(subprocess.check_output(
+            ["swaymsg", "-t", "get_tree", "-r"], stderr=subprocess.DEVNULL))
+    except (OSError, subprocess.CalledProcessError, ValueError):
+        return None
+
+
+def sway(win_id, command):
+    result = subprocess.run(["swaymsg", f"[con_id={int(win_id)}] {command}"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            check=False)
+    return result.returncode == 0
+
+
+def find_workspace(tree):
+    def visit(node, workspace=None):
+        if node.get("type") == "workspace" and not str(node.get("name", "")).startswith("__"):
+            workspace = node
+        if node.get("focused"):
+            for child in children(node):
+                found = visit(child, workspace)
+                if found:
+                    return found
+            return workspace
+        for child in children(node):
+            found = visit(child, workspace)
+            if found:
+                return found
+        return None
+    return visit(tree)
+
+
+def scratchpad(tree):
+    return next((n for n in walk(tree) if n.get("name") == "__i3_scratch"), None)
+
+
+def focused_window(tree):
+    def visit(node, floating=None):
+        if node.get("type") == "floating_con":
+            floating = node
+        for child in children(node):
+            found = visit(child, floating)
+            if found:
+                return found
+        if node.get("focused") and node.get("type") in ("con", "floating_con"):
+            return floating or node
+        return None
+    return visit(tree)
+
+
+def managed_windows(tree):
+    return {int(n["id"]): n for n in walk(tree)
+            if n.get("id") is not None and marked(n) and not protected(n)}
+
+
+def read_state(tree):
+    try:
+        data = json.loads(STATE_FILE.read_text())
+    except (OSError, ValueError):
+        data = {}
+    managed = managed_windows(tree)
+    old = data.get("order", [])
+    order = [n for n in old if type(n) is int and n in managed]
+    order.extend(n for n in managed if n not in order)
+    last = data.get("last_shown")
+    return {"order": order, "last_shown": last if last in managed else None}
+
+
+def save_state(state):
+    # Atomic writes. A dead utility does not erase another helper's scratchpads.
+    fd, tmp = tempfile.mkstemp(prefix=".utility-", dir=STATE_DIR)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(state, f)
+            f.write("\n")
+        os.replace(tmp, STATE_FILE)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def visible_utilities(workspace, managed):
+    if workspace is None:
+        return []
+    return [n for n in workspace.get("floating_nodes") or []
+            if n.get("id") is not None and
+            (int(n["id"]) in managed or not protected(n))]
+
+
+def hidden_managed(tree, managed):
+    scratch = scratchpad(tree)
+    if not scratch:
+        return set()
+    ids = {int(n["id"]) for n in walk(scratch) if n.get("id") is not None}
+    return set(managed).intersection(ids)
+
+
+def park(node, state):
+    if not node or protected(node):
+        return False
+    win_id = int(node["id"])
+    if not marked(node) and not sway(win_id, f"mark --add {MARK_PREFIX}{win_id}"):
+        return False
+    if not sway(win_id, "move scratchpad"):
+        return False
+    if win_id not in state["order"]:
+        state["order"].append(win_id)
+    state["last_shown"] = win_id
+    return True
+
+
+def show(win_id, tree, state):
+    managed = managed_windows(tree)
+    if win_id not in managed:
+        return False
+    workspace = find_workspace(tree)
+    visible = [n for n in visible_utilities(workspace, managed)
+               if int(n["id"]) in managed]
+    if any(int(n["id"]) == win_id for n in visible):
+        result = sway(win_id, "focus")
+    else:
+        # A single progress overlay at a time; no foreign scratchpad touched.
+        for n in visible:
+            if not sway(n["id"], "move scratchpad"):
+                return False
+        if win_id not in hidden_managed(get_tree() or tree, managed):
+            return False
+        result = sway(win_id, "scratchpad show, floating enable, move position center, focus")
+    if result:
+        state["last_shown"] = win_id
+    return result
+
+
+def toggle(tree, state):
+    managed = managed_windows(tree)
+    workspace = find_workspace(tree)
+    focused = focused_window(tree)
+    visible = visible_utilities(workspace, managed)
+    if focused and any(int(n["id"]) == focused.get("id") for n in visible):
+        return park(focused, state)
+    if visible:
+        return park(visible[-1], state)
+    hidden = hidden_managed(tree, managed)
+    # Only restore windows this helper owns. Prefer the last viewed window,
+    # then the most recently parked one. Cycling updates last_shown.
+    candidates = [n for n in reversed(state["order"]) if n in hidden]
+    if state.get("last_shown") in candidates:
+        return show(state["last_shown"], tree, state)
+    return show(candidates[0], tree, state) if candidates else False
+
+
+def cycle(tree, state):
+    managed = managed_windows(tree)
+    if not managed:
+        return False
+    workspace = find_workspace(tree)
+    visible = [n for n in visible_utilities(workspace, managed)
+               if int(n["id"]) in managed]
+    hidden = hidden_managed(tree, managed)
+    candidates = [n for n in state["order"]
+                  if n in hidden or any(int(v["id"]) == n for v in visible)]
+    if not candidates:
+        return False
+    shown = next((int(n["id"]) for n in visible if n.get("focused")), None)
+    pivot = shown if shown in candidates else state.get("last_shown")
+    target = candidates[(candidates.index(pivot) + 1) % len(candidates)] if pivot in candidates else candidates[0]
+    return show(target, tree, state)
+
+
+def pick(tree, state):
+    managed = managed_windows(tree)
+    workspace = find_workspace(tree)
+    visible = {int(n["id"]) for n in visible_utilities(workspace, managed)}
+    hidden = hidden_managed(tree, managed)
+    candidates = [n for n in state["order"] if n in hidden or n in visible]
+    if not candidates:
+        return False
+    rows = []
+    for win_id in candidates:
+        node = managed[win_id]
+        desc = str(node.get("name") or node.get("app_id") or "Utility").replace("\n", " ")
+        rows.append(f"{desc[:95]} [#{win_id}]")
+    try:
+        response = subprocess.run(["fuzzel", "--dmenu", "--prompt=Utilities > "],
+                                  input="\n".join(rows) + "\n", capture_output=True,
+                                  text=True, check=False)
+    except OSError:
+        return False
+    if response.returncode != 0 or response.stdout.strip() not in rows:
+        return False
+    idx = rows.index(response.stdout.strip())
+    return show(candidates[idx], get_tree() or tree, state)
+
+
+def main(argv):
+    command = argv[0] if argv else "toggle"
+    if command not in ("toggle", "send", "next", "pick", "status"):
+        print("usage: scratch-utility-toggle [toggle|send|next|pick|status]", file=sys.stderr)
+        return 2
+    STATE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with (STATE_DIR / "utility.lock").open("a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        tree = get_tree()
+        if tree is None:
+            return 1
+        state = read_state(tree)
+        if command == "status":
+            hidden = hidden_managed(tree, managed_windows(tree))
+            for win_id in state["order"]:
+                node = managed_windows(tree)[win_id]
+                print(f"{win_id}\t{'parked' if win_id in hidden else 'visible'}\t{node.get('name') or node.get('app_id') or 'utility'}")
+            return 0
+        if command == "send":
+            node = focused_window(tree)
+            if protected(node) if node else True:
+                subprocess.run(["notify-send", "-t", "1400", "Utility Scratchpad",
+                                "Protected window: this shortcut will not move it."],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                               check=False)
+                return 0
+            changed = park(node, state)
+        elif command == "next":
+            changed = cycle(tree, state)
+        elif command == "pick":
+            changed = pick(tree, state)
+        else:
+            changed = toggle(tree, state)
+        if changed:
+            save_state(state)
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

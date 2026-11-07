@@ -158,6 +158,33 @@ def load_session():
     return None, "no saved session"
 
 
+def night_light_enabled():
+    """Read applied wl-gammarelay temperature, not daemon presence.
+
+    The daemon runs for brightness control even when night light is off.
+    Fall back to the user preference only if D-Bus is unavailable.
+    """
+    try:
+        result = subprocess.check_output(
+            ["busctl", "--user", "get-property", "rs.wl-gammarelay", "/",
+             "rs.wl.gammarelay", "Temperature"],
+            stderr=subprocess.DEVNULL, timeout=2, text=True).split()
+        if len(result) == 2 and result[0] == "q":
+            return int(result[1]) < 6500
+    except (OSError, subprocess.CalledProcessError,
+            subprocess.TimeoutExpired, ValueError):
+        pass
+    try:
+        preference = NL_STATE.read_text().strip().lower()
+        if preference in ("on", "1"):
+            return True
+        if preference in ("off", "0", "disabled"):
+            return False
+    except OSError:
+        pass
+    return None
+
+
 def proc_running(name):
     try:
         subprocess.check_output(["pgrep", "-x", name],
@@ -172,7 +199,7 @@ def current_desktop_state(sock):
     path uses. Values may be None when undetectable (never raises)."""
     cur = {"night_light": None, "bottom_bar": None}
     try:
-        cur["night_light"] = proc_running("wlsunset")
+        cur["night_light"] = night_light_enabled()
     except Exception:
         pass
     try:

@@ -226,19 +226,22 @@ def main():
     if len(sys.argv) >= 3:
         target_apps = [arg1]
         pct_str = sys.argv[2].strip()
-    elif not arg1.rstrip("%").isdigit():
+    elif arg1.lower() != "auto" and not arg1.rstrip("%").isdigit():
         sys.stderr.write(f"craft-scale: missing percentage for app '{arg1}'.\n")
         sys.exit(1)
 
-    try:
-        pct = int(pct_str.rstrip("%"))
-    except ValueError:
-        sys.stderr.write(f"craft-scale: invalid percentage '{pct_str}'. Must be an integer like 125 or 150.\n")
-        sys.exit(1)
+    if pct_str.lower() == "auto":
+        pct = 100
+    else:
+        try:
+            pct = int(pct_str.rstrip("%"))
+        except ValueError:
+            sys.stderr.write(f"craft-scale: invalid percentage '{pct_str}'. Must be an integer like 125 or 150, or 'auto'.\n")
+            sys.exit(1)
 
-    if pct < 50 or pct > 300:
-        sys.stderr.write("craft-scale: percentage must be between 50 and 300.\n")
-        sys.exit(1)
+        if pct < 50 or pct > 300:
+            sys.stderr.write("craft-scale: percentage must be between 50 and 300.\n")
+            sys.exit(1)
 
     apply_scale(pct, target_apps=target_apps)
 

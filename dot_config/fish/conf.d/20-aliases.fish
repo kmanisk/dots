@@ -52,6 +52,11 @@ alias start="dc-start"
 alias awake="keep-awake"
 alias caffeine="keep-awake"
 
+# Waydroid
+alias wd="waydroid-launcher"
+alias wds="waydroid-stop"
+alias wdr="waydroid-restart"
+
 # Modern CLI Replacements
 if type -q lsd
     alias ls="lsd"

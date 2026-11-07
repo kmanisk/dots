@@ -1,0 +1,40 @@
+#!/bin/sh
+set -eu
+
+src="$HOME/.local/bin/bt-keyboard-reconnect.c"
+cache_root="${XDG_CACHE_HOME:-$HOME/.cache}/bt-keyboard-reconnect"
+bin="$cache_root/bt-keyboard-reconnect"
+hash_file="$cache_root/source.sha256"
+
+mkdir -p "$cache_root"
+
+if ! command -v cc >/dev/null 2>&1; then
+    echo "bt-keyboard-reconnect: C compiler not found (install base-devel)" >&2
+    exit 1
+fi
+if ! command -v pkg-config >/dev/null 2>&1 || ! pkg-config --exists libsystemd; then
+    echo "bt-keyboard-reconnect: libsystemd development metadata not available" >&2
+    exit 1
+fi
+
+src_hash=$(sha256sum "$src" | cut -d" " -f1)
+old_hash=""
+[ -f "$hash_file" ] && old_hash=$(cat "$hash_file")
+
+if [ ! -x "$bin" ] || [ "$src_hash" != "$old_hash" ]; then
+    tmp="$bin.tmp.$$"
+    hash_tmp="$hash_file.tmp.$$"
+    trap 'rm -f "$tmp" "$hash_tmp"' EXIT INT TERM
+
+    cc -std=c11 -O2 -pipe -fno-plt -Wall -Wextra -Wpedantic \
+        -Wl,--as-needed -o "$tmp" "$src" $(pkg-config --cflags --libs libsystemd)
+    strip "$tmp" 2>/dev/null || true
+    chmod 755 "$tmp"
+    mv -f "$tmp" "$bin"
+
+    printf "%s\n" "$src_hash" > "$hash_tmp"
+    mv -f "$hash_tmp" "$hash_file"
+    trap - EXIT INT TERM
+fi
+
+exec "$bin" "$@"

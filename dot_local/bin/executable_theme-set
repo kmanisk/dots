@@ -3,7 +3,7 @@
 theme-set: Minimal, robust Base46 system theme compiler.
 Staged atomic file replacement, live IPC/RPC/signals where supported,
 zero resident processes / daemons / watchers.
-Optimized for low-latency verified reloads without detached background work.
+Optimized for low-latency verified reloads; missing wallpaper bytes hydrate in detached one-shot jobs.
 """
 import os
 import sys
@@ -11,14 +11,15 @@ import glob
 import json
 import re
 import subprocess
-import tempfile
 import math
 import colorsys
 import signal
 import fcntl
 import filecmp
-import shutil
 from contextlib import contextmanager
+
+sys.path.insert(0, os.path.expanduser("~/.local/lib"))
+from theme_engine.wallpaper_policy import resolve_omarchy_wallpaper_source, wallpaper_path_allowed
 
 
 STATE_DIR = os.path.expanduser("~/.local/state/theme")
@@ -30,10 +31,12 @@ QT6_COLOR_FILE = os.path.expanduser("~/.config/qt6ct/colors/nvchad.conf")
 LOCK_FILE = os.path.join(STATE_DIR, ".lock")
 WALLPAPER_ROOT_DIR = os.path.expanduser("~/.local/share/theme/wallpapers")
 WALLPAPER_CACHE_DIR = os.path.join(WALLPAPER_ROOT_DIR, "upstream")
-WALLPAPER_LIBRARY_MANIFEST = os.path.join(WALLPAPER_ROOT_DIR, "manifest.json")
 WALLPAPER_STATE_DIR = os.path.join(STATE_DIR, "wallpaper")
 CURRENT_WALLPAPER_FILE = os.path.expanduser("~/.config/current_wallpaper")
 WALLPAPER_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+REPOSITORY_DISCOVERY_VERSION = 3
+UPSTREAM_APPS_VERSION = 3
+UPSTREAM_APPS_DIR = os.path.expanduser("~/.local/share/theme/upstream-apps")
 
 os.makedirs(STATE_DIR, exist_ok=True)
 
@@ -68,13 +71,128 @@ def run_ipc(cmd, label, timeout=1.0):
         print(f"[WARN] {label} failed: {exc}", file=sys.stderr)
         return False
 
-def reload_nvim_socket(sock, name, timeout=1.5):
+def upstream_apps_overlay_path(theme_name):
+    return os.path.join(UPSTREAM_APPS_DIR, f"{theme_name}.json")
+
+
+def load_upstream_apps_overlay(theme_name, theme_data):
+    """Load a validated runtime overlay for legacy Omarchy imports."""
+    source = theme_data.get("source") or {}
+    repository = str(source.get("repository") or "").rstrip("/")
+    ref = str(source.get("commit") or source.get("branch") or "main")
+    if str(source.get("provider") or "").lower() != "omarchy" or not repository:
+        return None
+    try:
+        with open(upstream_apps_overlay_path(theme_name), "r", encoding="utf-8") as handle:
+            overlay = json.load(handle)
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
+    if overlay.get("version") != UPSTREAM_APPS_VERSION:
+        return None
+    if str(overlay.get("repository") or "").rstrip("/") != repository:
+        return None
+    if str(overlay.get("ref") or "") != ref:
+        return None
+    return overlay
+
+
+def merge_upstream_apps_overlay(theme_name, theme_data):
+    """Merge parsed app profiles without mutating the canonical cache object."""
+    overlay = load_upstream_apps_overlay(theme_name, theme_data)
+    if not overlay or not isinstance(overlay.get("apps"), dict):
+        return theme_data
+    merged = dict(theme_data)
+    apps = dict(theme_data.get("apps") or {})
+    apps.update(overlay.get("apps") or {})
+    merged["apps"] = apps
+    merged["upstream_apps_overlay"] = {
+        "version": overlay.get("version"),
+        "files": overlay.get("files") or {},
+    }
+    return merged
+
+
+def upstream_apps_need_hydration(theme_name, theme_data):
+    source = theme_data.get("source") or {}
+    if os.environ.get("THEME_UPSTREAM_REAPPLY") == "1":
+        return False
+    if str(source.get("provider") or "").lower() != "omarchy" or not source.get("repository"):
+        return False
+    assets = theme_data.get("assets") or {}
+    if assets.get("upstream_apps_version") == UPSTREAM_APPS_VERSION:
+        return False
+    return load_upstream_apps_overlay(theme_name, theme_data) is None
+
+
+def spawn_reload(cmd, label):
+    """Fire a reload-current-config command without extending theme latency.
+
+    These commands carry no theme values; if they finish after a newer switch,
+    they reload the newest already-promoted config and therefore cannot restore
+    stale colors.
+    """
+    try:
+        subprocess.Popen(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            close_fds=True,
+        )
+        return True
+    except Exception as exc:
+        print(f"[WARN] {label} launch failed: {exc}", file=sys.stderr)
+        return False
+
+
+def spawn_upstream_apps_hydration(theme_name):
+    helper = os.path.expanduser("~/.local/bin/theme-upstream-apps")
+    if not os.path.isfile(helper) or not os.access(helper, os.X_OK):
+        return False
+    try:
+        subprocess.Popen(
+            [helper, "hydrate", theme_name],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            close_fds=True,
+        )
+        return True
+    except Exception as exc:
+        print(f"[WARN] upstream app hydration launch failed for {theme_name}: {exc}", file=sys.stderr)
+        return False
+
+
+def spawn_wallpaper_hydration(theme_name):
+    """Hydrate a missing resolved wallpaper repository without blocking theme apply."""
+    helper = os.path.expanduser("~/.local/bin/theme-wallpaper")
+    if not os.path.isfile(helper) or not os.access(helper, os.X_OK):
+        return False
+    try:
+        subprocess.Popen(
+            [helper, "hydrate", theme_name],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            close_fds=True,
+        )
+        return True
+    except Exception as exc:
+        print(f"[WARN] wallpaper hydration launch failed for {theme_name}: {exc}", file=sys.stderr)
+        return False
+
+
+def reload_nvim_socket(sock, name, theme_type, timeout=1.5):
     """Apply a Base46 theme to one live NvChad socket and surface Lua failures."""
     lua_code = (
         'luaeval("(function() '
         'vim.g.system_theme_sync = true; '
         'local ok, err = xpcall(function() '
         f"require(\'nvconfig\').base46.theme = \'{name}\'; "
+        f"require(\'nvconfig\').base46.transparency = {str(theme_type != 'light').lower()}; "
         f"package.loaded[\'themes.{name}\'] = nil; "
         f"package.loaded[\'base46.themes.{name}\'] = nil; "
         "require('base46').load_all_highlights(); "
@@ -105,7 +223,7 @@ def reload_nvim_socket(sock, name, timeout=1.5):
     return False
 
 
-def refresh_nvim_disk_cache(name, timeout=2.5):
+def refresh_nvim_disk_cache(name, theme_type, timeout=2.5):
     """Compile Base46 cache through normal NvChad startup when no live socket can."""
     # `nvim --headless -l -` skips normal init loading, so nvconfig/base46 are not
     # available there. Use a normal headless startup and turn Lua failure into
@@ -113,6 +231,7 @@ def refresh_nvim_disk_cache(name, timeout=2.5):
     lua_cmd = (
         "lua local ok,err=xpcall(function() "
         f"require('nvconfig').base46.theme='{name}'; "
+        f"require('nvconfig').base46.transparency={str(theme_type != 'light').lower()}; "
         f"package.loaded['themes.{name}']=nil; "
         f"package.loaded['base46.themes.{name}']=nil; "
         "require('base46').load_all_highlights() "
@@ -143,12 +262,40 @@ def write_atomic(filepath, content):
     """Safely write content to filepath atomically via os.replace."""
     dirname = os.path.dirname(filepath)
     os.makedirs(dirname, exist_ok=True)
-    with tempfile.NamedTemporaryFile("w", dir=dirname, delete=False) as tf:
-        tf.write(content)
-        tf.flush()
-        os.fsync(tf.fileno())
-        temp_name = tf.name
-    os.replace(temp_name, filepath)
+    temp_name = f"{filepath}.tmp.{os.getpid()}"
+    try:
+        with open(temp_name, "w", encoding="utf-8") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, filepath)
+    finally:
+        try:
+            os.unlink(temp_name)
+        except FileNotFoundError:
+            pass
+
+
+def create_rollback_backup(source, destination):
+    """Keep old target bytes for rollback without importing/copying file metadata."""
+    try:
+        os.link(source, destination)
+        return
+    except OSError:
+        pass
+    with open(source, "rb") as src, open(destination, "wb") as dst:
+        while True:
+            chunk = src.read(65536)
+            if not chunk:
+                break
+            dst.write(chunk)
+
+
+def write_stage(filepath, content):
+    """Write private .next/ content without fsync; live targets are promoted transactionally later."""
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    with open(filepath, "w", encoding="utf-8") as handle:
+        handle.write(content)
 
 
 def write_atomic_if_changed(filepath, content):
@@ -213,56 +360,87 @@ def preserve_scale_managed_chrome(filename, rendered, current_path):
     return rendered
 
 
-def cached_theme_wallpaper(name):
-    """Return the remembered local wallpaper for a theme, without networking.
+def _upstream_wallpaper_images(name, source_theme=None):
+    directory = os.path.join(WALLPAPER_CACHE_DIR, name)
+    if not os.path.isdir(directory):
+        return []
+    manifest_path = os.path.join(directory, "manifest.json")
+    files = []
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as handle:
+            manifest = json.load(handle)
+        for item in manifest.get("files") or []:
+            filename = item.get("file") if isinstance(item, dict) else None
+            source_path = item.get("source") if isinstance(item, dict) else None
+            if source_theme is not None and source_path and not wallpaper_path_allowed(source_theme, str(source_path)):
+                continue
+            candidate = os.path.join(directory, str(filename or ""))
+            if filename and os.path.isfile(candidate) and os.path.splitext(candidate)[1].lower() in WALLPAPER_EXTENSIONS:
+                files.append(candidate)
+    except (OSError, json.JSONDecodeError, TypeError):
+        files = []
+    if files:
+        return files
+    return sorted(
+        os.path.join(directory, entry)
+        for entry in os.listdir(directory)
+        if os.path.splitext(entry)[1].lower() in WALLPAPER_EXTENSIONS
+        and os.path.isfile(os.path.join(directory, entry))
+    )
 
-    The centralized curated library is authoritative when the theme is mapped;
-    the migrated per-theme upstream cache remains a compatibility fallback.
-    """
+
+def cached_theme_wallpaper(name, theme_data=None):
+    """Return a local wallpaper without substituting another theme's artwork."""
     state_path = os.path.join(WALLPAPER_STATE_DIR, name)
     try:
         selected = open(state_path, "r", encoding="utf-8").read().strip()
     except OSError:
         selected = ""
 
-    library_images = []
-    try:
-        with open(WALLPAPER_LIBRARY_MANIFEST, "r", encoding="utf-8") as handle:
-            manifest = json.load(handle)
-        entry = (manifest.get("themes") or {}).get(name) or {}
-        assets = manifest.get("assets") or {}
-        for asset_id in entry.get("assets") or []:
-            asset = assets.get(asset_id) or {}
-            relative = str(asset.get("file") or "")
-            candidate = os.path.join(WALLPAPER_ROOT_DIR, relative)
-            if os.path.isfile(candidate) and os.path.splitext(candidate)[1].lower() in WALLPAPER_EXTENSIONS:
-                library_images.append(candidate)
-    except (OSError, json.JSONDecodeError, TypeError):
-        library_images = []
+    source = resolve_omarchy_wallpaper_source(name, theme_data or {}) if theme_data is not None else None
+    images = _upstream_wallpaper_images(source[0], source[1]) if source else []
 
-    if library_images:
-        if selected:
-            for candidate in library_images:
-                if os.path.basename(candidate) == selected:
-                    return candidate
-        return library_images[0]
-
-    directory = os.path.join(WALLPAPER_CACHE_DIR, name)
-    if not os.path.isdir(directory):
-        return None
-    images = sorted(
-        os.path.join(directory, entry)
-        for entry in os.listdir(directory)
-        if os.path.splitext(entry)[1].lower() in WALLPAPER_EXTENSIONS
-        and os.path.isfile(os.path.join(directory, entry))
-    )[:5]
     if not images:
         return None
     if selected:
-        candidate = os.path.join(directory, selected)
-        if candidate in images and os.path.isfile(candidate):
-            return candidate
+        for candidate in images:
+            if os.path.basename(candidate) == selected:
+                return candidate
     return images[0]
+
+
+def wallpaper_cache_needs_hydration(name, theme_data):
+    """Return True when a resolved repository cache needs lazy discovery/repair."""
+    source = resolve_omarchy_wallpaper_source(name, theme_data or {})
+    if not source:
+        return False
+    source_name, source_theme = source
+    source_meta = source_theme.get("source") or {}
+    expected_repository = str(source_meta.get("repository") or "").rstrip("/")
+    expected_ref = str(source_meta.get("commit") or source_meta.get("branch") or "main")
+    path = os.path.join(WALLPAPER_CACHE_DIR, source_name, "manifest.json")
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            manifest = json.load(handle)
+    except (OSError, json.JSONDecodeError, TypeError):
+        return True
+
+    if manifest.get("discovery_version") != REPOSITORY_DISCOVERY_VERSION:
+        return True
+    if str(manifest.get("repository") or "").rstrip("/") != expected_repository:
+        return True
+    if str(manifest.get("ref") or "") != expected_ref:
+        return True
+
+    files = manifest.get("files") or []
+    if not files:
+        return True
+    directory = os.path.join(WALLPAPER_CACHE_DIR, source_name)
+    for item in files:
+        filename = item.get("file") if isinstance(item, dict) else None
+        if not filename or not os.path.isfile(os.path.join(directory, str(filename))):
+            return True
+    return False
 
 
 def get_available_themes():
@@ -286,6 +464,70 @@ def scan_running_processes(names):
     except Exception:
         pass
     return found
+
+def foot_terminal_ptys(foot_pids):
+    """Find the slave PTYs of existing Foot windows, including server clients.
+
+    In Foot server mode, footclient is an IPC client with no terminal child.
+    The long-lived `foot --server` spawns each session as a direct child (Fish,
+    shell `-e`, or other command) which owns the slave PTY on fd 0/1/2.
+    Inspect only those direct child standard FDs; scanning every FD or every
+    /dev/pts would risk injecting OSC into unrelated terminals/sessions.
+    """
+    pts = set()
+    for pid in foot_pids:
+        try:
+            with open(f"/proc/{pid}/task/{pid}/children", "r", encoding="utf-8") as handle:
+                child_pids = (int(child) for child in handle.read().split())
+                for child_pid in child_pids:
+                    for fd in (1, 0, 2):
+                        try:
+                            target = os.readlink(f"/proc/{child_pid}/fd/{fd}")
+                        except OSError:
+                            continue
+                        if target.startswith("/dev/pts/") and target[9:].isdigit():
+                            pts.add(target)
+                            break
+        except (OSError, ValueError):
+            continue
+    return pts
+
+
+def broadcast_foot_palette(colors, foot_pids):
+    """Send the active Foot palette to windows without resetting screen cells.
+
+    Use one OSC write per PTY, including Foot server-hosted sessions. This
+    updates terminal-default and indexed colors; application-painted RGB cells
+    cannot be recolored until that TUI chooses to redraw them.
+    Returns (updated, discovered) for optional, non-mutating verification.
+    """
+    foot_pts = foot_terminal_ptys(foot_pids)
+    if not foot_pts:
+        return 0, 0
+    osc_seq = (
+        f"\x1b]10;{colors['foot_fg']}\x1b\\"
+        f"\x1b]11;{colors['foot_bg']}\x1b\\"
+        f"\x1b]12;{colors['foot_cursor']}\x1b\\"
+        f"\x1b]17;{colors['foot_selection_bg']}\x1b\\"
+        f"\x1b]19;{colors['foot_selection_fg']}\x1b\\"
+        + "".join(
+            f"\x1b]4;{index};{colors[f'foot_color{index}']}\x1b\\"
+            for index in range(16)
+        )
+    ).encode("utf-8")
+    updated = 0
+    for pts in sorted(foot_pts):
+        try:
+            # Avoid clearing or forcing redraw of in-progress fullscreen TUIs.
+            with open(pts, "wb", buffering=0) as f:
+                if f.write(osc_seq) == len(osc_seq):
+                    updated += 1
+        except OSError as exc:
+            print(f"[WARN] Foot OSC update for {pts}: {exc}", file=sys.stderr)
+    if os.environ.get("THEME_FOOT_TRACE") == "1":
+        print(f"[Foot] updated {updated}/{len(foot_pts)} live PTYs", file=sys.stderr)
+    return updated, len(foot_pts)
+
 
 def get_current_theme():
     name_file = os.path.join(STATE_DIR, "name")
@@ -588,6 +830,28 @@ def normalize_palette(theme_data, name):
     border_muted = ensure_contrast(blend_colors(bg, accent, 0.32), bg, min_ratio=1.7, is_dark=is_dark)
     r["border_focus"] = border_focus
     r["border_muted"] = border_muted
+
+    # Sway tabbed chrome: Base16 BASE01 can be an expressive *accent* rather
+    # than a quiet UI surface (Rebecca is saturated purple, Gold Rush gold).
+    # Never use raw bg2/blue/accent as a tab's broad background or text. Keep
+    # the theme's BASE00 hue and add only restrained neutral lightness, while
+    # retaining its authored accent as the narrow focused-border indicator.
+    neutral = "#ffffff" if is_dark else "#000000"
+    tab_active_bg = blend_colors(bg, neutral, 0.12 if is_dark else 0.08)
+    tab_inactive_bg = blend_colors(bg, neutral, 0.025 if is_dark else 0.015)
+    r["tab_active_bg"] = tab_active_bg
+    r["tab_inactive_bg"] = tab_inactive_bg
+    # BASE05 is the palette's intended body text. Some imported BASE07/
+    # base_30.white values are vivid syntax hues (e.g. Moonlight neon pink),
+    # unsuitable for an entire tab title; do not inherit them as tab text.
+    r["tab_active_fg"] = ensure_contrast(base05, tab_active_bg, min_ratio=4.5, is_dark=is_dark)
+    # Inactive titles should be a subdued form of the same body text rather
+    # than an unrelated imported grey_fg hue (some 'muted' aliases are gold,
+    # magenta, or other syntax accents). Keep readable contrast on the dim tab.
+    tab_inactive_seed = blend_colors(base05, bg, 0.28)
+    r["tab_inactive_fg"] = ensure_contrast(tab_inactive_seed, tab_inactive_bg, min_ratio=4.5, is_dark=is_dark)
+    r["tab_urgent_fg"] = ensure_contrast(true_red, tab_inactive_bg, min_ratio=4.5, is_dark=is_dark)
+
     r["semantic_background"] = bg
     r["semantic_foreground"] = smart_fg
     r["semantic_border"] = border_focus
@@ -625,6 +889,116 @@ def normalize_palette(theme_data, name):
     r["meter_bg"] = meter_bg
     r["div_line"] = div_line
 
+
+    # Per-app upstream profiles: exact author intent wins for that application
+    # when the Omarchy repository shipped a dedicated theme file. Only parsed
+    # colors are consumed; fonts, geometry, keybindings and commands stay local.
+    apps = theme_data.get("apps") if isinstance(theme_data.get("apps"), dict) else {}
+
+    alacritty_profile = apps.get("alacritty") if isinstance(apps.get("alacritty"), dict) else {}
+    alacritty_colors = alacritty_profile.get("colors") if isinstance(alacritty_profile.get("colors"), dict) else {}
+    r["alacritty_bg"] = alacritty_colors.get("background") or bg
+    r["alacritty_fg"] = alacritty_colors.get("foreground") or smart_fg
+    r["alacritty_cursor"] = alacritty_colors.get("cursor") or accent
+    r["alacritty_cursor_text"] = alacritty_colors.get("cursor_text") or r["alacritty_bg"]
+    r["alacritty_selection_bg"] = alacritty_colors.get("selection_background") or alacritty_colors.get("selection") or sel
+    r["alacritty_selection_fg"] = alacritty_colors.get("selection_foreground") or bright_fg
+    alacritty_fallbacks = [
+        bg, true_red, true_green, true_yellow, true_blue, true_purple, true_cyan, smart_fg,
+        muted, true_red, true_green, true_yellow, true_blue, true_purple, true_cyan, bright_fg,
+    ]
+    for index, fallback in enumerate(alacritty_fallbacks):
+        value = alacritty_colors.get(f"color{index}") or fallback
+        r[f"alacritty_color{index}"] = clean_hex(value)
+
+    kitty_profile = apps.get("kitty") if isinstance(apps.get("kitty"), dict) else {}
+    kitty_colors = kitty_profile.get("colors") if isinstance(kitty_profile.get("colors"), dict) else {}
+    kitty_theme = kitty_colors.get("theme") if isinstance(kitty_colors.get("theme"), dict) else {}
+    def kitty_value(key, fallback):
+        value = kitty_theme.get(key) or kitty_colors.get(key) or fallback
+        return clean_hex(value) if isinstance(value, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", clean_hex(value)) else fallback
+    r["kitty_background"] = kitty_value("background", bg)
+    r["kitty_foreground"] = kitty_value("foreground", smart_fg)
+    r["kitty_cursor"] = kitty_value("cursor", accent)
+    r["kitty_cursor_text"] = kitty_value("cursor_text_color", bg)
+    r["kitty_selection_bg"] = kitty_value("selection_background", sel)
+    r["kitty_selection_fg"] = kitty_value("selection_foreground", bright_fg)
+    r["kitty_url"] = kitty_value("url_color", true_cyan)
+    r["kitty_active_border"] = kitty_value("active_border_color", accent)
+    r["kitty_inactive_border"] = kitty_value("inactive_border_color", border_muted)
+    r["kitty_bell_border"] = kitty_value("bell_border_color", true_red)
+    r["kitty_active_tab_fg"] = kitty_value("active_tab_foreground", bg)
+    r["kitty_active_tab_bg"] = kitty_value("active_tab_background", accent)
+    r["kitty_inactive_tab_fg"] = kitty_value("inactive_tab_foreground", smart_fg)
+    r["kitty_inactive_tab_bg"] = kitty_value("inactive_tab_background", bg2)
+    r["kitty_tab_bar_bg"] = kitty_value("tab_bar_background", bg)
+    r["kitty_mark1_fg"] = kitty_value("mark1_foreground", bg)
+    r["kitty_mark1_bg"] = kitty_value("mark1_background", true_blue)
+    r["kitty_mark2_fg"] = kitty_value("mark2_foreground", bg)
+    r["kitty_mark2_bg"] = kitty_value("mark2_background", true_yellow)
+    r["kitty_mark3_fg"] = kitty_value("mark3_foreground", bg)
+    r["kitty_mark3_bg"] = kitty_value("mark3_background", true_cyan)
+    for index, fallback in enumerate(alacritty_fallbacks):
+        r[f"kitty_color{index}"] = kitty_value(f"color{index}", fallback)
+
+    # Foot is this workstation's primary terminal. Omarchy repositories often
+    # ship Alacritty and/or Kitty palettes instead of a Foot theme, so translate
+    # those authored terminal colors into Foot without importing terminal
+    # behavior. Alacritty is the primary source when both exist; Kitty fills
+    # fields Alacritty does not define, then the normalized palette is fallback.
+    def authored_hex(value):
+        if not isinstance(value, str):
+            return None
+        cleaned = clean_hex(value)
+        return cleaned if re.fullmatch(r"#[0-9a-fA-F]{6}", cleaned) else None
+
+    def foot_pick(alacritty_key, kitty_key, fallback):
+        return (
+            authored_hex(alacritty_colors.get(alacritty_key))
+            or authored_hex(kitty_theme.get(kitty_key))
+            or authored_hex(kitty_colors.get(kitty_key))
+            or fallback
+        )
+
+    if alacritty_colors:
+        r["foot_profile_source"] = "alacritty"
+    elif kitty_theme or kitty_colors:
+        r["foot_profile_source"] = "kitty"
+    else:
+        r["foot_profile_source"] = "generated"
+
+    r["foot_bg"] = foot_pick("background", "background", bg)
+    r["foot_fg"] = foot_pick("foreground", "foreground", smart_fg)
+    r["foot_cursor"] = foot_pick("cursor", "cursor", accent)
+    r["foot_cursor_text"] = foot_pick("cursor_text", "cursor_text_color", r["foot_bg"])
+    r["foot_selection_bg"] = (
+        authored_hex(alacritty_colors.get("selection_background"))
+        or authored_hex(alacritty_colors.get("selection"))
+        or authored_hex(kitty_theme.get("selection_background"))
+        or authored_hex(kitty_colors.get("selection_background"))
+        or authored_hex(kitty_colors.get("selection"))
+        or sel
+    )
+    r["foot_selection_fg"] = (
+        authored_hex(alacritty_colors.get("selection_foreground"))
+        or authored_hex(kitty_theme.get("selection_foreground"))
+        or authored_hex(kitty_colors.get("selection_foreground"))
+        or bright_fg
+    )
+    # Alacritty has no URL color role; use Kitty's authored URL color when the
+    # repository provides one, otherwise retain the normalized theme accent.
+    r["foot_url"] = (
+        authored_hex(kitty_theme.get("url_color"))
+        or authored_hex(kitty_colors.get("url_color"))
+        or accent
+    )
+    for index, fallback in enumerate(alacritty_fallbacks):
+        r[f"foot_color{index}"] = (
+            authored_hex(alacritty_colors.get(f"color{index}"))
+            or authored_hex(kitty_theme.get(f"color{index}"))
+            or authored_hex(kitty_colors.get(f"color{index}"))
+            or fallback
+        )
 
     # Distinct box outline colors:
     r["btop_cpu_box"]  = accent
@@ -672,19 +1046,67 @@ def normalize_palette(theme_data, name):
     r["btop_process_mid"]   = safe_yellow
     r["btop_process_end"]   = safe_red
 
+    btop_profile = apps.get("btop") if isinstance(apps.get("btop"), dict) else {}
+    btop_colors = btop_profile.get("colors") if isinstance(btop_profile.get("colors"), dict) else {}
+    authored_btop = btop_colors.get("theme") if isinstance(btop_colors.get("theme"), dict) else {}
+    btop_token_map = {
+        "main_fg": "btop_main_fg", "title": "btop_title", "hi_fg": "btop_hi_fg",
+        "selected_bg": "btop_selected_bg", "selected_fg": "btop_selected_fg",
+        "inactive_fg": "btop_inactive_fg", "graph_text": "btop_graph_text",
+        "meter_bg": "meter_bg", "proc_misc": "btop_proc_misc",
+        "cpu_box": "btop_cpu_box", "mem_box": "btop_mem_box", "net_box": "btop_net_box",
+        "proc_box": "btop_proc_box", "div_line": "div_line",
+        "temp_start": "btop_temp_start", "temp_mid": "btop_temp_mid", "temp_end": "btop_temp_end",
+        "cpu_start": "btop_cpu_start", "cpu_mid": "btop_cpu_mid", "cpu_end": "btop_cpu_end",
+        "free_start": "btop_free_start", "free_mid": "btop_free_mid", "free_end": "btop_free_end",
+        "cached_start": "btop_cached_start", "cached_mid": "btop_cached_mid", "cached_end": "btop_cached_end",
+        "available_start": "btop_avail_start", "available_mid": "btop_avail_mid", "available_end": "btop_avail_end",
+        "used_start": "btop_used_start", "used_mid": "btop_used_mid", "used_end": "btop_used_end",
+        "download_start": "btop_download_start", "download_mid": "btop_download_mid", "download_end": "btop_download_end",
+        "upload_start": "btop_upload_start", "upload_mid": "btop_upload_mid", "upload_end": "btop_upload_end",
+        "process_start": "btop_process_start", "process_mid": "btop_process_mid", "process_end": "btop_process_end",
+    }
+    btop_defaults = {
+        "btop_main_fg": smart_fg, "btop_title": smart_fg, "btop_hi_fg": accent,
+        "btop_selected_bg": sel, "btop_selected_fg": bright_fg, "btop_inactive_fg": muted,
+        "btop_graph_text": muted, "btop_proc_misc": accent,
+    }
+    for token, fallback in btop_defaults.items():
+        r[token] = fallback
+    for source_key, token in btop_token_map.items():
+        value = authored_btop.get(source_key)
+        if isinstance(value, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", clean_hex(value)):
+            r[token] = clean_hex(value)
 
-    # Add Cava visualizer tokens (solid prominent accent, gradient = 0)
+    # Preserve the local btop canvas invariant regardless of upstream main_bg:
+    # terminal default background avoids the cached stale-background artifact.
+    r["btop_main_bg"] = ""
+
+    # Add Cava visualizer tokens. Preserve an authored upstream Cava theme when
+    # available; otherwise keep the existing single-accent fallback.
     accent = r.get("accent", "#58a6ff")
-    cava = theme_data.get("apps", {}).get("cava") or theme_data.get("cava", {})
+    cava = apps.get("cava") if isinstance(apps.get("cava"), dict) else (theme_data.get("cava", {}) or {})
     cava_bg = cava.get("background") or "default"
-    cava_fg = accent
+    cava_fg = cava.get("foreground") or ((cava.get("colors") or [accent])[0]) or accent
+    gradient = 1 if int(cava.get("gradient") or 0) else 0
+    colors = [clean_hex(str(value)) for value in (cava.get("colors") or []) if re.fullmatch(r"#[0-9a-fA-F]{6}", clean_hex(str(value)))]
+    count = min(len(colors), max(0, int(cava.get("gradient_count") or len(colors)))) if gradient else 0
+    lines = []
+    if gradient:
+        for index, color in enumerate(colors[:count], 1):
+            lines.append(f"gradient_color_{index} = '{color}'")
+    r["cava_bg"] = cava_bg if cava_bg == "default" else clean_hex(cava_bg)
+    r["cava_fg"] = clean_hex(cava_fg)
+    r["cava_gradient"] = str(gradient)
+    r["cava_gradient_count"] = str(count)
+    r["cava_gradient_count_line"] = f"gradient_count = {count}" if gradient else ""
+    r["cava_gradient_lines"] = "\n".join(lines)
 
-    r["cava_bg"] = cava_bg
-    r["cava_fg"] = cava_fg
-    r["cava_gradient"] = "0"
-    r["cava_gradient_count"] = "0"
-    r["cava_gradient_lines"] = ""
 
+    mako_profile = apps.get("mako") if isinstance(apps.get("mako"), dict) else {}
+    r["mako_bg"] = mako_profile.get("background_color") or bg
+    r["mako_fg"] = mako_profile.get("text_color") or smart_fg
+    r["mako_border"] = mako_profile.get("border_color") or accent
 
     # Add _x no-hash variants
     keys_snapshot = list(r.keys())
@@ -757,7 +1179,8 @@ def resolve_theme_data(name):
         path = candidate
         resolved_name = f"omarchy-{name}"
     with open(path, "r", encoding="utf-8") as handle:
-        return resolved_name, json.load(handle)
+        data = json.load(handle)
+    return resolved_name, merge_upstream_apps_overlay(resolved_name, data)
 
 
 def check_theme(name, quiet=False):
@@ -897,35 +1320,35 @@ def apply_theme(name, no_nvim=False):
                 )
                 return 1
             staged_path = os.path.join(next_dir, fname)
-            write_atomic(staged_path, rendered)
+            write_stage(staged_path, rendered)
             staged_files[staged_path] = os.path.join(STATE_DIR, fname)
 
             if fname == "zed-theme.json":
                 zed_dest = os.path.expanduser("~/.config/zed/themes/nvchad-system.json")
                 os.makedirs(os.path.dirname(zed_dest), exist_ok=True)
                 staged_zed = os.path.join(next_dir, "nvchad-system.json")
-                write_atomic(staged_zed, rendered)
+                write_stage(staged_zed, rendered)
                 staged_files[staged_zed] = zed_dest
 
             if fname == "cava.conf":
                 cava_theme_dest = os.path.expanduser("~/.config/cava/themes/current")
                 os.makedirs(os.path.dirname(cava_theme_dest), exist_ok=True)
                 staged_cava = os.path.join(next_dir, "current.cava")
-                write_atomic(staged_cava, rendered)
+                write_stage(staged_cava, rendered)
                 staged_files[staged_cava] = cava_theme_dest
 
             if fname == "kitty-colors.conf":
                 kitty_dest = os.path.expanduser("~/.config/kitty/kitty-colors.conf")
                 os.makedirs(os.path.dirname(kitty_dest), exist_ok=True)
                 staged_kitty = os.path.join(next_dir, "kitty-colors.conf")
-                write_atomic(staged_kitty, rendered)
+                write_stage(staged_kitty, rendered)
                 staged_files[staged_kitty] = kitty_dest
 
             if fname == "foot-colors.ini":
                 foot_dest = os.path.expanduser("~/.config/foot/foot-colors.ini")
                 os.makedirs(os.path.dirname(foot_dest), exist_ok=True)
                 staged_foot = os.path.join(next_dir, "foot-colors.ini")
-                write_atomic(staged_foot, rendered)
+                write_stage(staged_foot, rendered)
                 staged_files[staged_foot] = foot_dest
         except Exception as e:
             print(f"Error compiling template {fname}: {e}", file=sys.stderr)
@@ -935,8 +1358,8 @@ def apply_theme(name, no_nvim=False):
     qt_content = generate_qt_palette(r)
     staged_qt5 = os.path.join(next_dir, "qt5ct.conf")
     staged_qt6 = os.path.join(next_dir, "qt6ct.conf")
-    write_atomic(staged_qt5, qt_content)
-    write_atomic(staged_qt6, qt_content)
+    write_stage(staged_qt5, qt_content)
+    write_stage(staged_qt6, qt_content)
     staged_files[staged_qt5] = QT5_COLOR_FILE
     staged_files[staged_qt6] = QT6_COLOR_FILE
 
@@ -944,14 +1367,14 @@ def apply_theme(name, no_nvim=False):
     staged_neo = os.path.join(next_dir, "neo-colors")
     neo_dest = os.path.expanduser("~/.config/neo/colors")
     os.makedirs(os.path.dirname(neo_dest), exist_ok=True)
-    write_atomic(staged_neo, generate_neo_colors(r))
+    write_stage(staged_neo, generate_neo_colors(r))
     staged_files[staged_neo] = neo_dest
 
     # 4. Stage state markers
     staged_name = os.path.join(next_dir, "name")
     staged_type = os.path.join(next_dir, "type")
-    write_atomic(staged_name, name + "\n")
-    write_atomic(staged_type, theme_type + "\n")
+    write_stage(staged_name, name + "\n")
+    write_stage(staged_type, theme_type + "\n")
 
     # -------------------------------------------------------------
     # VALIDATION
@@ -983,7 +1406,7 @@ def apply_theme(name, no_nvim=False):
         backup = None
         if os.path.isfile(target_p):
             backup = os.path.join(next_dir, f".rollback-{index}")
-            shutil.copy2(target_p, backup)
+            create_rollback_backup(target_p, backup)
         promotion_plan.append((staged_p, target_p, backup))
 
     promoted = []
@@ -1034,8 +1457,27 @@ def apply_theme(name, no_nvim=False):
     # RUNTIME IPC / SIGNALS (Best-Effort, isolated)
     # -------------------------------------------------------------
 
-    # Single-pass /proc scan to discover all relevant processes at once
-    procs = scan_running_processes({"sway", "btop", "dunst", "mako", "yazi", "cava", "kitty", "legendary-tui", "foot", "footclient"})
+    # Process discovery is needed only when generated app configs changed. A
+    # same-theme no-op skips the /proc walk entirely. Neovim socket discovery
+    # remains independent below so a stale editor cache can still self-repair.
+    procs = (
+        scan_running_processes({"sway", "btop", "dunst", "mako", "yazi", "cava", "kitty", "legendary-tui", "foot", "footclient", "thunar"})
+        if changed_targets else
+        {name: [] for name in {"sway", "btop", "dunst", "mako", "yazi", "cava", "kitty", "legendary-tui", "foot", "footclient", "thunar"}}
+    )
+
+    # Foot terminal: update palette before app-specific TUI redraws.
+    # This reduces the dark/light mismatch during Neovim RPC refresh.
+    # SIGUSR1/SIGUSR2 do NOT reload foot-colors.ini; they switch to the
+    # [colors-dark]/[colors-light] palette cached by the long-lived Foot server.
+    # Sending those signals after a theme change can therefore restore a stale
+    # palette. New clients load the current generated palette via the footclient
+    # wrapper; existing clients are updated directly through their PTYs here.
+    # Only a `foot` process owns a terminal child; `footclient` does not.
+    foot_pids = procs.get("foot", [])
+    foot_theme_target = os.path.expanduser("~/.config/foot/foot-colors.ini")
+    if foot_pids and foot_theme_target in changed_targets:
+        broadcast_foot_palette(r, foot_pids)
 
     # Neovim RPC (system -> all live NvChad instances via their sockets).
     # A successful live reload also compiles Base46's disk cache, so avoid a
@@ -1057,49 +1499,54 @@ def apply_theme(name, no_nvim=False):
                 continue
             nvim_sockets.append(sock)
 
-        live_success = False
-        failed_sockets = []
-        for sock in nvim_sockets:
-            if reload_nvim_socket(sock, name):
-                live_success = True
+        # With no live Neovim there is nothing visible to refresh. Leave the
+        # Base46 marker stale intentionally; init.lua already recompiles on the
+        # next Neovim startup when system theme != cached theme. This removes a
+        # 50-120 ms headless editor startup from every ordinary theme switch.
+        if nvim_sockets:
+            live_success = False
+            failed_sockets = []
+            for sock in nvim_sockets:
+                if reload_nvim_socket(sock, name, theme_type):
+                    live_success = True
+                else:
+                    failed_sockets.append(sock)
+
+            cache_ready = live_success or refresh_nvim_disk_cache(name, theme_type)
+
+            # A successful socket has already produced a valid shared disk cache.
+            # Retry any lagging socket once now that the cache is known-good.
+            if cache_ready and failed_sockets:
+                for sock in failed_sockets:
+                    reload_nvim_socket(sock, name, theme_type, timeout=2.0)
+
+            if cache_ready:
+                try:
+                    os.makedirs(os.path.dirname(cache_theme_file), exist_ok=True)
+                    write_atomic(cache_theme_file, f"{name}\n")
+                except Exception as exc:
+                    print(f"[WARN] Neovim cache marker update failed: {exc}", file=sys.stderr)
             else:
-                failed_sockets.append(sock)
-
-        cache_ready = live_success or refresh_nvim_disk_cache(name)
-
-        # A successful socket has already produced a valid shared disk cache.
-        # Retry any lagging socket once now that the cache is known-good.
-        if cache_ready and failed_sockets:
-            for sock in failed_sockets:
-                reload_nvim_socket(sock, name, timeout=2.0)
-
-        if cache_ready:
-            try:
-                os.makedirs(os.path.dirname(cache_theme_file), exist_ok=True)
-                write_atomic(cache_theme_file, f"{name}\n")
-            except Exception as exc:
-                print(f"[WARN] Neovim cache marker update failed: {exc}", file=sys.stderr)
-        else:
-            print(
-                "[WARN] Neovim theme cache was not refreshed; leaving its marker stale so startup will retry",
-                file=sys.stderr,
-            )
+                print(
+                    "[WARN] Neovim theme cache was not refreshed; leaving its marker stale so startup will retry",
+                    file=sys.stderr,
+                )
 
     # Sway IPC: live client borders and swaybar colors (single batched command)
     sway_theme_target = os.path.join(STATE_DIR, "sway.conf")
     if procs["sway"] and sway_theme_target in changed_targets:
         sway_cmd = (
-            f"client.focused {r['border_focus']} {r['bg2']} {r['fg']} {r['border_focus']} {r['border_focus']}; "
-            f"client.focused_inactive {r['border_muted']} {r['bg']} {r['muted']} {r['border_muted']} {r['border_muted']}; "
-            f"client.unfocused {r['border_muted']} {r['bg']} {r['muted']} {r['border_muted']} {r['border_muted']}; "
-            f"client.urgent {r['red']} {r['bg']} {r['red']} {r['red']} {r['red']}; "
+            f"client.focused {r['border_focus']} {r['tab_active_bg']} {r['tab_active_fg']} {r['border_focus']} {r['border_focus']}; "
+            f"client.focused_inactive {r['border_muted']} {r['tab_inactive_bg']} {r['tab_inactive_fg']} {r['border_muted']} {r['border_muted']}; "
+            f"client.unfocused {r['border_muted']} {r['tab_inactive_bg']} {r['tab_inactive_fg']} {r['border_muted']} {r['border_muted']}; "
+            f"client.urgent {r['red']} {r['tab_inactive_bg']} {r['tab_urgent_fg']} {r['red']} {r['red']}; "
             f"bar bar-0 colors background {r['bg']}; "
             f"bar bar-0 colors statusline {r['fg']}; "
             f"bar bar-0 colors separator {r['muted']}; "
-            f"bar bar-0 colors focused_workspace {r['accent']} {r['bg2']} {r['accent']}; "
-            f"bar bar-0 colors active_workspace {r['blue']} {r['bg2']} {r['fg']}; "
-            f"bar bar-0 colors inactive_workspace {r['bg2']} {r['bg']} {r['muted']}; "
-            f"bar bar-0 colors urgent_workspace {r['red']} {r['bg']} {r['red']}"
+            f"bar bar-0 colors focused_workspace {r['border_focus']} {r['tab_active_bg']} {r['tab_active_fg']}; "
+            f"bar bar-0 colors active_workspace {r['border_muted']} {r['tab_active_bg']} {r['tab_active_fg']}; "
+            f"bar bar-0 colors inactive_workspace {r['tab_inactive_bg']} {r['bg']} {r['tab_inactive_fg']}; "
+            f"bar bar-0 colors urgent_workspace {r['red']} {r['tab_inactive_bg']} {r['tab_urgent_fg']}"
         )
         # Cursor is strictly decoupled and managed independently via toggle-cursor-theme (Gruvbox only)
 
@@ -1112,10 +1559,10 @@ def apply_theme(name, no_nvim=False):
             colors_content = (
                 "# GENERATED by theme-set — do not edit manually.\n"
                 "# Visibility-safe borders derived from the theme accent/background.\n"
-                f"client.focused {r['border_focus']} {r['bg2']} {r['fg']} {r['border_focus']} {r['border_focus']}\n"
-                f"client.focused_inactive {r['border_muted']} {r['bg']} {r['muted']} {r['border_muted']} {r['border_muted']}\n"
-                f"client.unfocused {r['border_muted']} {r['bg']} {r['muted']} {r['border_muted']} {r['border_muted']}\n"
-                f"client.urgent {r['red']} {r['bg']} {r['red']} {r['red']} {r['red']}\n"
+                f"client.focused {r['border_focus']} {r['tab_active_bg']} {r['tab_active_fg']} {r['border_focus']} {r['border_focus']}\n"
+                f"client.focused_inactive {r['border_muted']} {r['tab_inactive_bg']} {r['tab_inactive_fg']} {r['border_muted']} {r['border_muted']}\n"
+                f"client.unfocused {r['border_muted']} {r['tab_inactive_bg']} {r['tab_inactive_fg']} {r['border_muted']} {r['border_muted']}\n"
+                f"client.urgent {r['red']} {r['tab_inactive_bg']} {r['tab_urgent_fg']} {r['red']} {r['red']}\n"
             )
             write_atomic_if_changed(colors_conf, colors_content)
         except Exception as exc:
@@ -1148,67 +1595,6 @@ def apply_theme(name, no_nvim=False):
             except Exception:
                 pass
 
-    # Foot terminal: update live windows with OSC only.
-    # SIGUSR1/SIGUSR2 do NOT reload foot-colors.ini; they switch to the
-    # [colors-dark]/[colors-light] palette cached by the long-lived Foot server.
-    # Sending those signals after a theme change can therefore restore a stale
-    # palette. New clients load the current generated palette via the footclient
-    # wrapper; existing clients are updated directly through their PTYs here.
-    foot_pids = procs.get("foot", []) + procs.get("footclient", [])
-    foot_theme_target = os.path.expanduser("~/.config/foot/foot-colors.ini")
-    if foot_pids and foot_theme_target in changed_targets:
-        foot_pts = set()
-        for foot_pid in foot_pids:
-            try:
-                children_file = f"/proc/{foot_pid}/task/{foot_pid}/children"
-                if os.path.exists(children_file):
-                    with open(children_file, "r") as f:
-                        children = [int(p) for p in f.read().split()]
-                    for cpid in children:
-                        fd_dir = f"/proc/{cpid}/fd"
-                        if os.path.exists(fd_dir):
-                            for fd in os.listdir(fd_dir):
-                                try:
-                                    target = os.readlink(os.path.join(fd_dir, fd))
-                                    if target.startswith("/dev/pts/"):
-                                        foot_pts.add(target)
-                                except Exception:
-                                    pass
-            except Exception:
-                pass
-
-        if foot_pts:
-            osc_seq = (
-                f"\x1b]10;{r['fg']}\x1b\\"
-                f"\x1b]11;{r['black']}\x1b\\"
-                f"\x1b]12;{r['accent']}\x1b\\"
-                f"\x1b]17;{r['one_bg2']}\x1b\\"
-                f"\x1b]19;{r['bright_fg']}\x1b\\"
-                f"\x1b]4;0;{r['black']}\x1b\\"
-                f"\x1b]4;1;{r['red']}\x1b\\"
-                f"\x1b]4;2;{r['green']}\x1b\\"
-                f"\x1b]4;3;{r['yellow']}\x1b\\"
-                f"\x1b]4;4;{r['blue']}\x1b\\"
-                f"\x1b]4;5;{r['purple']}\x1b\\"
-                f"\x1b]4;6;{r['teal']}\x1b\\"
-                f"\x1b]4;7;{r['fg']}\x1b\\"
-                f"\x1b]4;8;{r['grey']}\x1b\\"
-                f"\x1b]4;9;{r['red']}\x1b\\"
-                f"\x1b]4;10;{r['vibrant_green']}\x1b\\"
-                f"\x1b]4;11;{r['base0a']}\x1b\\"
-                f"\x1b]4;12;{r['nord_blue']}\x1b\\"
-                f"\x1b]4;13;{r['baby_pink']}\x1b\\"
-                f"\x1b]4;14;{r['cyan']}\x1b\\"
-                f"\x1b]4;15;{r['bright_fg']}\x1b\\"
-            ).encode("utf-8")
-
-            for pts in foot_pts:
-                try:
-                    with open(pts, "wb", buffering=0) as f:
-                        f.write(osc_seq)
-                except Exception:
-                    pass
-
     # btop: direct SIGUSR2 signal for instantaneous in-memory theme & config reload
     if os.path.join(STATE_DIR, "btop.theme") in changed_targets:
         for pid in procs["btop"]:
@@ -1228,28 +1614,45 @@ def apply_theme(name, no_nvim=False):
     # Short-lived reload commands are synchronous so a newer theme can never
     # be overtaken by an older asynchronous IPC request.
     if procs["dunst"] and os.path.join(STATE_DIR, "dunst.conf") in changed_targets:
-        run_ipc(["dunstctl", "reload"], "Dunst reload", timeout=0.75)
+        spawn_reload(["dunstctl", "reload"], "Dunst reload")
 
     if procs["mako"] and os.path.join(STATE_DIR, "mako.conf") in changed_targets:
-        run_ipc(["makoctl", "reload"], "Mako reload", timeout=0.75)
+        spawn_reload(["makoctl", "reload"], "Mako reload")
 
     if procs["yazi"] and os.path.join(STATE_DIR, "yazi.toml") in changed_targets:
-        run_ipc(["ya", "emit-to", "0", "app:theme"], "Yazi theme DDS", timeout=0.75)
+        spawn_reload(["ya", "emit-to", "0", "app:theme"], "Yazi theme DDS")
 
-    # GTK dark preference & theme sync for GTK3 (Thunar) and GTK4.
+    # GTK cache work is only needed when GTK colors or polarity actually changed.
+    # Same-theme no-op reapplies must not spawn D-Bus writes or a Thunar process.
+    gtk_theme_target = os.path.join(STATE_DIR, "gtk.css")
+    gtk_colors_changed = gtk_theme_target in changed_targets
     if theme_type != current_type:
         pref = "prefer-dark" if theme_type == "dark" else "prefer-light"
-        gtk_theme = "adw-gtk3-dark" if theme_type == "dark" else "adw-gtk3"
         run_ipc(
             ["gsettings", "set", "org.gnome.desktop.interface", "color-scheme", pref],
             "GTK color-scheme update",
             timeout=0.75,
         )
+    if gtk_colors_changed:
+        gtk_theme = "adw-gtk3-dark" if theme_type == "dark" else "adw-gtk3"
+        alt_theme = "adw-gtk3" if theme_type == "dark" else "adw-gtk3-dark"
+        # Momentarily toggle gtk-theme so GTK3/GTK4 runtime engines flush style
+        # caches and re-parse the generated CSS. This stays ordered for real
+        # changes, but disappears entirely from no-op applications.
+        run_ipc(
+            ["gsettings", "set", "org.gnome.desktop.interface", "gtk-theme", alt_theme],
+            "GTK theme toggle step 1",
+            timeout=0.5,
+        )
         run_ipc(
             ["gsettings", "set", "org.gnome.desktop.interface", "gtk-theme", gtk_theme],
-            "GTK theme update",
-            timeout=0.75,
+            "GTK theme toggle step 2",
+            timeout=0.5,
         )
+        # Do not spawn Thunar just to ask it to quit. Refresh only an existing
+        # daemon/window so its next view sees the new CSS/icon cache.
+        if procs.get("thunar"):
+            run_ipc(["thunar", "--quit"], "Thunar daemon refresh", timeout=0.5)
 
 
     # Cava: reload colors only via SIGUSR2 (instantaneous, 0 audio drop)
@@ -1260,13 +1663,30 @@ def apply_theme(name, no_nvim=False):
             except Exception:
                 pass
 
+    # Legacy Omarchy imports may predate structured upstream app profiles.
+    # Hydrate those small text profiles off the critical path; when the active
+    # theme still matches, the helper re-enters this same serialized apply path.
+    if upstream_apps_need_hydration(name, theme_data):
+        spawn_upstream_apps_hydration(name)
+
     # 8. Wallpaper application is ordered with the rest of the switch so rapid
     # theme changes cannot leave the previous wallpaper behind. Theme switching
-    # never performs network I/O: upstream wallpapers are fetched on demand by
-    # theme-wallpaper and only an already-cached selection is restored here.
+    # normally uses local state. A palette may use only its own authoritative
+    # Omarchy repository, an exact/alias donor, or an artistic/technical semantic
+    # Omarchy donor. Solid color remains the final fallback; generic images are forbidden.
     wallpaper = theme_data.get("assets", {}).get("wallpaper") or theme_data.get("wallpaper")
     if not wallpaper:
-        wallpaper = cached_theme_wallpaper(name)
+        wallpaper = cached_theme_wallpaper(name, theme_data)
+
+    # Missing or legacy repository caches must never stall the palette
+    # transaction. Queue one detached hydration/discovery job even when an old
+    # cached wallpaper is already usable; it self-heals retired five-item
+    # manifests in the background. The worker downloads outside the theme lock
+    # and applies only if this theme is still active.
+    wallpaper_source = resolve_omarchy_wallpaper_source(name, theme_data)
+    if wallpaper_source and wallpaper_cache_needs_hydration(name, theme_data):
+        spawn_wallpaper_hydration(name)
+
     if wallpaper:
         wp_path = os.path.expanduser(wallpaper)
         desired_wallpaper = os.path.realpath(wp_path)
@@ -1288,13 +1708,51 @@ def apply_theme(name, no_nvim=False):
                 os.path.join(WALLPAPER_STATE_DIR, name),
                 os.path.basename(wp_path) + "\n",
             )
+    else:
+        # Never leak the previous theme's unrelated wallpaper while a missing
+        # repository hydrates (or when no donor exists). Use the theme background
+        # immediately; a queued worker may replace it later only if this theme is still active.
+        solid = r.get("bg", "#000000")
+        if run_ipc(
+            ["swaymsg", f"output * bg '{solid}' solid_color"],
+            "Sway theme background fallback",
+            timeout=0.75,
+        ):
+            try:
+                os.unlink(CURRENT_WALLPAPER_FILE)
+            except FileNotFoundError:
+                pass
 
     # 9. Hooks are failure-isolated but ordered. They are intentionally short
     # lived and cached; waiting prevents an older hook from winning a later switch.
-    if os.path.exists(HOOKS_DIR):
+    if changed_targets and os.path.exists(HOOKS_DIR):
         for h in sorted(os.listdir(HOOKS_DIR)):
             hp = os.path.join(HOOKS_DIR, h)
-            if os.path.isfile(hp) and os.access(hp, os.X_OK):
+            if not (os.path.isfile(hp) and os.access(hp, os.X_OK)):
+                continue
+            if h == "20-thunar-folder-color.py":
+                # Recoloring thousands of icon SVGs is maintenance, not a visible
+                # theme-switch dependency. The hook has its own lock + active-theme
+                # guard, so it can converge safely after the core switch returns.
+                spawn_reload([hp, name, theme_type], "Thunar folder icon refresh")
+                continue
+            if hp.endswith(".py"):
+                # Other small Python hooks execute in-process to avoid another interpreter.
+                try:
+                    import importlib.util
+                    spec = importlib.util.spec_from_file_location(
+                        f"theme_hook_{os.getpid()}_{h.replace('.', '_').replace('-', '_')}", hp
+                    )
+                    module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(module)
+                    hook_main = getattr(module, "main", None)
+                    if callable(hook_main):
+                        rc = hook_main()
+                        if rc not in (None, 0):
+                            print(f"[WARN] theme hook {h}: exit status {rc}", file=sys.stderr)
+                except Exception as exc:
+                    print(f"[WARN] theme hook {h} failed: {exc}", file=sys.stderr)
+            else:
                 run_ipc([hp, name, theme_type], f"theme hook {h}", timeout=1.5)
 
     return 0
@@ -1313,7 +1771,9 @@ def main():
         return 1
 
     cmd = filtered_args[0]
-    all_themes = get_available_themes()
+    all_themes = None
+    if cmd in {"--check-all", "--list", "--next", "--prev"}:
+        all_themes = get_available_themes()
 
     if cmd in {"-h", "--help", "help"}:
         print("Usage: theme-set <name> [--no-nvim] | --check <name> | --check-all | --list | --current | --info <name> | --next | --prev")
@@ -1323,6 +1783,7 @@ def main():
         return 0 if check_theme(filtered_args[1]) else 1
 
     if cmd == "--check-all":
+        all_themes = all_themes or []
         failures = [name for name in all_themes if not check_theme(name, quiet=True)]
         if failures:
             for name in failures:
@@ -1345,6 +1806,7 @@ def main():
                 return 1
         with open(tf, "r", encoding="utf-8") as f:
             data = json.load(f)
+        data = merge_upstream_apps_overlay(target_name, data)
         src = data.get("source", {})
         caps = data.get("capabilities", {})
         cr = data.get("derived", {}).get("contrast", {})
@@ -1362,8 +1824,56 @@ def main():
             print(f"Commit:       {src.get('commit')}")
         cap_list = [k for k, v in caps.items() if v]
         print(f"Capabilities: {', '.join(cap_list) if cap_list else 'palette'}")
-        accent = data.get("accent", "N/A")
-        cava_label = f"yes (accent {accent})" if caps.get("cava") else "no"
+
+        assets = data.get("assets") or {}
+        apps = data.get("apps") or {}
+        embedded = assets.get("upstream_apps_version") == UPSTREAM_APPS_VERSION
+        overlay_meta = data.get("upstream_apps_overlay") if isinstance(data.get("upstream_apps_overlay"), dict) else None
+        profile_apps = []
+        source_files = {}
+        for app, profile in apps.items():
+            if not isinstance(profile, dict):
+                continue
+            source_file = profile.get("source_file")
+            if source_file:
+                profile_apps.append(app)
+                source_files[app] = source_file
+        if embedded:
+            profile_mode = "embedded"
+            source_files.update(assets.get("upstream_app_files") or {})
+        elif overlay_meta:
+            profile_mode = "lazy-cache"
+            source_files.update(overlay_meta.get("files") or {})
+        else:
+            profile_mode = "generated-fallback"
+        if profile_apps:
+            profile_apps = sorted(set(profile_apps))
+            print(f"Upstream profiles: {profile_mode} ({', '.join(profile_apps)})")
+            exact_runtime_supported = {"alacritty", "kitty", "btop", "cava", "mako"}
+            runtime_exact = sorted(app for app in profile_apps if app in exact_runtime_supported)
+            recorded_only = sorted(app for app in profile_apps if app not in exact_runtime_supported)
+            if runtime_exact:
+                print(f"Runtime exact:  {', '.join(runtime_exact)}")
+            if recorded_only:
+                print(f"Recorded only:  {', '.join(recorded_only)}")
+            if isinstance(apps.get("alacritty"), dict):
+                print("Foot port:      alacritty -> foot (Kitty fills missing roles)")
+            elif isinstance(apps.get("kitty"), dict):
+                print("Foot port:      kitty -> foot")
+            else:
+                print("Foot port:      generated palette fallback")
+            file_summary = ", ".join(f"{app}={source_files[app]}" for app in sorted(source_files) if app in profile_apps)
+            if file_summary:
+                print(f"App sources:    {file_summary}")
+        else:
+            print(f"Upstream profiles: {profile_mode}")
+
+        cava = apps.get("cava") if isinstance(apps.get("cava"), dict) else {}
+        if cava.get("source") == "cava_theme":
+            cava_label = f"authored ({cava.get('gradient_count', len(cava.get('colors') or []))} colors)"
+        else:
+            accent = data.get("accent", "N/A")
+            cava_label = f"generated accent {accent}" if caps.get("cava") else "no"
         print(f"Cava:         {cava_label}")
 
         if cr:
@@ -1373,7 +1883,7 @@ def main():
         return 0
 
     if cmd == "--list":
-        for t in all_themes:
+        for t in (all_themes or []):
             print(t)
         return 0
 
@@ -1387,6 +1897,7 @@ def main():
             # mutation; two rapid --next calls therefore advance twice rather
             # than both selecting the same stale current theme.
             curr = get_current_theme()
+            all_themes = all_themes or []
             if not all_themes:
                 return 1
             idx = all_themes.index(curr) if curr in all_themes else 0

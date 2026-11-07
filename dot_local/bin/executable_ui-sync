@@ -9,8 +9,8 @@
 # This helper reads the active scale from config.d/99-ui-scale.conf, converts
 # the base sizes in ui-metrics.conf for that scale, and writes the result into
 # the config files the chrome actually reads. Run it after changing the scale;
-# ui-scale calls it automatically, and a theme-set hook re-runs it after a
-# theme switch so regenerated configs never lose the values.
+# ui-scale calls it automatically. theme-set preserves these scale-owned values
+# while rendering colors, so ordinary theme switches do not need to run ui-sync.
 #
 #   ui-sync            apply and report
 #   ui-sync --quiet    apply silently (hooks, autostart)

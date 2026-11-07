@@ -8,7 +8,7 @@ Use this document as the single source of truth for terminal file navigation and
 ## 1. Terminal File Manager: Yazi (`~/.config/yazi/`)
 
 * **Configuration:** `~/.config/yazi/yazi.toml` & `keymap.toml`.
-* **Pane Ratios:** `[ 1, 4, 3 ]` (Parent directory, active listing, preview window).
+* **Pane Ratios:** `[ 3, 7, 8 ]` (parent 16.7%, active listing 38.9%, preview 44.4%). This balances readable parent filenames against a larger preview. Earlier live `[ 1, 3, 4 ]` (12.5%/37.5%/50%) clipped parent names, whereas `[ 2, 4, 3 ]` (22.2%/44.4%/33.3%) made the preview too narrow. Changes take effect on the next Yazi launch; no plugin or daemon required.
 * **Display Defaults:**
   * Directory sorting: `sort_dir_first = true`.
   * Hidden files: `show_hidden = true`.
@@ -18,6 +18,7 @@ Use this document as the single source of truth for terminal file navigation and
   * Edit: `${EDITOR:-vi} %s` $\to$ automatically opens files in Neovim (`nvim`).
   * Media / Fallback: `xdg-open %s1`.
 * **Neovim Integration:** Can be invoked inside any Neovim session via `<leader>fm`.
+* **Square UI (2026-11-07):** `dot_config/yazi/init.lua` sets `full-border` to `ui.Border.PLAIN`; theme template `dot_config/theme/templates/yazi.toml` sets `[indicator].padding` to `{ open = "▐", close = "▌" }` to replace the rounded selection/hover pills, and `[status].sep_left` / `sep_right` to empty caps for rectangular status blocks. These are supported in Yazi 26.9.1. The live file `~/.config/yazi/theme.toml` is a symlink to the palette-managed `~/.local/state/theme/yazi.toml`. After a November 7 regression, we confirmed the live generator at `~/.config/theme/templates/yazi.toml` was still the old rounded variant even though chezmoi was updated; it has now been synchronized with the source. `[tabs].sep_inner`/`sep_outer` are also explicitly empty so defaults cannot reintroduce round caps. The selected `all-hallows-eve` theme was re-rendered successfully and all indicator/tab/status separator fields were checked. Do not edit only the generated file: theme switches regenerate it. Yazi must be reopened for changed `init.lua` plugins; if an instance is already running, `F5` or `ya emit-to 0 app:theme` reloads theme data. Yazi was closed during the update, so the next launch reads both files automatically.
 
 ---
 
@@ -58,7 +59,17 @@ In keeping with the 60% keyboard philosophy, all editor operations use non-strai
 
 ---
 
-## 4. Maintenance & File Locations
+## 4. Ventoy GUI on Sway/Xwayland
+
+The system package `ventoy-bin` supplies `/usr/bin/ventoygui` and `/usr/share/applications/ventoy.desktop`. Ventoy uses polkit (`pkexec`) to elevate its GTK3 GUI and forces `GDK_BACKEND=x11`; Sway's Xwayland ACL normally authorizes only the logged-in user, so an elevated Ventoy window may fail to map even after authentication.
+
+The managed user command `~/.local/bin/ventoygui` (`dot_local/bin/executable_ventoygui`) grants `SI:localuser:root` using `xhost` **only** for the lifetime of the GUI, runs the unmodified `/usr/bin/ventoygui` with its normal polkit challenge, and revokes its own grant on exit. A nonblocking lock prevents overlapping wrappers from undoing each other's permission. The user desktop override at `~/.local/share/applications/ventoy.desktop` (source: `dot_local/share/applications/ventoy.desktop.tmpl`) routes the app launcher explicitly to the managed helper. Never use broad `xhost +` or bypass polkit. No Ventoy install/write command is run automatically.
+
+Live verification on 2026-11-05: the GTK3 interface initialized, enumerated the host NVMe disk, found no Ventoy installation, and exited; no removable USB drive was attached and no disk was modified. The root-only X11 grant was observed during launch and absent again after exit. For normal use select only the intended removable USB disk in the GUI; never select the internal `nvme0n1` drive.
+
+---
+
+## 5. Maintenance & File Locations
 
 | File | Purpose |
 | :--- | :--- |

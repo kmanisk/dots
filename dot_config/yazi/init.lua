@@ -3,7 +3,7 @@ require("git"):setup({
 })
 
 require("full-border"):setup({
-	type = ui.Border.ROUNDED,
+	type = ui.Border.PLAIN,
 })
 
 require("mime-ext"):setup()

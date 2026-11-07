@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+"""Local-only RFB keyboard helper for disposable Windows 10 VM. No host input."""
+import socket
+import struct
+import sys
+import time
+
+def receive(sock,n):
+    data=b''
+    while len(data)<n:
+        v=sock.recv(n-len(data))
+        if not v: raise RuntimeError('VNC server closed')
+        data+=v
+    return data
+
+def key(sock,keysym,delay=0.05):
+    for pressed in (1,0):
+        sock.sendall(struct.pack(">BBHI",4,pressed,0,keysym))
+        time.sleep(delay)
+
+def main():
+    s=socket.create_connection(("127.0.0.1",5912),timeout=5)
+    s.settimeout(5)
+    ver=receive(s,12)
+    if not ver.startswith(b'RFB 003.'): raise RuntimeError(ver)
+    s.sendall(ver)
+    if ver.startswith(b"RFB 003.003"):
+        auth=struct.unpack(">I",receive(s,4))[0]
+        if auth!=1: raise RuntimeError(f"authentication required {auth}")
+    else:
+        n=receive(s,1)[0]
+        opts=receive(s,n)
+        if 1 not in opts: raise RuntimeError(f"unsupported security types {opts}")
+        s.sendall(b'\x01')
+        status=struct.unpack(">I",receive(s,4))[0]
+        if status!=0:raise RuntimeError(f"server rejected auth ({status})")
+    s.sendall(b'\x01') # Shared desktop; don't disconnect other viewers.
+    header=receive(s,24)
+    name_len=struct.unpack(">I",header[-4:])[0]
+    if name_len>4096:raise RuntimeError("invalid VNC desktop name")
+    name=receive(s,name_len)
+    print("connected VNC",name.decode(errors='replace'),struct.unpack(">HH",header[:4]))
+    op=sys.argv[1] if len(sys.argv)>1 else "shutdown"
+    if op=="shutdown":
+        s.sendall(struct.pack(">BBHI",4,1,0,0xFFEB)) # Super_L
+        key(s,ord("r"))
+        s.sendall(struct.pack(">BBHI",4,0,0,0xFFEB))
+        time.sleep(1.0)
+        for c in "shutdown /s /t 0":
+            key(s,ord(c),.012)
+        key(s,0xFF0D)
+        print("requested Windows shutdown from inside guest")
+    elif op=="win+r":
+        s.sendall(struct.pack(">BBHI",4,1,0,0xFFEB))
+        key(s,ord("r"))
+        s.sendall(struct.pack(">BBHI",4,0,0,0xFFEB))
+    elif op=="text":
+        for c in sys.argv[2]:
+            if ord(c)>127:raise ValueError("ASCII only")
+            # QEMU VNC maps an unshifted colon keysym to semicolon on the
+            # Windows keyboard layout. Emit Shift+semicolon explicitly.
+            if c == ":":
+                s.sendall(struct.pack(">BBHI",4,1,0,0xFFE1))
+                key(s,ord(";"),.025)
+                s.sendall(struct.pack(">BBHI",4,0,0,0xFFE1))
+            else:
+                key(s,ord(c),.025)
+        key(s,0xFF0D)
+    elif op=="click":
+        x,y=map(int,sys.argv[2:4])
+        # PointerEvent: type5, buttons, x16, y16.
+        s.sendall(struct.pack(">BBHH",5,1,x,y))
+        time.sleep(.1)
+        s.sendall(struct.pack(">BBHH",5,0,x,y))
+    else:raise ValueError("unsupported operation")
+    s.close()
+if __name__=="__main__":main()

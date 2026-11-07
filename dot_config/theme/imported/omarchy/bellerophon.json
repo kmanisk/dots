@@ -19,7 +19,18 @@
       "backgrounds/02-warrior-and-statue.webp",
       "backgrounds/03-guardian-garden.webp",
       "backgrounds/04-warrior-by-the-sea.webp",
-      "backgrounds/05-cliff-rider.webp"
+      "backgrounds/05-cliff-rider.webp",
+      "backgrounds/06-blue-cloak.webp",
+      "backgrounds/07-cavern-statue.webp",
+      "backgrounds/08-black-warrior.webp",
+      "backgrounds/09-sea-sentinel.webp",
+      "backgrounds/10-blue-archer.webp",
+      "backgrounds/11-coastal-colossus.webp",
+      "backgrounds/12-red-moon-climb.webp",
+      "backgrounds/13-temple-rider.webp",
+      "backgrounds/14-moon-rider.webp",
+      "backgrounds/15-red-cloak-overlook.webp",
+      "backgrounds/16-coastal-guardian.webp"
     ]
   },
   "authored": {
@@ -73,7 +84,7 @@
     "BASE0C": "#8b9ac5",
     "BASE0D": "#94a3ce",
     "BASE0E": "#7f809d",
-    "BASE0F": "#6c534e"
+    "BASE0F": "#785c57"
   },
   "base_30": {
     "baby_pink": "#7f809d",
@@ -199,7 +210,7 @@
       "warning": "#9b917a"
     }
   },
-  "display_name": "Bellerophon",
+  "display_name": "Bellerophon for",
   "name": "bellerophon",
   "palette": {
     "accent": "#94a3ce",
@@ -219,7 +230,7 @@
       "BASE0C": "#8b9ac5",
       "BASE0D": "#94a3ce",
       "BASE0E": "#7f809d",
-      "BASE0F": "#6c534e"
+      "BASE0F": "#785c57"
     }
   },
   "schema": 1,
@@ -248,10 +259,9 @@
     "author": "janooh37-hue",
     "branch": "main",
     "commit": "755b56c1671635ff4969353dff6d87b0302aa8c4",
-    "imported_at": "2026-11-01T01:59:03.794762",
+    "imported_at": "2026-11-02T23:19:21.028171",
     "provider": "omarchy",
-    "registry": "https://omarchy.org/themes/",
-    "registry_listed": true,
+    "registry_listed": false,
     "repository": "https://github.com/janooh37-hue/omarchy-bellerophon-theme"
   },
   "type": "dark"
