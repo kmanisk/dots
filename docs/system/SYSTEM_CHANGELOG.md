@@ -12,7 +12,311 @@ Rules:
 - Do not paste large diffs, logs, or transient diagnostics here.
 - If a change alters current machine assumptions, also update `SYSTEM_CONTEXT.md`.
 
+## 2026-11-13
+
+### Local Coder Policy Gateway production promotion and three-mode security architecture
+
+- Promoted the Local Coder Policy Gateway to production under dedicated system user `localcoder` (UID 947, GID 947) running system unit `chatgpt-local-coder-policygate.service` on ports 3000 (MCP) and 3001 (Admin UI).
+- Implemented three operational security modes:
+  - `STRICT`: Read-only inspection by default; signed operator approval required for mutations and executables; no sudo.
+  - `STANDARD` (Default): Trusted project workspaces under `/srv/local-coder/projects/`, development commands, git inspection without repeated approvals; signed approval for sudo/destructive actions.
+  - `YOLO` / `FULL ACCESS`: Root-operator interactive signed lease (`policygate-operator yolo --duration <min>`) with time limit; narrow escalation broker execution (`/usr/local/bin/local-coder-escalation-broker`); automatic revert on expiry or `yolo --off`.
+- Sandboxing: `ProtectHome=yes`, `ProtectSystem=strict`, `BindReadOnlyPaths=/home/onyx/.local/share/chezmoi:/srv/local-coder/context/chezmoi`, `BindPaths=/srv/local-coder/workspace /srv/local-coder/projects`.
+- Bridge authorization: eliminated obsolete `SECURITY_PRIVILEGED_COMMAND_REQUIRED` error via scoped single-use HMAC token injection when operator approved or YOLO is active.
+- Tool restoration: 35 tools active including safe read-only Git tools (`git_status`, `git_diff`, `git_log`, `git_branch`), process supervision (`start_process`, `process_output`, `stop_process`, `clear_processes`), `system_context`, and `chezmoi_inspect`.
+- Monitor styling: overhauled `local-coder-status` and scratchpad `local-coder-monitor` (`Win + Alt + D`) with vibrant high-contrast ANSI colors, category color-coding, and 12-hour AM/PM timestamps (`%I:%M:%S %p`).
+- Audit integrity: append-only `+a` ledger at `/var/log/local-coder-policygate/audit.jsonl` verified against trusted root anchor.
+- Rollback tested and verified: stopping `chatgpt-local-coder-policygate.service` and starting user unit `chatgpt-local-coder.service` restores legacy setup in 1.1s. Owning documentation: `docs/system/chatgpt-local-coder.md`, `docs/system/agent-control-plane.md`.
+
+### Atlas IDD continuation preflight and media checksum verification
+
+- Verified stopped clone disk integrity, paired IDD-on/off OVMF checksums, GPU-binding preflight and zero residency findings through Local Coder. Retained selected matching B7-829 upstream source; documented historical mode mismatch and remaining runtime profiling/cadence gates. Requested LTSC ISO matches supplied hashes and independent HeiDoc catalog SHA256; original authenticated Microsoft hash metadata remains unavailable. No new VM experiment, restore, guest/host configuration change or accepted fix. User subsequently explicitly approved sudo, but Local Coder rejected the privileged probe with SECURITY_PRIVILEGED_COMMAND_REQUIRED (managed mode requires an authorization token). Connected tool schema lacks auth_token and no token-grant tool is exposed; agent_status incorrectly reports open access. No connector security settings were changed. Runtime work remains blocked by that connector authorization mismatch; all three VMs remain stopped. Evidence: `docs/virtualization/atlas-21h2-baseline.md` and clone `inspection/atlas-idd-continuation-preflight-20261113.md`.
+
+### Isolated Atlas Looking Glass IDD CPU regression and timer A/B confirmed
+
+- Created a **standalone** Windows 10 Atlas 21H2 A/B clone at `/mnt/Games/VirtualMachines/atlas-21h2-ab-20261113/`, with distinct QCOW2/OVMF storage, on-demand launcher, scoped CPU/thermal monitor, VNC port and four paired experimental snapshots. Verified all guest test boots stopped cleanly, watchdog windows passed and QCOW2 checks succeeded. No original Atlas, Nano11, NVIDIA, Intel PF, system service/autostart or shared launcher changes.
+- Guest PnP `ROOT\DISPLAY\0000` (Looking Glass Indirect Display Device) **enabled** averaged 1.173 host QEMU cores at idle. Disabling this exact display device lowered CPU to ~0.22 cores, with a verified 0.217-core cold-boot repeat. Keeping IDD enabled while deleting only `useplatformtick` averaged 1.090 cores; independently deleting only `disabledynamictick` averaged 1.147 cores. Thus IDD-enabled activity is the proven idle CPU regression, not either Atlas timer tweak alone; the underlying capture/driver mechanism remains unresolved. Clone left **stopped at the verified low-CPU IDD-disabled checkpoint**, so Looking Glass is **not available** on that fallback.
+- All changed Windows settings were restricted to the disposable clone. Both original Atlas and Nano11 remain stopped and untouched. Verified logs and recovery: `docs/virtualization/atlas-21h2-baseline.md` and clone `inspection/atlas-ab-findings-20261113.md`. No commits or pushes.
+
+## 2026-11-12
+
+### Unpinned native ChatGPT app from Workspace 2 and updated Win+Alt+G focus summoner (verified)
+
+- Removed `chatgpt` from the Workspace 2 browser assignment/move rules in `dot_config/sway/config.d/30-window-rules.conf` and `~/.config/sway/config.d/30-window-rules.conf`, allowing ChatGPT to open directly on whichever workspace it was launched from with `border pixel 2` and `floating disable`.
+- Updated `dot_local/bin/executable_chatgpt-focus` and `~/.local/bin/chatgpt-focus` (`Win+Alt+G`) to dynamically query the active workspace and summon any existing ChatGPT window (`app_id` or `class`) to the active workspace (`move to workspace <name>, focus`), or launch a new instance on demand.
+- Updated documentation in `docs/system/sway.md`. Verified with `sway-check`, `sway -C`, and live reload. No commits or pushes made.
+
+### Tuned Win + Alt + D Local Coder monitor font size in Foot scratchpad to 15 pt (verified)
+
+- Tuned the `dc-term` Local Coder monitor scratchpad font in `dot_local/bin/executable_scratch-toggle` and `~/.local/bin/scratch-toggle` by adjusting `SCRATCH_DC_FONT_SIZE` to 15 pt (tuned from 17 pt and 12 pt per user request).
+- Terminated the existing running `dc-term` instance and verified fresh spawn with `size=15`. Updated `docs/system/foot.md` and `docs/system/chatgpt-local-coder.md`. No commits or pushes made.
+
+### Atlas Looking Glass B7-829 short frame success and GPU device-removal regression (verified)
+
+- The separate offline Atlas 21H2 VM passed VGA/VFIO/post-Intel-driver 60-minute idle checks and explicit Intel D3D11 render/readback. A pre-IDD partial QCOW2 snapshot and paired OVMF vars were preserved. Matching B7-829 IDD briefly delivered actual 1920x1080 and 1920x1200 BGRA frames, but a later client test lost the LGMP source and QEMU rose to approximately five host CPU cores. Guest IDD log confirms 0x887A0005 (D3D12 GPU device removed/suspended); cause remains undetermined. The exact Atlas VM was manually paused and shut down gracefully by the bounded `atlas21h2-lg-regression-shutdown-20261112.service` (exit 0); stopped QCOW2 integrity check passed. Atlas is stopped and NOT Looking-Glass-stability-accepted. No Nano11 changes, guest network, legacy LG Host service, daemon, host GPU rebinding, committed or pushed files. Details: `docs/virtualization/atlas-21h2-baseline.md`.
+
+### Implemented passwordless root permissions and transparent sudo elevation for Local Coder
+
+- Configured ChatGPT Local Coder agent prompt instructions (`CODEX_AGENT_PROMPT`, `MCP_QUICKSTART`, `/home/onyx/Projects/AGENTS.md`) to establish passwordless root authority (`(ALL) NOPASSWD: ALL`), enabling ChatGPT to manage packages (`sudo pacman`), systemd units (`sudo systemctl`), and system configuration directly via `run_command` without password prompts.
+- Created `src/lib/sudo-fs.ts` providing transparent privilege escalation (`readFileSafe`, `writeFileSafe`, `unlinkSafe`, `mkdirSafe`, `rmDirSafe`, `copyFileSafe`, `moveFileSafe`, `statSafe`, `readdirSafe`). When standard Node.js user permissions encounter `EACCES` or `EPERM` on root-owned or system files outside `$HOME` (e.g. `/etc/`, `/boot/`, `/usr/`), filesystem tools automatically elevate using non-interactive `sudo -n tee`, `sudo -n cat`, `sudo -n rm`, and `sudo -n mkdir`.
+- Updated `src/tools/filesystem.ts`, `src/lib/patch.ts`, and `src/lib/checkpoint.ts` to utilize safe filesystem operations. Validated that writing and reading files in root-restricted paths (tested via `/etc/test-mcp-root.txt` and `/etc/mcp-test-root-verify.txt` over live MCP JSON-RPC tools/call) succeeds with automatic checkpointing and without permission crashes.
+- Rebuilt TypeScript project (`tsc`), passed all 10 test suites (43 tests), restarted `chatgpt-local-coder.service`, and verified live `/health` and tool invocation over loopback and Funnel. Updated `docs/system/chatgpt-local-coder.md`.
+
+### Configured ChatGPT Local Coder MCP server and Tailscale Funnel lifecycle
+
+- Cloned `hoangcoderr/chatgpt-local-coder` at commit `bc2ce5e6cb12fac20633065fb122fabbbb5c98c3` into `/home/onyx/Projects/chatgpt-local-coder`.
+- Installed `tailscale 1.104.5` and `pnpm 12.19.0` via `pacman -S --needed` after pre-installation Snapper snapshot #519 (post-snapshot #520); added to chezmoi package manifests `packages/common.txt` and `packages/development.txt`.
+- Built TypeScript project with `pnpm run build` (`tsc`) and ran all 10 unit/integration test suites (43 tests passed, 0 failed).
+- Created owner-only `.env` (mode 0600) with generated 256-bit `MCP_TOKEN` and `ADMIN_TOKEN`, binding `HOST=127.0.0.1`, `PORT=3000`, `ADMIN_PORT=3001`, `CHATGPT_TOOL_PROFILE=slim` (27 tools), and `WORKSPACE_PATH=/home/onyx/Projects`.
+- Created on-demand systemd user service `chatgpt-local-coder.service` (disabled at boot per residency policy) and operational lifecycle controllers `local-coder-start`, `local-coder-status`, `local-coder-stop`, and `local-coder`.
+- Verified local health check at `http://127.0.0.1:3000/health`, verified unauthenticated root returns HTTP 404, and verified token-authenticated MCP JSON-RPC `initialize` and `tools/list` handshake returning HTTP 200 and session ID.
+- Verified live Tailscale Funnel forwarding on `https://onyx.tail646579.ts.net` proxying loopback port 3000; public MCP `initialize`, `tools/list` (27 tools), and live `agent_status` tool call succeeded over public HTTPS Funnel with Admin UI (port 3001) verified unreachable externally.
+- Retired `desktop-commander.service` (disabled, stopped, and removed from user units), reclaiming ~250MB RAM; re-wired `Win + Alt + D` scratchpad to toggle `local-coder-monitor` displaying live status, Funnel state, and streaming `.mcp-audit.log` tool calls.
+- Consolidated connector details file strictly into `/home/onyx/Projects/chatgpt-local-coder/chatgpt-connector.txt` (mode 0600), removing duplicate files.
+- Verified clean shutdown via `local-coder-stop`, freeing ports 3000/3001 and leaving zero unexpected resident daemons (`system-residency-audit` passed with 0 findings). Documented in `docs/system/chatgpt-local-coder.md`.
+
+## 2026-11-11
+
+### Consolidated user captures and photos into central Media library
+
+- Verified `/mnt/Games` NTFS3 `nocase`: `Other`/`other` resolve to the same inode, while only `others -> Other` was a redundant symlink (safely unlinked). Tracked `media-consolidate-20261111.service` exited 0 after copying and SHA256-verifying 506 Sway screenshots (273,768,215 bytes) into `/mnt/Games/Other/Media/Screenshots`, preserving original screenshots in a dated Btrfs backup and linking old screenshot path to the new library. Two loose MP4s moved to `Recordings/Imported` by atomic rename; two MW4 edited clips and a downloaded image copied and verified under `Videos/Edits` and `Photos/Downloads`, with old paths linked for app compatibility and backups retained. Existing COD MW4, Surya, Waydroid data and unrelated project assets untouched.
+- GSR UI v6.1.7 saves to `Recordings/GPU-Screen-Recorder`, `Recordings/Replays`, `Screenshots` using its untracked user-owned JSON config, backing up the prior config first; no codec/audio changes. OBS output remains `Recordings` with existing AV1/7 GiB splitting, and both Waydroid read-only binds remain valid. Sway screenshot helpers add an offline NTFS-unmounted fallback under `~/Pictures/Screenshots-Offline` without changing hotkeys. Verified source/live shell syntax and media symlink access; no new service, package, reboot, commit or push. Details and rollback: `docs/system/media-library.md`.
+
+### Hardened OBS WebSocket recording shortcuts after follow-up audit
+
+- Fixed `obs-record start` launching another OBS when the running instance's WebSocket was unavailable, and `obs-record stop` force-signaling OBS on WebSocket failure. Both now fail safely; `stop` never terminates OBS. Reworked the one-shot standard-library WebSocket v5 client to verify the upgrade, authenticate with the OBS-generated password and validate replies. Activated `auth_required=true` and 0600 permissions in untracked OBS-owned plugin settings, because prior unauthenticated WebSocket was listening beyond loopback. Original helper/config backed up locally (including private password). An isolated authenticated mock server passed handshake/status/stop and no-fallback-on-failure tests. OBS itself was closed, so no live capture/key injection test was performed; existing Sway bindings and recording format unchanged. See `docs/audio/obs-recording.md`. No commit or push.
+
+### Repaired OBS Studio recording shortcuts and eliminated duplicate instance dialog
+
+- Diagnosed why `Alt + Shift + X` spawned an "OBS is already running!" popup instead of stopping recording: Sway's bindings executed nonexistent CLI argument `obs --stoprecording`, which attempted to launch a secondary OBS instance.
+- Enabled OBS built-in WebSocket v5 (`~/.config/obs-studio/plugin_config/obs-websocket/config.json`) on `127.0.0.1:4455` without authentication.
+- Created `~/.local/bin/obs-record` (managed in `dot_local/bin/executable_obs-record`) to interact directly with OBS over WebSocket: `start` begins recording (or launches OBS if closed), `stop` issues `StopRecord` and notifies with the output filename, and `status` queries live recording metrics.
+- Updated `40-keybindings.conf` and `50-gaming-mode.conf` to invoke `obs-record start` and `obs-record stop`. Validated with `sway-check` and `sway-safe-reload`. Verified live start/status/stop cycle without duplicate instance errors.
+
+
+### Atlas Intel VFIO and signed guest driver verified; post-driver idle pending
+
+- The isolated Atlas test VM passed 240/240 samples of VFIO-only idle (mean 0.182 host cores, peak 0.27, 89 C package peak, zero safety pauses). The Intel 32.0.101.7092 display driver was installed offline via its signed INF after the bundled GUI installer failed; Windows Device Manager reported the Intel UHD VF working properly, and DxDiag Render confirmed WDDM 2.7 and Direct3D acceleration enabled. A normal ACPI shutdown, stopped-disk QCOW2 check (exit 0), and VFIO cold boot preserved the working Intel driver. A separate post-driver 60-minute idle check is running as `atlas21h2-postdriver-idle-20261111.service`; its outcome is not yet verified. No Looking Glass, guest network, host GPU rebinding, Nano11 changes, commits, or pushes. Details: `docs/virtualization/atlas-21h2-baseline.md`.
+
+### Waydroid vendor OTA and cropped-content display recovery (observed, verified)
+
+- The user's Waydroid Updater installed MAINLINE vendor build `eng.aleast.20261022.130727` at 02:48:31 IST and restarted Android. Before that update, a fresh screenshot showed Android content occupying only ~65% of an otherwise correctly tiled Sway Waydroid window; a compositor-only resize did not correct it. After the update/restart a new window covered its full tile, and a workspace 2->1->2 switch retained full content. Update-vs-restart causality is not isolated. No assistant-induced Waydroid restart, persistent display override or Android-data change.
+- Verified NVIDIA 620.70.06 Venus/ANGLE rendering, `sys.boot_completed=1`, Waydroid IP, installed Google Photos/Kitsune, direct-subsurface workaround and both driver/subsurface read-only checks. `waydroid-container` and `wd-venus` remain disabled at boot and active on demand; residency audit 0 findings. Source of truth: `docs/virtualization/waydroid-guide.md` and `docs/virtualization/waydroid.md`. No commit or push.
+
+### Retiled a stale full-workspace Brave floating window on workspace 2
+
+- Live Sway IPC found Brave Origin main window ID 264 as `floating=user_on`, almost full-display, hiding tiled tabs on workspace 2. Its existing `for_window`/`tiling_drag disable` protections operate at map-time/input-time and did not retroactively correct the previous floating state. Issued `[con_id=264] floating disable`; verified the same browser window in the normal tabbed tiling tree at workspace size 1476x923, with zero remaining workspace 2 floats. `toggle-floating-strict` continues to retile browsers; Sway validation passed. Existing mouse/keyboard guards were already source/live-synchronized; no new watcher/daemon, source-rule change, config reload, browser restart, extra window or commit/push. An arbitrary future external Sway IPC float remains outside these protections. See `docs/system/sway.md` section 9.
+
+### Atlas idle/cold boot acceptance and isolated VFIO test
+
+- The separate Windows 10 Atlas VGA guest passed 60 minutes idle (mean 0.155 cores, max 0.33 cores, 82 C peak, zero safety pauses), two graceful ACPI shutdowns, stopped-disk image check, baseline internal snapshot atlas-clean-20261111 with matching OVMF vars, and a cold boot to desktop.
+- Added an opt-in start-vfio launch mode guarded against binding errors and IOMMU overlap. Host Intel PF remained i915, VF already vfio-pci, NVIDIA host remained intact. QEMU with VF started and displayed Windows over VNC; no driver/3D acceleration validation or Looking Glass yet. The separate monitored 60-minute VFIO-only idle run is active under atlas21h2-vfio-idle-20261111.service. No commit or push.
+
+## 2026-11-10
+
+### Corrected oversized OBS Qt interface without changing global display scale
+
+- Diagnosed live OBS process `QT_SCALE_FACTOR=1.5` from an untracked user `.desktop` entry, superimposed on Sway output scale 1.30. Managed a corrected per-OBS native Wayland launcher (`QT_QPA_PLATFORM=wayland QT_SCALE_FACTOR=1.0`) in chezmoi and applied the same override to existing default and gaming-mode OBS Alt+Shift+R/X hotkeys without rebinding keys. Backed up original desktop/Sway files. `desktop-file-validate`, `sway-check`, `sway-safe-reload`, and source/live parity passed; OBS was gracefully restarted without interrupting an active recording. Verified actual process Qt scale 1.0, native Wayland window, visually smaller interface, screen/audio capture reconnection, and preserved AV1 CQP18/60 FPS/7 GiB recording setup. Global Qt/GTK scale, Sway output scale, theme and PipeWire untouched; no service, commit or push. See `docs/audio/obs-recording.md`.
+
+### Fixed recurrent Waydroid hwcomposer/SurfaceFlinger crashes via Sway-safe composition
+
+- Reproduced repeated paired `SIGABRT` dumps in `hwcomposer.waydroid.so` and Android `surfaceflinger` while the NVIDIA Venus ABI check was healthy. The persistent `persist.waydroid.use_subsurface=true` matches upstream's direct-subsurface failure mechanism on non-KWin compositors (#21). With Waydroid stopped, backed up the root config and changed only this property to `false`; regenerated host/guest property files using offline `waydroid upgrade -o`. Verified runtime false, working Sway UI and Android IP, Settings/Play Store/full-UI switching, unchanged compositor PIDs for over two minutes and zero new core dumps in that test window. Exact internal abort and longer-term stability not proven.
+- Added managed `waydroid-subsurface-ensure` and integrated it into the existing on-demand `waydroid-driver-ensure` so a future NVIDIA setup won't silently restore the unsafe `true` default. No daemon, automatic boot service, Android data reset, NVIDIA driver update, unrelated edits, commit or push. Bash/ShellCheck, Python compile, healthy no-op checks passed. Owner docs: `docs/virtualization/waydroid-guide.md` and `docs/virtualization/waydroid.md`.
+
+### Confirmed Atlas desktop and staged formal idle test
+
+- The isolated Windows 10 Pro Atlas guest completed offline OOBE and reached the Atlas desktop with taskbar, with no networking, Intel VFIO, Looking Glass or host shares. Installation/first-login watchdog's first 32 samples peaked at 2.78 QEMU host CPU cores and 83°C with no safety event; those numbers are **not** an idle baseline.
+- A recoverable transient user-unit 60-minute idle trial is configured with 60-second settle time and a verified-PID QEMU thermal/CPU watchdog. Results must be verified from `monitor/latest-idle.status.json` before claiming success. No commit or push.
+
+### Isolated offline Atlas 21H2 QEMU baseline prepared and Windows Setup reached
+
+- Verified the downloaded Atlas v0.5.2 21H2 ISO as Windows 10 Pro **19044.1889**, a customized unsupported build. Created independent 64 GiB QCOW2 and OVMF vars for a 4 GiB/6-vCPU SATA/VGA/VNC-only VM with no NIC, VFIO, Looking Glass or host shares. Nano11 remains the sole normal desktop backend and is unchanged.
+- Added on-demand `atlas-lab` source/live launcher and `atlas-monitor` script for bounded CPU/thermal monitoring and safety pause. Created read-only unattended installation floppy targeting only the fresh disk; corrected the image's invalid empty ProductKey using a public non-activating Pro installation key. Verified Windows Setup reached file-copy stage and the disk was receiving writes.
+- No complete guest install, Windows desktop login, clean guest shutdown or 60-minute idle pass is yet claimed. All later verification results must be recorded in `docs/virtualization/atlas-21h2-baseline.md`. No commit or push.
+
+
+### Google Photos-ready OBS recording segmentation
+
+- Enabled OBS 33.0.1 automatic recording splits **by size** (`RecSplitFile=true`, `RecSplitFileType=Size`, `RecSplitFileSize=7168` MB) so each segment targets about 7 GiB, below Google Photos' published 10 GB/video normal backup limit. Preserved NVENC AV1 CQP18/P6, native 1920x1200 60 FPS, Rec.709 SDR, 48 kHz AAC, Hybrid MP4 and `/mnt/Games/Other/Media/Recordings`. Backed up pre-change `basic.ini` and restarted OBS gracefully. The new Wayland window, output profile, AV1 support and active audio streams were verified; no 7 GiB split test or actual Photos playback upload was performed. Details: `docs/audio/obs-recording.md`. No commit/push or new services.
+
+### Configured OBS NVENC AV1 recording location and verified audio capture routing
+
+- Gracefully restarted OBS 33.0.1 after backing up its live profile, encoder and scene JSON. Updated both recording-folder settings to existing `/mnt/Games/Other/Media/Recordings`; kept native 1920x1200 60 FPS/NVENC AV1/P6/Hybrid MP4, increased CQP fidelity 20->18, set Rec.709 limited SDR, retained 48 kHz stereo AAC 320 kbps and muted mic. Pinned the mic capture to existing `ghelper-audio` without changing the PipeWire graph; left default-following output monitor intact for games routed through different DSP paths. New OBS Wayland window and screen/audio capture streams returned after restart.
+- Audio static is not conclusively resolved: the OBS warning about capture and audio-monitoring device overlap persists even though source monitoring is off, and the sampled old recording did not clip. A fresh short listening test remains necessary. No extra services, DSP changes, application removal, commit or push; app-owned OBS config is intentionally not checked into chezmoi. Evidence, settings and rollback: `docs/audio/obs-recording.md`.
+
+### Recovered stale Waydroid session and added conservative launcher self-healing
+
+- A Venus-mode Android session reported RUNNING with UNKNOWN guest IP and no Sway window. GUI relaunch returned zero without a surface; guest app service and GPU driver checks passed. Previous SurfaceFlinger crashes were observed, but their connection to this later stall is unproven. The existing `waydroid-restart` recovered the guest IP, new Waydroid window, and app access with no data reset.
+- Updated live and chezmoi `waydroid-launcher` to detect only the triple condition (RUNNING + UNKNOWN IP + no Sway surface) twice on explicit invocation, then invoke the existing clean `waydroid-stop` once and proceed. Five isolated condition tests, Bash/ShellCheck, and healthy real no-restart launch passed; future naturally stale branch remains to be verified. No resident watcher, auto-boot service, unrelated change, commit or push. See `docs/virtualization/waydroid-guide.md` and `docs/virtualization/waydroid.md`.
+
+### Recovered Waydroid on NVIDIA 620 and added on-demand driver self-repair
+
+- Diagnosed `waydroid-container.service` failure: NVIDIA `620.70.06` lacks the exact public ABI profile required by the prior `nvidia-prolapse` vendor image gated on `615.78.08`. The upstream `android/compute` gate refused the update (issue #41); no unsafe ABI bypass. Recovered via upstream `waydroid-nvidia-setup --mode venus --native-gl off --refresh 165`, restoring the official vendor image without touching userdata/Magisk. Verified Android boot complete, Sway window, Play Store/Kitsune Mask entries, NVIDIA RTX 5050 Venus/ANGLE Vulkan SurfaceFlinger and disabled-at-boot system/user services.
+- Added `waydroid-driver-ensure` and integrated it into the managed `waydroid-launcher`: on-demand compatibility check, polkit-authorized same-mode repair, Venus fallback, lock to prevent concurrent setup, correct renderer selected after switching, and restoration of disabled-at-boot policy; no resident watcher. ShellCheck, healthy no-op check, source/live parity and subsystem lifecycle audit passed; future real driver-mismatch repair path is not yet tested. Detailed recovery and rollback: `docs/virtualization/waydroid-guide.md` and `docs/virtualization/waydroid.md`. No commits or pushes.
+
+### Repaired stale Fuzzel entries and enabled Anger Foot LSFG 2x
+
+- Removed the unowned `~/.local/share/applications/vesktop.desktop` pointing at removed `/usr/bin/vesktop` and only its matching `~/.cache/fuzzel` recency entry. Updated `discord://` handling to installed `discord.desktop`, synchronizing the live and chezmoi MIME map while preserving existing Codex/RAR preferences. Fixed the other visibly broken user-level launcher, `btop.desktop`, by switching from absent Alacritty to installed `footclient` (same `app_id=btop` Sway floating behavior). Confirmed no other missing top-level command in visible user/system application entries; preserved other apps and Waydroid exports. Source of truth: `dot_config/mimeapps.list`, `dot_local/share/applications/btop.desktop`.
+- At the user's request, Anger Foot's Alt+G and desktop entries now explicitly include `nonsteam-run --lsfg 2x`, with MangoHud still disabled. Its game executable, existing Proton prefix, patched DLL and saved settings were untouched. LSFG profile validator and launcher dry-run passed; actual in-game frame generation has **not** been tested. Managed desktop source: `dot_local/share/applications/proton-anger-foot.desktop`; detailed docs: `docs/system/sway.md` and `docs/gaming/anger-foot.md`. No commit/push, packages, daemons or restart.
+
+### Set MangoHud and LSFG 2x defaults for newly registered non-Steam games
+
+- `proton-add-game` now passes `--mangohud --lsfg 2x` into new menu/desktop entries by default, with `--no-mangohud`, `--no-lsfg` and `--lsfg 3x|4x` overrides. This is a registration-time default only: direct `nonsteam-run` calls, Steam titles, existing custom registrations, Anger Foot's known presentation workaround and Elden Ring/Bloodborne special launchers are unchanged. ASUS Performance remains exclusively opt-in. Verified default, opt-out and 4x dry-run commands without starting a game or writing game files. Owner doc: `docs/gaming/nonsteam-run.md`.
+
+### Audited and hardened unified non-Steam Proton runner and registration
+
+- Fixed `nonsteam-run` self-matching `pgrep -f` guard (could prevent Proton launch) with prefix-scoped `flock`; removed dangerous prelaunch wineserver kills and automatic edits to game install `dxvk.conf`. Added managed read-only fallback, strict flag/runner/prefix validation, side-effect-free `--dry-run`, robust menu registration and stable title-prefix behavior. Kept `--perf`, MangoHud and LSFG opt-in; `--perf` now restores the previous actual ASUS profile; LSFG 2x/3x/4x now enables `LSFGVK_ENV=1` with its installed DLL. Existing special Bloodborne and Elden Ring launchers remain unmodified.
+- Fake-Proton scenario tests verified argument preservation, opt-in environment, mode restoration and repeated safe desktop/menu registration with paths containing spaces. The Anger Foot executable, its different patched/backup DLL hashes, `compatdata/anger-foot`, `steam_appid.txt` 1978590 and fullscreen/DXVK files were inspected but not modified. A real Anger Foot rendered-title-screen test is still outstanding. Updated `docs/gaming/nonsteam-run.md` and affected game docs; no commit/push.
+
+### Implemented universal nonsteam-run wrapper and refactored proton-add-game
+
+- Replaced per-game standalone script generation in `~/.local/bin/` with a single universal launcher: `~/.local/bin/nonsteam-run`.
+- Added granular CLI flags to `nonsteam-run`:
+  - `-p, --perf`: ASUS Performance mode during gameplay, restoring Balanced on termination.
+  - `-m, --mangohud`: attaches MangoHud telemetry overlay (`MANGOHUD=1`).
+  - `-l, --lsfg <2x|3x|4x>`: Lossless Scaling frame generation multiplier (LSFG-VK).
+  - Isolated prefix resolution, NVIDIA RTX 5050 Mobile dGPU offload, and safe DXVK defaults.
+- Refactored `proton-add-game` to register titles directly into `~/.config/rofi/custom-games.list` via `nonsteam-run`, avoiding per-game executable script creation in `bin`.
+- Removed legacy `anger-foot-run` and updated Anger Foot registration to use `nonsteam-run`.
+- Added fish function `~/.config/fish/functions/nonsteam-run.fish`. Verified menu integration, argument handling, and documentation in `docs/gaming/nonsteam-run.md`.
+
+### Restricted ASUS Performance power profile switching to Elden Ring
+
+- Removed automatic `asusctl profile set Performance` invocation and trap restoration from `anger-foot-run`, `bloodborne-run`, and the `proton-add-game` template engine.
+- Preserved hardware performance profile switching exclusively for `eldenring-lsfg` / `eldenring-launch-inner` per system gaming policy.
+- Verified live: system remains on Balanced profile; updated owning documentation in `docs/gaming/anger-foot.md` and `docs/gaming/bloodborne-bbport.md`.
+
+### Resolved Anger Foot black screen regression on launch
+
+- Root-caused persistent startup black screen to three compounding factors:
+  1. Unity `LogoScreen.IntroRoutine` WebM video preparation stall (`WaitUntil(() => _videoPlayer.isPrepared)` hung indefinitely due to missing container GStreamer codecs).
+  2. Xwayland mode-switch stall triggered by `ExclusiveFullScreen` mode at 1.3x fractional scaling.
+  3. Vulkan swapchain presentation stall caused by MangoHud layer hooking before FIFO swapchain establishment.
+- Patched `LogoScreen.Start` in `Assembly-CSharp.dll` to directly invoke `LoadTitleScreen(3)` (`LoadingTransition.FadeFromBlackOnly`), cleanly bypassing the video hang. Pre-patch backup kept at `Assembly-CSharp.dll.bak`.
+- Added `dxvk.conf` with `dxgi.allowFse = False` / `d3d11.enableExclusiveFullscreen = False` and set `"FullScreenMode": "FullScreenWindow,1"` in prefix `Settings.json`.
+- Disabled MangoHud in `~/.local/bin/anger-foot-run` (`MANGOHUD=0`) and enforced `PROTON_ENABLE_NVAPI=0`.
+- Verified live: game boots directly into 3D Title Screen on Sway Workspace 4 with full audio, 3D character/environment rendering, and responsive UI controls. Detailed in `docs/gaming/anger-foot.md`.
+
+### Re-enabled REA MCP tools in Codex
+
+- Restored the `mcp_servers.rea` stdio registration in the app-owned `~/.codex/config.toml` with command `/home/onyx/.local/bin/rea`, args `mcp`, 30 s startup and 450 s tool timeout. The registration had been absent since the 2026-10-26 disable; existing Codex settings were preserved and a timestamped pre-change config backup was kept.
+- Verified with `codex mcp get rea` (enabled, stdio), `rea doctor --client codex --json` (`registration:codex` healthy), and a direct MCP `initialize` handshake returning `rea` 6.8.0. No native analysis engine (Ghidra, Hopper, IDA, JADX, Kuna) is installed, so engine-dependent operations remain unavailable. Restart Codex to load the server. Details in `docs/system/agent-control-plane.md`.
+
+### Removed incompatible absolute USB tablet from running Nano11
+
+- Confirmed QEMU had both PS/2 relative mouse and selected USB HID Tablet, a documented Looking Glass source of cursor misalignment/click offsets. Resolved tablet precisely to `/machine/peripheral-anon/device[0]` and hot-unplugged **only that device** using HMP `device_del`. Verified `info mice` shows exclusively active PS/2 Mouse, `info usb` shows no tablet, and guest remains running at 6 GiB with LGMP input.
+- Removed `-device usb-tablet` from source/live `nano11` for future clean boots; retained USB XHCI controller and all existing guest/RDP/capture settings. No reboot or disk changes. Human pointer acceptance still required; details and rollback in `docs/virtualization/nano11-native-qemu.md`.
+
+### Recovered Nano11 restart and verified running 6 GiB guest
+
+- The requested `win restart` waited on Windows ACPI guest shutdown past the existing 120-second limit. The guest stopped, but no automatic relaunch occurred. Verified disk/process/unit state and started Nano11 once without force poweroff. Live QEMU PID 39649 reports 6 GiB and 12 vCPUs; the Looking Glass client received 1920x1200 frames and connected input/clipboard.
+- Made normal `nano11 stop` / `restart` more tolerant of slow Windows exit: wait 180 rather than 120 seconds, emit periodic progress, and check the shutdown boundary again. No VM restart was used to test this revised code, so runtime acceptance remains pending.
+
+### Unified Alt+W and Caps+Tab focus toggle
+
+- Moved xremap global `Alt-w` from `rofi-windows open` to the existing one-shot `win-focus-toggle` action used by `CapsLock-Tab`. Both keys now navigate between the existing Windows workspace 5 and the previous Linux workspace without launching a stopped guest. Kept Caps+Esc for starting Windows, Alt+Shift+W for the menu, and other shortcuts. Updated the helper notification to point to Caps+Esc instead of Alt+W. Source/live xremap and helper parity, validator and service restart tested; physical chord acceptance remains user-side. No VM stop or restart.
+
+### Restored original instant interactive controls; reduced Caps+Z/X vibrance latency
+
+- Reverted native volume `volume-notify`, backlight/subzero `change-brightness`, and `wl-gammarelay` night-light `toggle-nightlight` / `adjust-nightlight` **byte-for-byte** to pre-smoothing backups and tracked Git HEAD. Existing Fn/Caps/gesture chords, native mute, OSD/game notification policy, backlight and gamma limits, and current user settings remain intact. The smoothing experiment below is historical, not currently active.
+- Replaced the transient vibrance ramp with a direct native NVIDIA ioctl per Caps+X/Z press, using optimized integer-only Bash on the hotkey path, a short serialization lock, and nonblocking OSD; eliminated xremap's intermediate `/bin/sh -c` launch for those two keys. Exact NVIDIA 620.70.06 driver-match guard retained. Live six-step up/down test completed with 12.6–17.5 ms command latencies (median 13.2 ms) and restored the starting 85% raw 716 level. `smooth-control` is no longer used by any active control. Owner docs: `docs/system/interactive-control-smoothing.md`, `docs/display/nvidia-vibrance.md`, `docs/system/xremap.md`.
+
+### Prepared Nano11 6 GiB allocation for next launch
+
+- Changed only the Nano11 QEMU memory option `-m 4G` -> `-m 6G` in the chezmoi and live launcher. Existing guest PID was still running at 4 GiB and was not restarted, stopped or hotplugged. Kept all existing CPU, VFIO, IDD, startup and stop settings. Verified Bash syntax and source/live parity; next-launch memory confirmation pending.
+
+
+### Smoothed interactive vibrance, night-light, brightness and volume controls
+
+- Added `smooth-control`, a stdlib, short-lived per-domain ramp worker with atomic target updates and separate `flock` guards. Updated existing `nvibrant-ctl`, `change-brightness`, `volume-notify`, `toggle-nightlight` and `adjust-nightlight` launchers without rebinding any keys. Nominal smoothstep durations: vibrance 230 ms, brightness 190 ms, volume 160 ms, night light 280 ms. Direct mute and original OSD/workspace suppression remain instantaneous; no new service or compositor animation.
+- Verified with NVIDIA 620.70.06 and active PipeWire/gamma relay: vibrance 614->716->614 plus rapid up/up/down/down coalescing; volume 100->95->100; hardware brightness 0->5->0 and below-zero gamma 1.00->0.95->1.00; night-light 4500->4600->4500 K. Original state restored. Fixed a notification AWK error caught in the first live vibrance test; isolated script backups retained at `~/.local/state/smooth-controls-backup-20261110/`. See `docs/system/interactive-control-smoothing.md`.
+
+### Set up oguri animated wallpaper daemon and control tooling
+
+- Installed `oguri-git r116.8b47791-1` from AUR (Snapper snapshot 474/475 created) providing `/usr/bin/oguri`, `/usr/bin/ogurictl`, and `/usr/bin/oguri-swaybg`. Added `oguri-git` to `packages/aur-explicit.txt`.
+- Configured chezmoi template `dot_config/oguri/config` with strict key=value syntax (no surrounding spaces around `=`). Provisioned sample animation asset `~/.local/share/oguri/oguri-cap.gif`.
+- Added on-demand systemd user service `oguri.service` (disabled by default to honor zero-idle CPU principles for competitive gaming) and management helper `dot_local/bin/executable_oguri-wallpaper` with fish completions.
+- Verified daemon startup, IPC socket creation (`/run/user/1000/oguri`), dynamic `ogurictl output` updates, toggle lifecycle, and clean return to Sway's underlying static wallpaper upon daemon stop. Created reference guide `docs/display/oguri.md`.
+
+
+### Added local Dusk Linux painted/minimal wallpapers without replacing theme defaults
+
+- Reviewed the 1,507-image `dusklinux/images` gallery and manually selected 25 artistic/minimal images (14 dark, 11 light), using pinned source revision and per-image SHA-256 metadata. Downloaded/normalized them locally to ~11.8 MiB WebP under `~/.local/share/theme/wallpapers/dusklinux/`; image binaries are **not** tracked because the upstream repo has no license/artist attribution.
+- Added the managed metadata, explicit `theme-curated-art-fetch --fetch` restore helper, local color/style matcher, and small `theme-set` / `theme-wallpaper` adapters. Existing Omarchy images remain first and default, while up to three curated options are added per eligible theme. In the 339-theme test, 327 had three supplementary options and all 12 deliberately solid palettes stayed solid. Tested 25/25 local assets, all theme preflights, selection priority and read-only no-network cycling; verified current `windows-dark-mode` wallpaper was not changed. No daemon, startup downloader, commit or push. See `docs/theme/dusklinux-curated-artwork.md`.
+
+### Retired unstable Windows 10 X-Lite; preserved clean-ISO rebuild knowledge
+
+- At user's explicit request, the isolated X-Lite/Micro10 VM was permanently removed after confirming both QEMU guests stopped, no X-Lite disk writer or mount, valid single-image backing chain and five QCOW2 internal snapshots. Unique tracked job `retire-xlite-vm-20261110-retry1.service` finished successfully (exit 0), deleting only `/mnt/Games/VirtualMachines/xlite-micro10/` (~23 GiB). Nano11 and its separate backup were verified present and left untouched; no force-stop, host GPU rebind or host reboot.
+- Condensed successful setup procedures and repeated Looking Glass/idle 7–11-core runaway CPU findings into one reusable guide `docs/virtualization/windows-vm-rebuild-guide.md`. Removed old specialized X-Lite launcher, desktop entry, guest-only scripts, outdated dedicated docs and state; retained general Nano11 controls.
+- Switched shared `windows-backend`, `rofi-windows`, `win-focus-toggle`, native Fish `win`/completions and Sway window assignment to Nano11-only. `win 10` now rejects explicitly; existing on-demand `win`, Alt+W, Caps+Esc, Caps+Tab, Windows menu, RDP/restart and emergency controls preserved. Source/live syntax, menu and source parity validated without starting Nano11. No commit/push.
+
+
+### Windows tools optical fallback and unified Caps+Esc / Alt+W actions
+
+- Verified live QEMU had attached the read-only `WIN10TOOLS` USB storage image; Windows Explorer nevertheless showed only C:. The underlying USBSTOR/automount problem is unresolved. A readonly SATA hard disk was rejected and SATA optical hotplug was unsupported; the unattached HMP block backend was cleaned up. Created a verified ISO9660 optical image containing `OPTIMIZE.PS1` and changed opt-in `WIN10LAB_TOOLS=1` future boots to use a read-only AHCI SATA CD-ROM at port 2. QEMU startup smoke test and Bash/ShellCheck passed. No guest reboot or data modification; next-boot Windows enumeration is not yet verified. The debloat script remains unexecuted.
+- Added global xremap `CapsLock-Esc` and `Alt-w` actions pointing to the same existing `rofi-windows open` helper; removed duplicate Sway plain Alt+W binding. Bare CapsLock→Escape, Caps+Tab Linux/Windows toggle, Alt+Shift+W menu and all other Windows/Super mappings remain intact. xremap and Sway validation passed; physical chord tests are still required. Backups are in `~/.local/state/win-caps-esc-20261110/`. Owning docs: `docs/virtualization/win10-xlite-experiment.md`, `docs/system/xremap.md`, `docs/system/sway.md`. No commit/push.
+
+### Contained Windows 10 IDD/CPU stall and staged reversible guest optimization
+
+- Windows 10 X-Lite's Looking Glass producer failed after 21m55s, LGMP input/clipboard sessions were lost, and the guest's QEMU PID 149949 used 4.97 host CPU cores with package temperature about 86–88°C. Sent HMP `stop` to preserve memory/disk and eliminate QEMU CPU consumption, then used the existing guarded paused-VM `win10lab stop` via tracked `win10-graceful-recovery-20261110-012441.service`. The guest exited cleanly (0) without force-poweroff. Offline `qemu-img check -q` passed (tracked `win10-offline-qcow-check-20261110-012619.service`); transient monitor/TPM/SPICE sockets were gone. Other host loads were preserved. This is a safe recovery, **not** a permanent fix for the repeated X-Lite IDD/0x101 issue.
+- Prepared but **did not run** Windows `Optimize-Guest.ps1` (read-only audit by default; backed-up service/task/registry changes on explicit apply; restore supported). The separate read-only `WIN10TOOLS` FAT16 media holds the script and only appears on an opt-in `WIN10LAB_TOOLS=1` boot. Normal VM boots remain free of extra USB devices, and no Microsoft Store/AppX, graphics, security, networking or Power BI prerequisites were changed. QEMU media options, Bash/ShellCheck and source/live parity were checked; PowerShell guest execution has not been tested.
+- The physical Caps+Tab still failed with the earlier F23 workaround. Verified `xremap.service` lacked `SWAYSOCK`; updated the on-demand focus helper to resolve the active Sway socket, restored direct xremap launch and added inhibited `Alt+Ctrl+Tab` fallback. Helper testing with missing socket environment, xremap and Sway validation, and service restart passed. Physical chord acceptance still pending. Owning docs: `docs/virtualization/win10-xlite-experiment.md`, `docs/system/xremap.md`, `docs/system/sway.md`; no commit/push.
+
+### Earlier F23 Caps+Tab trial (superseded 2026-11-10)
+
+- Replaced xremap's direct `CapsLock-Tab` launch with reserved `F23`, bound in Sway as `--inhibited --no-repeat F23` to the existing on-demand `win-focus-toggle` helper. This moves focus switching into the compositor's shortcut-inhibition-aware binding path for both selectable Windows VM backends; no xremap daemon, VM setting, Right Ctrl behavior or guest input configuration was changed.
+- Verified xremap config, `sway-check` (0 warnings), source/live parity and Sway reload. With X-Lite running and its Looking Glass window focused, Wayland-injected F23 toggled Windows workspace 5 → Linux workspace 2; the reverse 2 → 5 → 2 also passed. Physical Caps+Tab and Nano11 input acceptance remain to be confirmed by the user. Backups: `~/.local/state/win-caps-tab-20261110/`; documented in `docs/system/xremap.md` and `docs/system/sway.md`. No commit/push.
+
+### Native Discord voice works over Jio USB
+
+- Installed official `discord 1:1.0.168-1` after a root Snapper snapshot and added it to the gaming package manifest. The native client showed Voice Connected in LEGENDS/Gaming with Wi-Fi disconnected; Discord-owned UDP port 57674 to 104.29.139.89:19301 was [ASSURED]. No VPN or persistent Discord service.
+- Brave/Vesktop still failed WebRTC ICE/DTLS; this is a verified working native-client workaround, not a fully diagnosed browser root cause. Live MTU 1500 is temporary, the saved MTU 1372 unchanged. See `docs/system/discord-jio-voice.md`.
+- Corrected stale WARP installed-state docs after verifying complete package/service removal. Preserved unrelated uncommitted edits; no commit/push.
+
+## 2026-11-09
+
+### Fixed mpv visibility and ChatGPT scratchpad & border handling
+
+- Configured Sway window rules in `30-window-rules.conf` for media players (`mpv`, `vlc`, `celluloid`, `totem`, `amberol`): players open tiled in tabbed view (`floating disable, layout tabbed, focus`). Added fish function `~/.config/fish/functions/mpv.fish` that automatically dismisses `scratch-term` upon launching `mpv` so the dropdown scratchpad never obscures the tabbed video window beneath it. Verified `mpv` active in Workspace 2 tabbed container alongside Brave and ChatGPT.
+- Added explicit Sway rules assigning `chatgpt` to workspace 2 (`floating disable, border pixel 2, layout tabbed`), resolving missing borders caused by client-side decorations (CSD).
+- Added `chatgpt`, `mpv`, `vlc`, `celluloid` to `PROTECTED` in `~/.local/bin/scratch-utility-toggle` so `Win+Shift+-` cannot accidentally banish them to the utility scratchpad queue. Updated `chatgpt-focus` to discover both tiled and floating instances. Applied via chezmoi and reloaded Sway with `sway-safe-reload`. No commit or push.
+
+### Installed signed AeroFTP 4.2.7 on CachyOS
+
+- Installed `aeroftp-bin 4.2.7-1` from the upstream-maintained AUR package after reviewing its PKGBUILD. Upstream release SHA-256 and Sigstore verified, and desktop/MIME/icon registration completed. Installed WebKitGTK 4.1 and the package's other missing dependencies without upgrades or removals; Snapper package hooks created root snapshot pairs 458/459 and 460/461.
+- Added `aeroftp-bin` to the chezmoi AUR manifest and `docs/system/aeroftp.md`. `/usr/bin/aeroftp` and `aeroftp-cli --version` were verified; on-demand service audit had zero outstanding findings. The graphical window and Google Drive OAuth sign-in were not yet tested. No new daemon, commit, or push.
+
+## 2026-11-08
+
+### Restored NVIDIA digital vibrance after 620.70.06 driver upgrade
+
+- `nvibrant-bin 1.3.0` lacked matching NVIDIA 620.70.06 NVKMS structure layout and its 615 fallback failed `AllocDevice ioctl`, breaking Caps+X/Z despite valid xremap mappings. Built a pinned upstream `nvibrant` executable against the installed 620.70.06 NVIDIA DKMS headers and installed a user-scoped versioned binary, with managed `nvibrant-current` exact-driver enforcement and `nvibrant-build-local` rebuild helper. The repaired `apply-vibrance` reports failures, and managed `nvibrant-ctl` applies before saving and no longer claims success for a failed ioctl or writes when inspecting.
+- Verified NVIDIA 620.70.06 on RTX 5050 AsusMuxDgpu: connected DP connector 2 returned `Set vibrance (614) Success`; startup applicator passed; the Caps+X/+Z command path completed 70%/65% round trip while preserving original 614; xremap was active and its watched portable `$HOME`-based bindings validated. No driver downgrade, system package replacement, compositor restart, daemon, commit or push. Physical keypress acceptance remains separate. See `docs/display/nvidia-vibrance.md` and `docs/system/xremap.md`.
+
+### Added persistent `win switch 10|11` wrapper for the entire Windows desktop
+
+- Introduced `~/.local/bin/windows-backend` (`dot_local/bin/executable_windows-backend`) as a single persistent, no-daemon selector. `win switch 10|11` gracefully stops the other running VM, verifies exit, stores the new preference atomically, then opens that VM on workspace 5. `win select 10|11` changes preference only if safe; `win current` reads selected/active/effective backend. Active VM takes precedence, both-active conflicts fail closed, default is 11 until changed; `~/.local/state/windows/selected` is private.
+- The same selection now drives Fuzzel/Rofi `rofi-windows`, `Alt+W`, `Super+Alt+W`, `Super+Ctrl+5`, unprefixed Fish `win` actions and global `CapsLock+Tab`; no xremap mapping changed. Explicit per-guest commands remain available for recovery.
+- With both guests stopped, verified selecting 10 affected Fish status and Fuzzel menu routing, then restored 11 and confirmed private state persisted. A mocked Fish round-trip passed stop11 → launch10 → stop10 → launch11; injected failed stop preserved state and did not launch. Added bounded cleanup of stale Nano11 LG/RDP windows and KVMFR ownership after verified shutdown. Bash/ShellCheck, Fish syntax, Sway validation/reload and source/live checks passed. No real guest was started, stopped or reset as part of the selector test; an actual transition remains untested. Preserved existing source changes and VM disks; no commit or push.
+
+### Switched shared Windows controls to native Nano11, preserving X-Lite
+
+- Switched the default behind `Alt+W`, `Super+Ctrl+5`, `Alt+Shift+W` Fuzzel menu and native Fish `win` from X-Lite to the existing Nano11 guest. Nano11's Looking Glass and RDP now use **workspace 5**; xremap `CapsLock+Tab` is unchanged but its helper recognizes either running VM. Nano11 client explicitly uses Right Ctrl, capture-on-focus, keyboard grab, Windows-key forwarding, visible alerts and Sway shortcut inhibition. `win 10 ...` and both separate disks/UEFI/TPM states are preserved.
+- Added `nano11 force-stop [--now]` so the existing menu's emergency stop continues to work with Nano11, using a lifecycle lock, exact disk-verified PID, HMP `quit` and same-PID SIGTERM fallback; normal ACPI stop remains separate. Interactive CLI still requires `FORCE POWER OFF`, while the menu uses explicit `--now`. Bash/ShellCheck and invalid-argument refusal passed. **No real Nano11 emergency powercut was executed.**
+- Verified live/source parity, Fish syntax, `sway-check` (0 warnings), Sway reload, five generic icon menu entries, native Nano11 QEMU PID `323585` (12 vCPU/4 GiB), Intel PF on `i915`/VF on `vfio-pci`, and X-Lite stopped. Looking Glass produced Windows 11 build 26200 1920x1200 BGRA frames with LGMP input/clipboard and SPICE audio; Caps+Tab helper completed **5 → 2 → 5** with Nano11 focused.
+- Separate host issue discovered: loaded NVIDIA module **615.78.08** versus installed NVIDIA userspace **620.70.06**, with NVML mismatch and Looking Glass EGL falling back to llvmpipe (~1.6 host CPU cores). No reboot/driver change attempted. Physical keyboard acceptance and real emergency-stop validation remain outstanding. Backups: `~/.local/state/windows-backend-switch-20261108/`. Details: `docs/virtualization/nano11-native-qemu.md`, `docs/system/sway.md`, `docs/system/xremap.md`, `docs/system/terminal-shell.md`.
+
 ## 2026-11-07
+
+### Made Windows emergency stop one click; staged isolated idle-timer test
+
+- At the user's explicit direction, changed the **Force Stop Windows** menu entry to call `win10lab force-stop --now` directly, without a second terminal/prompt. Preserved the backend's lifecycle lock, QCOW2-verified process ownership, HMP quit and verified-PID SIGTERM fallback; the direct CLI without `--now` remains confirmation-gated and normal `win stop` stays graceful. **Live-verified:** hard-stopped paused X-Lite PID 149709; QEMU exited, Nano11 stayed stopped, and the offline QCOW2 integrity check passed. Guest unsaved data was not guaranteed preserved.
+- Examined earlier guest 0x101 CLOCK_WATCHDOG_TIMEOUT (minidump) and separate UMDF/Looking Glass System 10110/10111 failures. An `hv-relaxed` idle run still lost source at 25m46s; later run lost LGMP after 15m15s with QEMU using 10.89 host cores. As a **next-boot A/B hypothesis, not a verified repair**, changed only X-Lite QEMU `-machine` to `hpet=off`, matching one timer attribute of the known-working Nano11 VM. Backed up the launcher and created stopped-QCOW2 snapshot `before-hpet-off-20261107`; diskless KVM probe, Bash/ShellCheck and live/source parity passed. No Windows boot was performed under this setting because host package temperature was ~90 C with unrelated Playwright CPU load. Work remains blocked on safe 30-minute idle/driver acceptance, not on the menu implementation. Details: `docs/virtualization/win10-xlite-experiment.md`.
+
+### Previous confirmation-gated Windows VM force-stop menu entry (superseded later on 2026-11-07)
+
+- Added a fifth icon-backed **Force Stop Windows** action to the existing generic Fuzzel/Rofi Windows menu, without changing its normal Stop/Restart/Open/FPS wiring, Sway bindings, Nano11 or the guest. When X-Lite is running, the new action launches a one-shot Foot terminal outside fullscreen guest workspace 5 (when applicable) to invoke the pre-existing `win10lab force-stop` confirmation. The user must type `FORCE POWER OFF` before its locked, verified-QEMU-PID monitor-quit/SIGTERM path runs; it never auto-escalates `win stop` or sends SIGKILL.
+- Verified Bash/ShellCheck, exact five icon/text rows rendered without a VM startup, and chezmoi/live launcher parity. Both guests were stopped; no actual hard kill occurred. The host nevertheless reached 96 C and ~5700 RPM fan; a two-second measurement attributed ~1.0 CPU core to an active Playwright Chromium test and ~0.8 core to a Brave renderer. Thus, this current thermal event was independent of QEMU, while prior guest clock/IDD CPU-runaway episodes remain unresolved. Backups: `~/.local/state/win10lab/menu-force-stop-20261107/`; runbook: `docs/virtualization/win10-xlite-experiment.md`.
 
 ### Reviewed full chezmoi worktree for publication; privileged upgrade deferred
 
@@ -800,6 +1104,23 @@ Rules:
 - Restored normal guest keyboard-grab behavior; because Right Ctrl still failed in the user test, added a reversible Windows 10-only `KEY_F12` capture-release default (via the existing xremap `CapsLock+=` F12 mapping). Client-only relaunch logged F12, captured a real 1920x1200 frame, and left QEMU untouched; physical F12 acceptance is **not yet verified**.
 - Recorded user-supplied Microsoft Store `Microsoft-Store.msix` version 22308.1401.6.0 framework-install progress and WinGet `msstore` `0x8a15005e` certificate-pinning error; success and root cause remain unverified. Compared the source-documented Store-client alternatives Raven, Alt App Installer, MSStoreHelper, MSStoreDownloader and MSStoreNoAuth; only the last still depends on WinGet's broken Store source. No third-party installer was installed; no Store services or framework dependencies were removed.
 
+### Bookmarks and web favorites launcher restoration
+
+- Restored dedicated bookmarks launcher `rofi-favorites` (with `rofi-bookmarks` symlink) bound to `Alt+u`, `Alt+b`, and `Alt+Shift+b` in `dot_config/sway/config.d/40-keybindings.conf`.
+- Sourced bookmarks from `~/.config/rofi/favorites.list`, adding Amazon and annotating ASUS TUF Hardware & Drivers (Dolby) inventory. Uses Fuzzel layer-shell dmenu on Wayland with SVG icon hints (falling back to Rofi floating theme), opens the selected target in the browser via `xdg-open`, and focuses Workspace 2.
+- Synchronized Fuzzel `.desktop` entries via `sync-fuzzel-favorites` (15 entries synced) and validated Sway config via `sway-check` and `sway-safe-reload`.
+
+### Foot terminal URL mode execution fix
+
+- Fixed `Alt+o` URL jump mode failing to launch links when pressing hint keys (e.g. `s`, `a`). Root cause was `foot-server.service` running in a systemd user environment with `PATH=/usr/local/bin:/usr/bin`, failing to find `foot-url-launch` in `~/.local/bin` (`spawn: foot-url-launch: failed to spawn: No such file or directory`).
+- Symlinked `/usr/local/bin/foot-url-launch` to `~/.local/bin/foot-url-launch` for immediate live resolution in `foot --server`, added `dot_config/environment.d/05-path.conf` to persist `~/.local/bin` in the systemd user manager environment, and updated `foot-url-launch` to auto-discover `SWAYSOCK` and switch to Workspace 2 when web URLs open.
+
+### Neovim smart file navigation and pathfinder.nvim integration
+
+- Installed and configured `HawkinsT/pathfinder.nvim` via `lazy.nvim` (`dot_config/nvim/lua/plugins/pathfinder.lua`) providing visual jump targets (`<leader>pf`, `<leader>pF`, `<leader>px`) and multi-line file/URL scanning (`]f`, `[f`, `]u`, `[u`).
+- Implemented `configs.smart_gf` (`dot_config/nvim/lua/configs/smart_gf.lua`) mapped to `gf`, `gF`, `g f`, `gx`, and `g x` in `dot_config/nvim/lua/mappings.lua`.
+- Added support for `${VAR}` and `$VAR` environment variable expansion, shell variable assignment prefixes (`PATH=...`), colon-separated path lists, `file:line:col` coordinates, markdown links (`#L123`), and directory opening via `oil.nvim`. Added curly braces to `isfname` in `dot_config/nvim/lua/options.lua`. Verified in headless Neovim against `PATH=${HOME}/.local/bin:...` opening `oil:///home/onyx/.local/bin/`.
+
 ### Looking Glass Windows 10 keyboard capture correction
 
 - Restored `input:grabKeyboard=yes` in the source-managed `win10lab` launcher after the earlier `no` setting interfered with capture/Right Ctrl behavior; preserved `input:ignoreWindowsKeys=yes`, Right Ctrl escape, and Sway's per-window shortcuts-inhibitor exception.
@@ -818,3 +1139,17 @@ Rules:
 - Added a dedicated workspace 9 Sway rule, Super+Alt+9 direct launch/focus, a Fuzzel/Rofi Windows 10 entry and a desktop application alongside the existing Nano11 workspace 10.
 - Verified after a clean guest stop/restart: X-Lite QEMU runs 12 vCPUs (6 cores x 2 threads) pinned to P-core threads 0-11, retaining 4 GiB RAM and isolated VFIO/QCOW2; offline QCOW2 check passed. Looking Glass received real 1920x1200 frames fullscreen on workspace 9 with host-auto pacing (sustained 165 guest updates not verified).
 - Kept guest starts on demand, cross-VM VF ownership checks, and the previously verified graceful shutdown fallback. Actual sustained 165 UPS, physical input, audio/clipboard and another host cold boot remain independent acceptance gates.
+
+### ChatGPT Local Coder monitor 12-hour AM/PM timestamp formatting
+
+- Updated `dot_local/bin/executable_local-coder-monitor` and live `~/.local/bin/local-coder-monitor` jq stream parser to convert UTC ISO-8601 timestamps from `.mcp-audit.log` into local 12-hour AM/PM time format (`%I:%M:%S %p`) via `fromdateiso8601 | strflocaltime`.
+- Verified live rendering in `ChatGPT Local Coder Monitor` (`dc-term`) floating scratchpad (`Win + Alt + D`). Fallback protection preserves raw timestamp strings if parsing fails.
+
+### Local Coder Policy Gateway production deployment and version switch
+
+- Deployed secured Local Coder Policy Gateway to `/opt/local-coder-policygate` running under isolated system user `localcoder` (UID 947, GID 947) via `chatgpt-local-coder-policygate.service` on ports 3000 (MCP) and 3001 (Admin UI), preserving the existing Tailscale Funnel.
+- Implemented `local-coder-switch` CLI supporting `new`, `legacy`, and `status` actions with automated health checks, port collision prevention, and automatic rollback to the previous version on failure.
+- Implemented `policygate-project` CLI for scoped mapping of host project directories to `/srv/local-coder/projects/` under UID 947 and `ProtectHome=yes` using POSIX ACLs.
+- Cleaned exposed tool manifest: permanently retired unsafe capabilities (`node_repl`, `ponytail_turn`) from the slim profile (33 tools active); verified `system_context`, `system_inspect`, `system_job`, and `chezmoi_inspect` are callable without deadlock.
+- Dynamic security mode reporting: `agent_status` and permission metadata dynamically reflect active mode (`STANDARD`, `STRICT`, `YOLO`); verified `full_machine_access: false` unless an authorized YOLO lease is active.
+- Verified cryptographic append-only audit ledger (`audit.jsonl`), Ed25519-signed operator approval workflow, YOLO lease activation/expiry, and 1.8-second version switching.

@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# local-coder-start: Start ChatGPT Local Coder MCP server & Tailscale Funnel
+# ==============================================================================
+set -euo pipefail
+
+ENV_FILE="$HOME/Projects/chatgpt-local-coder/.env"
+PROJECT_DIR="$HOME/Projects/chatgpt-local-coder"
+
+if [ ! -f "$ENV_FILE" ]; then
+    echo "Error: Configuration file not found at $ENV_FILE" >&2
+    exit 1
+fi
+
+# Ensure port is not occupied by an unrelated process
+check_port_conflict() {
+    local port="$1"
+    local pid
+    pid=$(ss -tlpn "sport = :$port" 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2 || true)
+    if [ -n "$pid" ]; then
+        local current_unit_pid
+        current_unit_pid=$(systemctl --user show -p MainPID --value chatgpt-local-coder.service 2>/dev/null || echo "0")
+        if [ "$pid" != "$current_unit_pid" ]; then
+            echo "Error: Port $port is in use by unexpected PID $pid. Aborting to avoid terminating unrelated services." >&2
+            exit 1
+        fi
+    fi
+}
+
+check_port_conflict 3000
+check_port_conflict 3001
+
+# 1. Ensure tailscaled is running
+if ! systemctl is-active tailscaled.service >/dev/null 2>&1; then
+    echo "Starting tailscaled.service..."
+    sudo systemctl start tailscaled.service
+fi
+
+# 2. Check Tailscale authentication
+if ! tailscale status >/dev/null 2>&1; then
+    echo "Tailscale is not logged in."
+    tailscale status 2>&1 || true
+    echo ""
+    echo "Please authenticate Tailscale in your browser, then run local-coder-start again."
+    exit 1
+fi
+
+# 3. Start chatgpt-local-coder.service
+if systemctl --user is-active chatgpt-local-coder.service >/dev/null 2>&1; then
+    echo "chatgpt-local-coder.service is already active."
+else
+    echo "Starting chatgpt-local-coder.service..."
+    systemctl --user start chatgpt-local-coder.service
+fi
+
+# 4. Wait for local health endpoint
+echo "Waiting for local health check (port 3000)..."
+READY=0
+for i in {1..30}; do
+    if curl -s -f http://127.0.0.1:3000/health >/dev/null 2>&1; then
+        READY=1
+        break
+    fi
+    sleep 0.5
+done
+
+if [ "$READY" -ne 1 ]; then
+    echo "Error: Server did not respond on http://127.0.0.1:3000/health within 15 seconds." >&2
+    journalctl --user -u chatgpt-local-coder.service -n 20 --no-pager >&2
+    exit 1
+fi
+
+# 5. Ensure Tailscale Funnel is forwarding port 3000
+echo "Configuring Tailscale Funnel on port 3000..."
+if ! tailscale funnel status 2>/dev/null | grep -q "3000"; then
+    tailscale funnel --bg 3000
+fi
+
+echo ""
+echo "ChatGPT Local Coder successfully started."
+echo "--------------------------------------------------"
+local-coder-status

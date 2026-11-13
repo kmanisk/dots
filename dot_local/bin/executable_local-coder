@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# local-coder: CLI dispatcher for ChatGPT Local Coder MCP server & Funnel
+# ==============================================================================
+set -euo pipefail
+
+ACTION="${1:-status}"
+
+case "$ACTION" in
+    start)
+        exec local-coder-start
+        ;;
+    stop)
+        exec local-coder-stop
+        ;;
+    restart)
+        local-coder-stop
+        sleep 1
+        exec local-coder-start
+        ;;
+    status)
+        exec local-coder-status
+        ;;
+    logs|log)
+        exec journalctl --user -u chatgpt-local-coder.service -f
+        ;;
+    *)
+        echo "Usage: local-coder [start|stop|restart|status|logs]" >&2
+        exit 2
+        ;;
+esac

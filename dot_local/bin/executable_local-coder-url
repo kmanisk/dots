@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# local-coder-url: Display current ChatGPT Local Coder connector URL locally
+# ==============================================================================
+set -euo pipefail
+
+AGE_FILE="$HOME/.local/share/chatgpt-local-coder/connector.age"
+KEY_FILE="$HOME/.local/share/chatgpt-local-coder/key.txt"
+ENV_FILE="$HOME/Projects/chatgpt-local-coder/.env"
+
+if [ -f "$AGE_FILE" ] && [ -f "$KEY_FILE" ]; then
+    if [ "${1:-}" = "--all" ] || [ "${1:-}" = "-a" ]; then
+        age -d -i "$KEY_FILE" "$AGE_FILE"
+    else
+        age -d -i "$KEY_FILE" "$AGE_FILE" | grep -m1 '^https://' || true
+    fi
+elif [ -f "$ENV_FILE" ]; then
+    TOKEN=$(grep '^MCP_TOKEN=' "$ENV_FILE" | cut -d= -f2)
+    echo "https://onyx.tail646579.ts.net/mcp/$TOKEN"
+else
+    echo "Error: Encrypted credentials not found." >&2
+    exit 1
+fi

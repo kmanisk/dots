@@ -26,6 +26,7 @@ The goal is to let different agents work on the same workstation without relying
 - `~/.local/share/agent/environment.json` — generated runtime evidence; never treat it as permanent configuration or commit it.
 - `~/.local/share/agent/projects.json` — project registry used by the helper scripts.
 - Desktop Commander Remote runs as the user unit `desktop-commander.service`. It is enabled under `default.target`, so the remote bridge starts automatically with the user systemd session. The unit is chezmoi-managed at `dot_config/systemd/user/desktop-commander.service`, and `run_onchange_linux-20-reconcile-services.sh.tmpl` restores the enabled state on future applies/rebuilds.
+- Local Coder Policy Gateway runs as the dedicated system unit `chatgpt-local-coder-policygate.service` (User: `localcoder`, UID 947), providing a secured 35-tool MCP bridge for ChatGPT Web and Codex over Tailscale Funnel. It enforces three operational security modes (STRICT, STANDARD, YOLO) and records to an append-only hash-chained audit ledger (`/var/log/local-coder-policygate/audit.jsonl`). Detailed documentation lives at `docs/system/chatgpt-local-coder.md`.
 
 ### Task-local continuity
 
@@ -97,6 +98,24 @@ The canonical custom skill source is `dot_agents/skills/`. `sync-agent-skills` e
 `run_after_90-sync-agent-skills.sh` re-runs this synchronization after every `chezmoi apply`. It preserves built-in/non-symlink agent skills and removes only stale symlinks previously managed from this repository. Every shared skill carries an authority warning: it is procedural knowledge, not a current-state source.
 
 The 2026-11-01 skill refresh originally treated BlueZ native HID reconnect as sufficient for the Katana keyboard, but fresh 2026-11-02 live testing superseded that assumption: BlueZ's retry window can expire after extended keyboard sleep, so the dedicated reconnect service was restored and subsequently migrated from Python/GLib to native C `sd-bus`/`sd-event`. `bluetooth-autoconnect` now points agents to that current owner instead of preserving the temporary BlueZ-only assumption. The same refresh also removed an Intel-only rendering invariant from `waydroid-cachyos-root`; that skill routes agents to the live `waydroid.cfg`, current `waydroid-nvidia-bin` mode, and `docs/virtualization/waydroid-guide.md` before making GPU/runtime claims. These are examples of the rule above: skills carry procedure, while live state and owning docs carry current truth.
+
+### REA MCP integration
+
+REA is registered as a Codex MCP server in the app-owned `~/.codex/config.toml`. That file is intentionally not chezmoi-managed because Codex and its desktop app rewrite runtime, UI, and marketplace state there. The durable registration block is:
+
+```toml
+[mcp_servers.rea]
+command = "/home/onyx/.local/bin/rea"
+args = [ "mcp" ]
+startup_timeout_sec = 30
+tool_timeout_sec = 450
+```
+
+Codex reads MCP registrations at session start, so restart Codex after changing the block. Verified on 2026-11-10 with `rea-agents` 6.8.0: `codex mcp get rea` reports enabled stdio, `rea doctor --client codex --json` reports `healthy: true` for `registration:codex`, and a direct stdio `initialize` returns `serverInfo` name `rea` version `6.8.0`.
+
+Prefer editing the explicit block over `rea setup --client codex --yes`. Setup also replaces the shared skill at `~/.agents/skills/reverse-engineer-anything`, which is chezmoi-managed from `dot_agents/skills/reverse-engineer-anything`, and that would create source/live drift. If setup is used, restore the managed skill copy afterward. The canonical skill is currently version 42 while `rea-agents` 6.8.0 bundles version 49; the installed skill remains usable for core workflows but lacks newer AgentEnv guidance. Update the repository skill source before accepting a setup-provided replacement.
+
+Native analysis engines are optional and currently absent: no Ghidra, Hopper, IDA, JADX, or Kuna installation is configured. Static JavaScript, package/archive inventory, browser, and runtime-observation workflows still work; native decompilation reports `provider_unavailable` until an engine is deliberately installed and its path is exported in this block.
 
 For a safe one-command publish after selecting the intended files:
 

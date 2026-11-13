@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# policygate-project - Scoped project workspace mapper for Local Coder Policy Gateway
+set -euo pipefail
+
+PROJECTS_DIR="/srv/local-coder/projects"
+DEFAULT_PARENT="/home/onyx/Projects"
+
+run_root() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
+
+do_map() {
+  local target="${1:-}"
+  if [ -z "$target" ]; then
+    echo "Usage: policygate-project map <project-name-or-path>" >&2
+    exit 1
+  fi
+
+  local resolved="$target"
+  if [ ! -d "$resolved" ]; then
+    resolved="$DEFAULT_PARENT/$target"
+  fi
+
+  if [ ! -d "$resolved" ]; then
+    echo "ERROR: Project directory does not exist: $resolved" >&2
+    exit 1
+  fi
+
+  local base
+  base="$(basename "$resolved")"
+  local mount_point="$PROJECTS_DIR/$base"
+
+  echo "Configuring scoped permissions for project: $base ($resolved)..."
+  run_root setfacl -R -m u:localcoder:rwx "$resolved"
+  run_root setfacl -R -d -m u:localcoder:rwx "$resolved"
+  run_root setfacl -R -d -m u:onyx:rwx "$resolved"
+  run_root setfacl -R -d -m g:onyx:rwx "$resolved"
+
+  run_root mkdir -p "$mount_point"
+
+  if mountpoint -q "$mount_point" 2>/dev/null; then
+    echo "Mount point $mount_point is already mounted."
+  else
+    echo "Mounting bind: $resolved -> $mount_point..."
+    run_root mount --bind "$resolved" "$mount_point"
+  fi
+
+  echo "SUCCESS: Project mapped at $mount_point"
+}
+
+do_unmap() {
+  local name="${1:-}"
+  if [ -z "$name" ]; then
+    echo "Usage: policygate-project unmap <project-name>" >&2
+    exit 1
+  fi
+
+  local mount_point="$PROJECTS_DIR/$name"
+  if mountpoint -q "$mount_point" 2>/dev/null; then
+    echo "Unmounting $mount_point..."
+    run_root umount "$mount_point"
+  fi
+
+  if [ -d "$mount_point" ]; then
+    run_root rmdir "$mount_point" || true
+  fi
+
+  echo "SUCCESS: Project $name unmapped."
+}
+
+do_list() {
+  echo "=== Mapped Local Coder Projects in $PROJECTS_DIR ==="
+  run_root bash -c '
+    shopt -s nullglob
+    entries=('"$PROJECTS_DIR"'/*)
+    if [ ${#entries[@]} -eq 0 ]; then
+      echo "(No projects currently mapped)"
+      exit 0
+    fi
+    for entry in "${entries[@]}"; do
+      if [ -d "$entry" ]; then
+        base="$(basename "$entry")"
+        src="$(findmnt -n -o SOURCE "$entry" 2>/dev/null || echo "(bind directory)")"
+        echo "- $base -> $src"
+      fi
+    done
+  '
+}
+
+case "${1:-}" in
+  map)
+    shift
+    do_map "$@"
+    ;;
+  unmap)
+    shift
+    do_unmap "$@"
+    ;;
+  list)
+    do_list
+    ;;
+  *)
+    echo "Usage: policygate-project <map|unmap|list> [project]"
+    exit 1
+    ;;
+esac

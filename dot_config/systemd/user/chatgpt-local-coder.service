@@ -1,0 +1,20 @@
+[Unit]
+Description=ChatGPT Local Coder MCP Server
+Documentation=https://github.com/hoangcoderr/chatgpt-local-coder
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Projects/chatgpt-local-coder
+EnvironmentFile=%h/Projects/chatgpt-local-coder/.env
+ExecStart=/usr/bin/node dist/index.js
+StandardOutput=journal
+StandardError=journal
+Restart=on-failure
+RestartSec=5s
+KillMode=mixed
+TimeoutStopSec=10s
+MemoryMax=1.5G
+
+[Install]
+WantedBy=default.target

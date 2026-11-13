@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# local-coder-monitor: Live TUI monitor for ChatGPT Local Coder & Tailscale
+# ==============================================================================
+set -euo pipefail
+
+local-coder-status
+echo ""
+echo -e "\033[1;35mStreaming live ChatGPT tool calls & activity:\033[0m"
+echo -e "\033[1;36m------------------------------------------------------------------\033[0m"
+
+# Audit log selection (production policygate -> staging -> legacy)
+AUDIT_LOG="/var/log/local-coder-policygate/audit.jsonl"
+if [ ! -f "$AUDIT_LOG" ] || [ ! -s "$AUDIT_LOG" ]; then
+    if [ -f "/var/log/local-coder-policygate-staging/audit.jsonl" ] && [ -s "/var/log/local-coder-policygate-staging/audit.jsonl" ]; then
+        AUDIT_LOG="/var/log/local-coder-policygate-staging/audit.jsonl"
+    elif [ -f "$HOME/Projects/chatgpt-local-coder/.mcp-audit.log" ]; then
+        AUDIT_LOG="$HOME/Projects/chatgpt-local-coder/.mcp-audit.log"
+    fi
+fi
+
+tail -n 12 -f "$AUDIT_LOG" 2>/dev/null | python3 -u -c '
+import sys, json, datetime
+
+C_RESET = "\033[0m"
+C_BOLD = "\033[1m"
+C_DIM = "\033[2m"
+C_CYAN = "\033[1;36m"
+C_GREEN = "\033[1;32m"
+C_YELLOW = "\033[1;33m"
+C_MAGENTA = "\033[1;35m"
+C_RED = "\033[1;31m"
+C_WHITE = "\033[1;37m"
+C_TIME = "\033[35m"
+C_CMD = "\033[38;5;213m"
+
+for raw in sys.stdin:
+    line = raw.strip()
+    if not line:
+        continue
+    try:
+        data = json.loads(line)
+    except Exception:
+        print(line, flush=True)
+        continue
+
+    t_str = data.get("time", "")
+    try:
+        dt = datetime.datetime.fromisoformat(t_str.replace("Z", "+00:00")).astimezone()
+        time_part = dt.strftime("%I:%M:%S %p")
+    except Exception:
+        time_part = t_str[:11] if t_str else "NOW"
+
+    tool = data.get("tool") or data.get("event") or "event"
+    if tool in ["run_command", "start_process", "system_job", "stop_process", "node_repl"]:
+        tool_colored = C_YELLOW + tool + C_RESET
+    elif any(k in tool for k in ["write", "edit", "patch", "replace", "create", "delete", "move", "copy", "add", "commit", "restore"]):
+        tool_colored = C_GREEN + tool + C_RESET
+    elif any(k in tool for k in ["read", "list", "glob", "grep", "tree", "status", "diff", "log", "branch", "stash", "inspect", "context"]):
+        tool_colored = C_CYAN + tool + C_RESET
+    elif any(k in tool for k in ["mcp", "skill", "agent", "remember"]):
+        tool_colored = C_MAGENTA + tool + C_RESET
+    else:
+        tool_colored = C_WHITE + tool + C_RESET
+
+    status = data.get("status", "ok")
+    if status == "ok":
+        status_colored = "\033[32m(ok)\033[0m"
+    elif "denied" in status or "error" in status or "fail" in status:
+        status_colored = C_RED + "(" + status + ")" + C_RESET
+    elif "approval" in status:
+        status_colored = C_YELLOW + "(" + status + ")" + C_RESET
+    else:
+        status_colored = C_DIM + "(" + status + ")" + C_RESET
+
+    target = data.get("target") or ""
+    if len(target) > 55:
+        target = target[:52] + "..."
+    target_colored = C_WHITE + target + C_RESET if target else ""
+
+    details = data.get("details")
+    parts = []
+    if isinstance(details, dict):
+        if "command" in details:
+            cmd = str(details["command"]).replace("\n", " ").replace("\r", "")
+            if len(cmd) > 65:
+                cmd = cmd[:62] + "..."
+            parts.append(C_CMD + "\"" + cmd + "\"" + C_RESET)
+        if "exit_code" in details:
+            code = details["exit_code"]
+            col = "\033[32m" if code == 0 else C_RED
+            parts.append(col + "exit:" + str(code) + C_RESET)
+        if "bytes" in details:
+            parts.append(C_YELLOW + str(details["bytes"]) + "B" + C_RESET)
+        if "class" in details:
+            parts.append(C_CYAN + str(details["class"]) + C_RESET)
+        if "reason" in details:
+            r = str(details["reason"]).replace("\n", " ")
+            if len(r) > 60:
+                r = r[:57] + "..."
+            parts.append(C_RED + r + C_RESET)
+    elif details is not None:
+        s = str(details).replace("\n", " ")
+        if len(s) > 55:
+            s = s[:52] + "..."
+        parts.append(C_DIM + s + C_RESET)
+
+    details_str = " ".join(parts)
+    prefix = C_TIME + "[" + time_part + "]" + C_RESET + " " + tool_colored + " " + status_colored + ":"
+    if target_colored and details_str:
+        print(prefix + " " + target_colored + " " + details_str, flush=True)
+    elif target_colored:
+        print(prefix + " " + target_colored, flush=True)
+    elif details_str:
+        print(prefix + " " + details_str, flush=True)
+    else:
+        print(prefix, flush=True)
+'

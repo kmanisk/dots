@@ -1,0 +1,222 @@
+#!/usr/bin/env bash
+# local-coder-switch - One-command switcher between Policy Gateway and Legacy Local Coder
+set -euo pipefail
+
+TARGET_USER="onyx"
+PORT=3000
+HEALTH_URL="http://127.0.0.1:${PORT}/health"
+MAX_WAIT_SECONDS=6
+
+run_user_systemctl() {
+  if [ "$(id -u)" -eq 0 ]; then
+    sudo -u "$TARGET_USER" XDG_RUNTIME_DIR="/run/user/$(id -u "$TARGET_USER")" systemctl --user "$@"
+  else
+    systemctl --user "$@"
+  fi
+}
+
+run_root_systemctl() {
+  if [ "$(id -u)" -eq 0 ]; then
+    systemctl "$@"
+  else
+    sudo systemctl "$@"
+  fi
+}
+
+check_health() {
+  local count=0
+  while [ "$count" -lt "$MAX_WAIT_SECONDS" ]; do
+    if curl -s -f -m 1 "$HEALTH_URL" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+    count=$((count + 1))
+  done
+  return 1
+}
+
+get_mode() {
+  local yolo_path="/var/lib/local-coder-policygate/yolo-lease.json"
+  local mode_path="/var/lib/local-coder-policygate/mode.json"
+  if [ -f "$yolo_path" ]; then
+    local expires
+    expires=$(jq -r '.expires_at // 0' "$yolo_path" 2>/dev/null || echo 0)
+    local now
+    now=$(date +%s000)
+    if [ -n "$expires" ] && [ "$expires" -gt "$now" ]; then
+      echo "YOLO (Full Access Lease Active)"
+      return
+    fi
+  fi
+  if [ -f "$mode_path" ]; then
+    local mode
+    mode=$(jq -r '.mode // "standard"' "$mode_path" 2>/dev/null || echo "standard")
+    if [ "$mode" = "strict" ]; then
+      echo "STRICT (Read-only)"
+      return
+    fi
+  fi
+  echo "STANDARD (Default)"
+}
+
+do_status() {
+  local pg_active="no"
+  local legacy_active="no"
+
+  if systemctl is-active --quiet chatgpt-local-coder-policygate.service 2>/dev/null; then
+    pg_active="yes"
+  fi
+  if run_user_systemctl is-active --quiet chatgpt-local-coder.service 2>/dev/null; then
+    legacy_active="yes"
+  fi
+
+  echo "=================================================================="
+  echo "Local Coder Version and Runtime Status"
+  echo "=================================================================="
+
+  if [ "$pg_active" = "yes" ] && [ "$legacy_active" = "yes" ]; then
+    echo "WARNING: Port conflict! Both services are marked active."
+    echo "Policy Gateway PID : $(systemctl show -p MainPID --value chatgpt-local-coder-policygate.service)"
+    echo "Legacy Service PID : $(run_user_systemctl show -p MainPID --value chatgpt-local-coder.service)"
+    echo "Run 'local-coder-switch new' or 'local-coder-switch legacy' to resolve."
+    return 1
+  fi
+
+  if [ "$pg_active" = "yes" ]; then
+    local pid
+    pid=$(systemctl show -p MainPID --value chatgpt-local-coder-policygate.service)
+    local mode
+    mode=$(get_mode)
+    local health="UNHEALTHY"
+    if curl -s -f -m 1 "$HEALTH_URL" >/dev/null 2>&1; then
+      health="HEALTHY (HTTP 200)"
+    fi
+    echo "Active Version : Policy Gateway (Production, Secured)"
+    echo "Process PID    : $pid"
+    echo "Execution User : localcoder (UID: 947)"
+    echo "Security Mode  : $mode"
+    echo "Local Port     : $PORT"
+    echo "Public Endpoint: https://onyx.tail646579.ts.net"
+    echo "Health Check   : $health"
+  elif [ "$legacy_active" = "yes" ]; then
+    local pid
+    pid=$(run_user_systemctl show -p MainPID --value chatgpt-local-coder.service)
+    local health="UNHEALTHY"
+    if curl -s -f -m 1 "$HEALTH_URL" >/dev/null 2>&1; then
+      health="HEALTHY (HTTP 200)"
+    fi
+    echo "Active Version : Legacy Local Coder (Original Checkout)"
+    echo "Process PID    : $pid"
+    echo "Execution User : $TARGET_USER (UID: $(id -u "$TARGET_USER"))"
+    echo "Security Mode  : Open (Full machine access, uncontained)"
+    echo "Local Port     : $PORT"
+    echo "Public Endpoint: https://onyx.tail646579.ts.net"
+    echo "Health Check   : $health"
+  else
+    echo "Active Version : NONE (Both services inactive)"
+    echo "Port Status    : Port $PORT is not currently being served"
+    echo "Run 'local-coder-switch new' to start Policy Gateway"
+  fi
+  echo "=================================================================="
+}
+
+switch_to_new() {
+  local pg_active="no"
+  if systemctl is-active --quiet chatgpt-local-coder-policygate.service 2>/dev/null; then
+    pg_active="yes"
+  fi
+
+  if [ "$pg_active" = "yes" ] && curl -s -f -m 1 "$HEALTH_URL" >/dev/null 2>&1; then
+    local pid
+    pid=$(systemctl show -p MainPID --value chatgpt-local-coder-policygate.service)
+    echo "Policy Gateway is already active and healthy (PID: $pid, Mode: $(get_mode))."
+    return 0
+  fi
+
+  echo "Switching to Policy Gateway (Production)..."
+
+  # Stop legacy if active
+  if run_user_systemctl is-active --quiet chatgpt-local-coder.service 2>/dev/null; then
+    echo "Stopping legacy user service..."
+    run_user_systemctl stop chatgpt-local-coder.service
+  fi
+
+  # Start Policy Gateway
+  echo "Starting Policy Gateway system service..."
+  run_root_systemctl start chatgpt-local-coder-policygate.service
+
+  echo "Verifying health on port $PORT..."
+  if check_health; then
+    local pid
+    pid=$(systemctl show -p MainPID --value chatgpt-local-coder-policygate.service)
+    echo "SUCCESS: Switched to Local Coder Policy Gateway."
+    echo "Active: PID $pid, User: localcoder (UID: 947), Mode: $(get_mode), Port: $PORT"
+    return 0
+  else
+    echo "ERROR: Policy Gateway failed health check! Rolling back to legacy service..."
+    run_root_systemctl stop chatgpt-local-coder-policygate.service || true
+    run_user_systemctl start chatgpt-local-coder.service || true
+    echo "Rollback to legacy service initiated."
+    return 1
+  fi
+}
+
+switch_to_legacy() {
+  local legacy_active="no"
+  if run_user_systemctl is-active --quiet chatgpt-local-coder.service 2>/dev/null; then
+    legacy_active="yes"
+  fi
+
+  if [ "$legacy_active" = "yes" ] && curl -s -f -m 1 "$HEALTH_URL" >/dev/null 2>&1; then
+    local pid
+    pid=$(run_user_systemctl show -p MainPID --value chatgpt-local-coder.service)
+    echo "Legacy Local Coder is already active and healthy (PID: $pid)."
+    return 0
+  fi
+
+  echo "Switching to legacy Local Coder (Original)..."
+
+  # Stop Policy Gateway if active
+  if systemctl is-active --quiet chatgpt-local-coder-policygate.service 2>/dev/null; then
+    echo "Stopping Policy Gateway system service..."
+    run_root_systemctl stop chatgpt-local-coder-policygate.service
+  fi
+
+  # Start legacy service
+  echo "Starting legacy user service..."
+  run_user_systemctl start chatgpt-local-coder.service
+
+  echo "Verifying health on port $PORT..."
+  if check_health; then
+    local pid
+    pid=$(run_user_systemctl show -p MainPID --value chatgpt-local-coder.service)
+    echo "SUCCESS: Restored legacy Local Coder."
+    echo "Active: PID $pid, User: $TARGET_USER, Port: $PORT"
+    return 0
+  else
+    echo "ERROR: Legacy service failed health check! Rolling back to Policy Gateway..."
+    run_user_systemctl stop chatgpt-local-coder.service || true
+    run_root_systemctl start chatgpt-local-coder-policygate.service || true
+    echo "Rollback to Policy Gateway initiated."
+    return 1
+  fi
+}
+
+case "${1:-}" in
+  new)
+    switch_to_new
+    ;;
+  legacy)
+    switch_to_legacy
+    ;;
+  status)
+    do_status
+    ;;
+  *)
+    echo "Usage: local-coder-switch <new|legacy|status>"
+    echo "  new    : Switch to secured Policy Gateway (UID: localcoder)"
+    echo "  legacy : Restore original Local Coder (UID: onyx)"
+    echo "  status : Report active version, PID, UID, mode and health"
+    exit 1
+    ;;
+esac

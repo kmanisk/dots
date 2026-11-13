@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# local-coder-status: Report ChatGPT Local Coder process, ports, Funnel & health
+# ==============================================================================
+set -euo pipefail
+
+# ANSI color codes
+C_RESET="\033[0m"
+C_BOLD="\033[1m"
+C_DIM="\033[2m"
+C_CYAN="\033[1;36m"
+C_GREEN="\033[1;32m"
+C_YELLOW="\033[1;33m"
+C_MAGENTA="\033[1;35m"
+C_RED="\033[1;31m"
+C_WHITE="\033[1;37m"
+C_BLUE="\033[1;34m"
+
+# Security Mode Detection
+MODE_LABEL="${C_GREEN}STANDARD (Default: project dev; signed approval for sudo)${C_RESET}"
+YOLO_LEASE="/var/lib/local-coder-policygate/yolo-lease.json"
+MODE_FILE="/var/lib/local-coder-policygate/mode.json"
+
+if [ -f "$YOLO_LEASE" ]; then
+    EXPIRES_AT=$(jq -r '.expires_at // 0' "$YOLO_LEASE" 2>/dev/null || echo 0)
+    NOW_MS=$(date +%s000)
+    if [ "$EXPIRES_AT" -gt "$NOW_MS" ] 2>/dev/null; then
+        EXP_TIME=$(python3 -c "import datetime; dt = datetime.datetime.fromtimestamp($EXPIRES_AT/1000).astimezone(); print(dt.strftime('%I:%M:%S %p'))" 2>/dev/null || echo "ACTIVE")
+        MODE_LABEL="${C_RED}${C_BOLD}YOLO / FULL ACCESS (ACTIVE until $EXP_TIME)${C_RESET}"
+    fi
+elif [ -f "$MODE_FILE" ]; then
+    DYNAMIC_MODE=$(jq -r '.mode // "standard"' "$MODE_FILE" 2>/dev/null || echo "standard")
+    if [ "$DYNAMIC_MODE" = "strict" ]; then
+        MODE_LABEL="${C_BLUE}${C_BOLD}STRICT (Read-only default; approvals required)${C_RESET}"
+    fi
+fi
+
+echo -e "${C_CYAN}==================================================================${C_RESET}"
+echo -e "${C_WHITE}${C_BOLD}ChatGPT Local Coder Status${C_RESET}  [Mode: ${MODE_LABEL}]"
+echo -e "${C_CYAN}==================================================================${C_RESET}"
+
+# 1. systemd service state
+echo -ne "${C_CYAN}Service Status : ${C_RESET}"
+ACTIVE_UNIT=""
+UNIT_USER=""
+if systemctl is-active chatgpt-local-coder-policygate.service >/dev/null 2>&1; then
+    ACTIVE_UNIT="chatgpt-local-coder-policygate.service"
+    UNIT_PID=$(systemctl show -p MainPID --value "$ACTIVE_UNIT" 2>/dev/null || echo "N/A")
+    MEM_USAGE=$(systemctl show -p MemoryCurrent --value "$ACTIVE_UNIT" 2>/dev/null || echo "0")
+    UNIT_USER=$(systemctl show -p User --value "$ACTIVE_UNIT" 2>/dev/null || echo "localcoder")
+    if [ "$MEM_USAGE" -gt 0 ] 2>/dev/null; then
+        MEM_MB=$(( MEM_USAGE / 1024 / 1024 ))
+        echo -e "${C_GREEN}ACTIVE (PolicyGate System)${C_RESET} ${C_YELLOW}(PID: $UNIT_PID, Mem: ${MEM_MB}MB, User: $UNIT_USER)${C_RESET}"
+    else
+        echo -e "${C_GREEN}ACTIVE (PolicyGate System)${C_RESET} ${C_YELLOW}(PID: $UNIT_PID, User: $UNIT_USER)${C_RESET}"
+    fi
+elif systemctl --user is-active chatgpt-local-coder.service >/dev/null 2>&1; then
+    ACTIVE_UNIT="chatgpt-local-coder.service"
+    UNIT_PID=$(systemctl --user show -p MainPID --value "$ACTIVE_UNIT" 2>/dev/null || echo "N/A")
+    MEM_USAGE=$(systemctl --user show -p MemoryCurrent --value "$ACTIVE_UNIT" 2>/dev/null || echo "0")
+    if [ "$MEM_USAGE" -gt 0 ] 2>/dev/null; then
+        MEM_MB=$(( MEM_USAGE / 1024 / 1024 ))
+        echo -e "${C_GREEN}ACTIVE (Legacy User)${C_RESET} ${C_YELLOW}(PID: $UNIT_PID, Mem: ${MEM_MB}MB, User: onyx)${C_RESET}"
+    else
+        echo -e "${C_GREEN}ACTIVE (Legacy User)${C_RESET} ${C_YELLOW}(PID: $UNIT_PID, User: onyx)${C_RESET}"
+    fi
+else
+    echo -e "${C_RED}INACTIVE${C_RESET}"
+fi
+
+# 2. Local health check
+echo -ne "${C_CYAN}Local Health   : ${C_RESET}"
+if HEALTH=$(curl -s -f http://127.0.0.1:3000/health 2>/dev/null); then
+    PROFILE=$(echo "$HEALTH" | jq -r '.instructions.tool_profile // "unknown"' 2>/dev/null || echo "ok")
+    SESSIONS=$(echo "$HEALTH" | jq -r '.activeSessions // 0' 2>/dev/null || echo "0")
+    echo -e "${C_GREEN}OK${C_RESET} (Profile: ${C_YELLOW}$PROFILE${C_RESET}, Active Sessions: ${C_MAGENTA}$SESSIONS${C_RESET})"
+else
+    echo -e "${C_RED}INACTIVE (port 3000 not responding)${C_RESET}"
+fi
+
+# 3. Tailscale core daemon
+echo -ne "${C_CYAN}Tailscale Core : ${C_RESET}"
+if systemctl is-active tailscaled.service >/dev/null 2>&1; then
+    if TS_STATUS=$(tailscale status 2>/dev/null); then
+        TS_SELF=$(echo "$TS_STATUS" | head -n 1)
+        echo -e "${C_GREEN}CONNECTED${C_RESET} ${C_DIM}($TS_SELF)${C_RESET}"
+    else
+        echo -e "${C_YELLOW}RUNNING (Not authenticated / Logged out)${C_RESET}"
+    fi
+else
+    echo -e "${C_RED}INACTIVE (tailscaled.service stopped)${C_RESET}"
+fi
+
+# 4. Tailscale Funnel state
+echo -e "${C_CYAN}Funnel Status  :${C_RESET}"
+if command -v tailscale >/dev/null 2>&1 && systemctl is-active tailscaled.service >/dev/null 2>&1; then
+    if tailscale status >/dev/null 2>&1; then
+        FUNNEL_OUT=$(tailscale funnel status 2>&1 || true)
+        if echo "$FUNNEL_OUT" | grep -q "Funnel on"; then
+            echo -e "  ${C_GREEN}Funnel Active:${C_RESET} ${C_WHITE}${C_BOLD}https://onyx.tail646579.ts.net${C_RESET} -> ${C_YELLOW}http://127.0.0.1:3000${C_RESET}"
+        else
+            echo -e "  ${C_DIM}No active funnel${C_RESET}"
+        fi
+    else
+        echo -e "  ${C_RED}Tailscale not logged in${C_RESET}"
+    fi
+else
+    echo -e "  ${C_RED}tailscaled not running${C_RESET}"
+fi
+
+# 5. Recent journal lines
+echo -e "${C_CYAN}------------------------------------------------------------------${C_RESET}"
+echo -e "${C_MAGENTA}Recent service logs:${C_RESET}"
+if [ "$ACTIVE_UNIT" = "chatgpt-local-coder-policygate.service" ]; then
+    journalctl -u chatgpt-local-coder-policygate.service -n 5 --no-pager 2>/dev/null | awk '{if (length > 95) print substr($0, 1, 92) "..."; else print $0}' | { grep . || echo "-- No entries --"; }
+elif [ "$ACTIVE_UNIT" = "chatgpt-local-coder.service" ]; then
+    journalctl --user -u chatgpt-local-coder.service -n 5 --no-pager 2>/dev/null | awk '{if (length > 95) print substr($0, 1, 92) "..."; else print $0}' | { grep . || echo "-- No entries --"; }
+else
+    echo -e "${C_DIM}-- Service not running --${C_RESET}"
+fi
+echo -e "${C_CYAN}==================================================================${C_RESET}"

@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# local-coder-stop: Stop ChatGPT Local Coder MCP server & Funnel exposure
+# ==============================================================================
+set -euo pipefail
+
+echo "Stopping ChatGPT Local Coder components..."
+
+# 1. Reset Funnel exposure
+if command -v tailscale >/dev/null 2>&1 && systemctl is-active tailscaled.service >/dev/null 2>&1; then
+    if tailscale status >/dev/null 2>&1; then
+        echo "Resetting Tailscale Funnel exposure..."
+        tailscale funnel reset >/dev/null 2>&1 || true
+    fi
+fi
+
+# 2. Stop systemd user service
+if systemctl --user is-active chatgpt-local-coder.service >/dev/null 2>&1; then
+    echo "Stopping chatgpt-local-coder.service..."
+    systemctl --user stop chatgpt-local-coder.service
+fi
+
+# 3. Stop tailscaled to adhere to daemonless policy when not in use
+if systemctl is-active tailscaled.service >/dev/null 2>&1; then
+    echo "Stopping tailscaled.service (on-demand daemonless policy)..."
+    sudo systemctl stop tailscaled.service || true
+fi
+
+# 4. Verify ports freed
+sleep 1
+if ss -tlpn | grep -qE ':3000|:3001'; then
+    echo "Warning: Port 3000 or 3001 still listening:" >&2
+    ss -tlpn | grep -E ':3000|:3001' >&2
+else
+    echo "Ports 3000 and 3001 are closed."
+fi
+
+echo "ChatGPT Local Coder is completely STOPPED."

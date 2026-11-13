@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# policygate-operator - Operator CLI wrapper for Local Coder Policy Gateway
+set -euo pipefail
+
+SCRIPT="/opt/local-coder-policygate/scripts/policygate-operator.mjs"
+
+if [ ! -f "$SCRIPT" ]; then
+  echo "ERROR: $SCRIPT not found" >&2
+  exit 1
+fi
+
+if [ "$(id -u)" -ne 0 ] && [ "${1:-}" != "status" ]; then
+  exec sudo /usr/bin/node "$SCRIPT" "$@"
+else
+  exec /usr/bin/node "$SCRIPT" "$@"
+fi
