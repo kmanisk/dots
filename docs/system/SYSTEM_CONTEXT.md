@@ -6,6 +6,16 @@ It is not a replacement for the detailed subsystem documentation. Its job is to 
 
 Last synchronized with repository state: 2026-10-31.
 Material change history is tracked in `docs/system/SYSTEM_CHANGELOG.md` and Git; this file intentionally does not pin itself to a commit hash.
+
+
+Source-only pending change (2026-11-17): BridgeDev's optional on-demand
+terminal monitor has a new candidate chezmoi source
+`dot_local/bin/executable_bridge-dev-monitor`, with an active MCP tool banner.
+It has **not been verified as applied to the running workstation**. Its
+runtime display also requires BridgeDev's server-side `/api/activity.active`
+feature to be deployed and verified independently. Do not infer that the
+installed `~/.local/bin/bridge-dev-monitor` already contains this change.
+
 Latest broad live-system audit used as an evidence baseline: `docs/system/workstation-audit-2026-10-23.md`.
 
 ### Atlas Windows 10 Pro 21H2 separate VM test (updated 2026-11-13)

@@ -38,6 +38,9 @@ jobs:
 
           printf 'base=%s\nhead=%s\n' "$base" "$head" >> "$GITHUB_OUTPUT"
 
+      - name: Validate BridgeDev monitor without touching the host
+        run: python3 scripts/test-bridge-dev-monitor.py
+
       - name: Verify system documentation contract
         shell: bash
         run: |

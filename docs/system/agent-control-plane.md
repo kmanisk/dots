@@ -5,6 +5,27 @@ This repository and the live-machine agent helpers form one shared control plane
 The goal is to let different agents work on the same workstation without relying on private chat history or each agent maintaining its own copy of system facts.
 
 ## Architecture
+## BridgeDev active-call monitor source (source-only update, 2026-11-17)
+
+The optional local Python/curses Activity Monitor is staged in
+`dot_local/bin/executable_bridge-dev-monitor`. It is launched on demand by
+the BridgeDev CLI/Sway scratchpad, without another resident service. Its header
+distinguishes running authenticated MCP tool calls (from the Admin API's
+`/api/activity` `active` snapshot), unconfirmed pending command jobs, and idle.
+An MCP tool being active **does not establish** whether ChatGPT's response
+stream is connected or whether generation continues. The monitor must never
+claim a ChatGPT response status it cannot observe. The current live copy is
+`~/.local/bin/bridge-dev-monitor`; an edited repository source does **not**
+mean the running copy has been replaced, and no `chezmoi apply` or restart is
+performed by this source-only change.
+
+Validation is `python3 scripts/test-bridge-dev-monitor.py` with a fake
+authenticated response and no network or system side effects. The monitor
+only polls/streams while its on-demand window is visible; it runs no
+background updater or watcher. BridgeDev must first publish the server-side
+in-flight lifecycle before the top banner can display active MCP requests.
+
+
 
 ### Durable repository knowledge
 
