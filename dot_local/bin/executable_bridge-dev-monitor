@@ -1,0 +1,940 @@
+#!/usr/bin/env python3
+"""
+BridgeDev Live Activity Monitor (TUI)
+Keyboard-first activity stream, running job receipts, and gateway telemetry.
+Streams updates only while visible in Sway; pauses when hidden in scratchpad.
+"""
+
+import curses
+import json
+import os
+import re
+import socket
+import struct
+import sys
+import threading
+import time
+import urllib.request
+import urllib.error
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
+
+ENV_PATH = os.path.expanduser("~/.config/bridge-dev/.env")
+JOBS_DIR = os.path.expanduser("~/.local/state/chatgpt-local-coder/jobs")
+AUDIT_LOG_PATH = os.path.expanduser("~/.local/share/bridge-dev/state/audit.jsonl")
+HEX_TOKEN_RE = re.compile(r"\b[0-9a-fA-F]{32,64}\b")
+BEARER_RE = re.compile(r"Bearer\s+[^\s\"']+", re.IGNORECASE)
+
+
+def redact_sensitive(text: str) -> str:
+    if not text:
+        return ""
+    text = BEARER_RE.sub("Bearer [REDACTED]", text)
+    text = HEX_TOKEN_RE.sub("[TOKEN_REDACTED]", text)
+    return text
+
+
+def load_config() -> Dict[str, str]:
+    config: Dict[str, str] = {
+        "PORT": "3000",
+        "ADMIN_PORT": "3001",
+        "ADMIN_TOKEN": "",
+        "MCP_TOKEN": "",
+    }
+    # Initial environment variables as base fallback
+    for k in ["PORT", "ADMIN_PORT", "ADMIN_TOKEN", "MCP_TOKEN"]:
+        if os.environ.get(k):
+            config[k] = os.environ[k]
+    # Current disk configuration overrides environment to support runtime token rotation
+    for env_file in [ENV_PATH, os.path.expanduser("~/.local/share/bridge-dev/.env")]:
+        if os.path.exists(env_file):
+            try:
+                with open(env_file, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            k, v = line.split("=", 1)
+                            config[k.strip()] = v.strip().strip("\"'")
+                break
+            except Exception:
+                pass
+    return config
+
+
+def is_scratchpad_visible(app_id: str = "dc-term") -> bool:
+    sock_path = os.environ.get("SWAYSOCK")
+    if not sock_path or not os.path.exists(sock_path):
+        return True
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(0.3)
+        s.connect(sock_path)
+        msg = b"i3-ipc" + struct.pack("<II", 0, 4)
+        s.sendall(msg)
+        header = s.recv(14)
+        if len(header) < 14:
+            s.close()
+            return True
+        magic, length, msg_type = struct.unpack("<6sII", header)
+        data = b""
+        while len(data) < length:
+            chunk = s.recv(min(length - len(data), 65536))
+            if not chunk:
+                break
+            data += chunk
+        s.close()
+        tree = json.loads(data)
+
+        def find_focused_ws(n: Dict[str, Any], cur: Optional[str] = None) -> Optional[str]:
+            if n.get("type") == "workspace":
+                cur = n.get("name")
+            if n.get("focused"):
+                return cur
+            for c in n.get("nodes", []) + n.get("floating_nodes", []):
+                res = find_focused_ws(c, cur)
+                if res is not None:
+                    return res
+            return None
+
+        focused_ws = find_focused_ws(tree)
+        result = [False]
+
+        def walk(n: Dict[str, Any], current_ws: Optional[str], in_scratch: bool) -> None:
+            if result[0]:
+                return
+            name = n.get("name") or ""
+            if n.get("type") == "workspace":
+                current_ws = name
+                if name in ("__i3", "__i3_scratch"):
+                    in_scratch = True
+            app = n.get("app_id") or (n.get("window_properties", {}) or {}).get("class") or ""
+            if app == app_id:
+                if not in_scratch and (focused_ws is None or current_ws == focused_ws):
+                    result[0] = True
+                return
+            for c in n.get("nodes", []) + n.get("floating_nodes", []):
+                walk(c, current_ws, in_scratch)
+
+        walk(tree, None, False)
+        return result[0]
+    except Exception:
+        return True
+
+
+class MonitorState:
+    def __init__(self, config: Dict[str, str]):
+        self.config = config
+        self.lock = threading.Lock()
+        self.health: Dict[str, Any] = {}
+        self.activities: List[Dict[str, Any]] = []
+        self.active_requests: List[Dict[str, Any]] = []
+        self.jobs: List[Dict[str, Any]] = []
+        self.visible = True
+        self.streaming = False
+        self.running = True
+        self.last_update = 0.0
+        self.last_health_check = 0.0
+        self.filter_query = ""
+        self.status_message = "Ready"
+
+    def update_health(self) -> None:
+        # The Admin token may have rotated while this scratchpad was hidden.
+        # Reads occur only while the monitor is visible.
+        self.config = load_config()
+        port = self.config.get("ADMIN_PORT", "3001")
+        mcp_port = self.config.get("PORT", "3000")
+        token = self.config.get("ADMIN_TOKEN", "")
+        url = f"http://127.0.0.1:{port}/health"
+        req = urllib.request.Request(url)
+        if token:
+            req.add_header("Authorization", f"Bearer {token}")
+
+        # Check active lease from disk for mode fallback
+        disk_yolo = False
+        for lease_path in ["/var/lib/bridge-dev-operator/active-lease.json",
+                           os.path.expanduser("~/.local/share/bridge-dev/state/yolo-lease.json"),
+                           "/var/lib/local-coder-policygate/yolo-lease.json"]:
+            if os.path.exists(lease_path):
+                try:
+                    with open(lease_path, "r", encoding="utf-8") as lf:
+                        ld = json.load(lf)
+                        exp = ld.get("expires_at")
+                        if (exp is None or exp > time.time() * 1000) and ld.get("mode") in ("yolo", "dangerous"):
+                            disk_yolo = True
+                            break
+                except Exception:
+                    pass
+
+        def get_fallback_pid() -> str:
+            try:
+                import subprocess
+                out = subprocess.check_output(
+                    ["systemctl", "--user", "show", "bridge-dev.service", "--property=MainPID", "--value"],
+                    timeout=0.5, stderr=subprocess.DEVNULL
+                ).decode().strip()
+                if out and out != "0":
+                    return out
+            except Exception:
+                pass
+            return "-"
+
+        try:
+            with urllib.request.urlopen(req, timeout=1.5) as resp:
+                data = json.loads(resp.read().decode())
+                with self.lock:
+                    self.health = data
+                    self.last_health_check = time.time()
+        except urllib.error.HTTPError as e:
+            fallback_pid = get_fallback_pid()
+            with self.lock:
+                status_code = "auth_stale" if e.code in (401, 403) else f"http_{e.code}"
+                self.health = {
+                    "status": status_code,
+                    "pid": fallback_pid,
+                    "policy_mode": "dangerous" if disk_yolo else "standard",
+                    "full_machine_access": disk_yolo,
+                    "error": f"Admin HTTP {e.code} (Credential Stale/Rejected)",
+                    "mcp_port": int(mcp_port),
+                }
+        except Exception as e:
+            mcp_alive = False
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{mcp_port}/healthz", timeout=0.8) as mresp:
+                    if mresp.status == 200:
+                        mcp_alive = True
+            except Exception:
+                pass
+
+            fallback_pid = get_fallback_pid()
+            status_desc = "admin_unreachable" if mcp_alive else "offline"
+            with self.lock:
+                self.health = {
+                    "status": status_desc,
+                    "pid": fallback_pid if mcp_alive else "-",
+                    "policy_mode": "dangerous" if disk_yolo else "standard",
+                    "full_machine_access": disk_yolo,
+                    "error": f"{type(e).__name__}" + (" (MCP port responding)" if mcp_alive else " (Gateway stopped)"),
+                    "mcp_port": int(mcp_port),
+                }
+
+    def fetch_recent_activities(self) -> None:
+        port = self.config.get("ADMIN_PORT", "3001")
+        token = self.config.get("ADMIN_TOKEN", "")
+        url = f"http://127.0.0.1:{port}/api/activity?limit=100"
+        req = urllib.request.Request(url)
+        if token:
+            req.add_header("Authorization", f"Bearer {token}")
+        try:
+            with urllib.request.urlopen(req, timeout=1.5) as resp:
+                data = json.loads(resp.read().decode())
+                entries = data.get("entries", [])
+                active = data.get("active")
+                if isinstance(active, list):
+                    with self.lock:
+                        self.active_requests = [a for a in active[:128] if isinstance(a, dict)]
+                if entries:
+                    with self.lock:
+                        seen_ids = {a.get("id") for a in self.activities if a.get("id")}
+                        for e in entries:
+                            if e.get("id") and e.get("id") not in seen_ids:
+                                self.activities.append(e)
+                        self.activities.sort(key=lambda x: x.get("time", ""), reverse=True)
+                        if len(self.activities) > 300:
+                            self.activities = self.activities[:300]
+                    return
+        except Exception:
+            pass
+
+        # Fallback to audit.jsonl if API returned empty
+        if os.path.exists(AUDIT_LOG_PATH) and os.path.getsize(AUDIT_LOG_PATH) > 0:
+            try:
+                lines = []
+                with open(AUDIT_LOG_PATH, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            lines.append(line)
+                audit_entries = []
+                for raw in lines[-60:]:
+                    try:
+                        d = json.loads(raw)
+                        audit_entries.append({
+                            "id": d.get("id") or d.get("hash", "")[:12],
+                            "time": d.get("time") or d.get("timestamp") or "",
+                            "kind": "tool",
+                            "tool": d.get("tool") or d.get("event") or "event",
+                            "status": d.get("status") or "ok",
+                            "duration_ms": d.get("duration_ms"),
+                            "summary": d.get("target") or str(d.get("details") or ""),
+                            "details": d.get("details"),
+                        })
+                    except Exception:
+                        pass
+                if audit_entries:
+                    with self.lock:
+                        self.activities = audit_entries
+                        self.activities.sort(key=lambda x: x.get("time", ""), reverse=True)
+            except Exception:
+                pass
+
+    def scan_jobs(self) -> None:
+        if not os.path.exists(JOBS_DIR):
+            return
+        job_list = []
+        try:
+            for fname in os.listdir(JOBS_DIR):
+                if fname.endswith(".json") and not fname.endswith(".result.json"):
+                    job_id = fname[:-5]
+                    json_path = os.path.join(JOBS_DIR, fname)
+                    exit_path = os.path.join(JOBS_DIR, f"{job_id}.exit")
+                    log_path = os.path.join(JOBS_DIR, f"{job_id}.log")
+                    try:
+                        with open(json_path, "r", encoding="utf-8") as f:
+                            meta = json.load(f)
+                    except Exception:
+                        continue
+
+                    exit_code = None
+                    if os.path.exists(exit_path):
+                        try:
+                            with open(exit_path, "r", encoding="utf-8") as f:
+                                exit_code = int(f.read().strip())
+                        except Exception:
+                            pass
+
+                    log_size = os.path.getsize(log_path) if os.path.exists(log_path) else 0
+                    status = "RUNNING"
+                    if exit_code is not None:
+                        status = f"EXIT {exit_code}" if exit_code != 0 else "COMPLETED"
+
+                    job_list.append({
+                        "id": job_id,
+                        "command": meta.get("command", ""),
+                        "created_at": meta.get("created_at", ""),
+                        "working_directory": meta.get("working_directory", ""),
+                        "status": status,
+                        "exit_code": exit_code,
+                        "log_path": log_path,
+                        "log_size": log_size,
+                    })
+            job_list.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+            with self.lock:
+                self.jobs = job_list[:100]
+        except Exception:
+            pass
+
+
+def sse_stream_worker(state: MonitorState) -> None:
+    # A new SSE connection reloads credentials after a token/service restart.
+
+    while state.running:
+        if not state.visible:
+            with state.lock:
+                state.streaming = False
+            time.sleep(1.0)
+            continue
+
+        state.config = load_config()
+        port = state.config.get("ADMIN_PORT", "3001")
+        token = state.config.get("ADMIN_TOKEN", "")
+        url = f"http://127.0.0.1:{port}/api/activity/stream"
+        req = urllib.request.Request(url)
+        if token:
+            req.add_header("Authorization", f"Bearer {token}")
+        resp = None
+        try:
+            resp = urllib.request.urlopen(req, timeout=30)
+            with state.lock:
+                state.streaming = True
+                state.status_message = "Stream connected"
+
+            while state.running and state.visible:
+                line = resp.readline()
+                if not line:
+                    break
+                decoded = line.decode("utf-8", errors="replace").strip()
+                if decoded.startswith("data:"):
+                    raw_data = decoded[5:].strip()
+                    if raw_data:
+                        try:
+                            entry = json.loads(raw_data)
+                            with state.lock:
+                                if not any(a.get("id") == entry.get("id") for a in state.activities if a.get("id")):
+                                    state.activities.insert(0, entry)
+                                    if len(state.activities) > 300:
+                                        state.activities.pop()
+                                state.last_update = time.time()
+                        except Exception:
+                            pass
+        except urllib.error.HTTPError as e:
+            with state.lock:
+                state.streaming = False
+                state.status_message = f"Stream paused (Auth HTTP {e.code})"
+        except Exception as e:
+            with state.lock:
+                state.streaming = False
+                state.status_message = f"Stream paused ({type(e).__name__})"
+        finally:
+            if resp:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
+        time.sleep(2.0)
+
+
+def visibility_worker(state: MonitorState) -> None:
+    while state.running:
+        vis = is_scratchpad_visible("dc-term")
+        with state.lock:
+            state.visible = vis
+        time.sleep(0.5)
+
+
+def poll_worker(state: MonitorState) -> None:
+    while state.running:
+        if state.visible:
+            state.update_health()
+            state.fetch_recent_activities()
+            state.scan_jobs()
+            time.sleep(1.5)
+        else:
+            time.sleep(2.0)
+
+
+class TuiApp:
+    def __init__(self, stdscr: Any, state: MonitorState):
+        self.stdscr = stdscr
+        self.state = state
+        self.current_tab = 0  # 0: Activity, 1: Jobs, 2: Gateway Diagnostics
+        self.selected_index = 0
+        self.scroll_offset = 0
+        self.filter_mode = False
+        self.detail_open = False
+        self.log_open = False
+        self.log_lines: List[str] = []
+        self.log_offset = 0
+
+    def init_curses(self) -> None:
+        try:
+            curses.curs_set(0)
+        except Exception:
+            pass
+        try:
+            curses.start_color()
+        except Exception:
+            pass
+        try:
+            curses.use_default_colors()
+        except Exception:
+            pass
+        self.stdscr.timeout(100)
+
+        # Initialize color pairs
+        try:
+            curses.init_pair(1, curses.COLOR_CYAN, -1)     # Cyan header / reads
+            curses.init_pair(2, curses.COLOR_GREEN, -1)    # Green ok / edits
+            curses.init_pair(3, curses.COLOR_YELLOW, -1)   # Yellow commands / running
+            curses.init_pair(4, curses.COLOR_RED, -1)      # Red errors / denied
+            curses.init_pair(5, curses.COLOR_MAGENTA, -1)  # Magenta MCP / skills
+            curses.init_pair(6, curses.COLOR_BLACK, curses.COLOR_CYAN)    # Selected row
+            curses.init_pair(7, curses.COLOR_WHITE, curses.COLOR_BLUE)    # Active tab
+            curses.init_pair(8, curses.COLOR_BLACK, curses.COLOR_WHITE)   # Modal header
+        except Exception:
+            pass
+
+    def get_filtered_activities(self) -> List[Dict[str, Any]]:
+        with self.state.lock:
+            items = list(self.state.activities)
+        q = self.state.filter_query.lower()
+        if not q:
+            return items
+        return [
+            a for a in items
+            if q in (a.get("tool") or "").lower()
+            or q in (a.get("status") or "").lower()
+            or q in (a.get("summary") or "").lower()
+            or q in (a.get("kind") or "").lower()
+        ]
+
+    def get_filtered_jobs(self) -> List[Dict[str, Any]]:
+        with self.state.lock:
+            items = list(self.state.jobs)
+        q = self.state.filter_query.lower()
+        if not q:
+            return items
+        return [
+            j for j in items
+            if q in (j.get("id") or "").lower()
+            or q in (j.get("command") or "").lower()
+            or q in (j.get("status") or "").lower()
+        ]
+
+    def safe_addstr(self, y: int, x: int, text: str, attr: int = 0) -> None:
+        h, w = self.stdscr.getmaxyx()
+        if y < 0 or y >= h or x < 0 or x >= w:
+            return
+        max_len = w - x
+        if y == h - 1:
+            max_len = max(0, w - x - 1)
+        if max_len <= 0:
+            return
+        try:
+            self.stdscr.addstr(y, x, text[:max_len], attr)
+        except Exception:
+            pass
+
+    def draw_box(self, y: int, x: int, h: int, w: int, title: str = "") -> None:
+        if h < 2 or w < 2:
+            return
+        self.safe_addstr(y, x, "┌" + "─" * max(0, w - 2) + "┐")
+        for i in range(1, h - 1):
+            self.safe_addstr(y + i, x, "│" + " " * max(0, w - 2) + "│")
+        self.safe_addstr(y + h - 1, x, "└" + "─" * max(0, w - 2) + "┘")
+        if title and len(title) < w - 4:
+            self.safe_addstr(y, x + 2, f" {title} ", curses.A_BOLD)
+
+    def render(self) -> None:
+        self.stdscr.erase()
+        h, w = self.stdscr.getmaxyx()
+        if h < 12 or w < 50:
+            self.safe_addstr(0, 0, "Window too small for BridgeDev Monitor")
+            self.stdscr.refresh()
+            return
+
+        with self.state.lock:
+            health = dict(self.state.health)
+            is_visible = self.state.visible
+            is_streaming = self.state.streaming
+            active_requests = list(self.state.active_requests)
+            pending_jobs = [j for j in self.state.jobs if j.get("status") == "RUNNING"]
+
+        # Header Bar
+        raw_status = str(health.get("status", "unknown")).lower()
+        if raw_status == "ok":
+            status_str = "OK"
+            stat_col = curses.color_pair(2)
+        elif "auth" in raw_status:
+            status_str = "AUTH STALE"
+            stat_col = curses.color_pair(4)
+        elif raw_status == "admin_unreachable":
+            status_str = "ADMIN OFFLINE"
+            stat_col = curses.color_pair(3)
+        elif raw_status == "offline":
+            status_str = "OFFLINE"
+            stat_col = curses.color_pair(4)
+        else:
+            status_str = raw_status.upper()
+            stat_col = curses.color_pair(4)
+
+        pid_val = health.get('pid', '-')
+        pid_str = f"PID {pid_val}"
+        policy = str(health.get("policy_mode") or health.get("security_mode") or "unknown").lower()
+        mode_str = ("YOLO" if policy in ("dangerous", "yolo") and health.get("full_machine_access") is True
+                    else "UNVERIFIED" if policy in ("dangerous", "yolo") else policy.upper())
+        tunnel_str = health.get("public_url") or "loopback"
+        sessions = health.get("active_sessions", 0)
+
+        if not is_visible:
+            stream_badge = "[STREAM: PAUSED (HIDDEN)]"
+            stream_color = curses.color_pair(3)
+        elif is_streaming:
+            stream_badge = "[STREAM: LIVE]"
+            stream_color = curses.color_pair(2)
+        elif "auth" in raw_status:
+            stream_badge = "[STREAM: AUTH REJECTED]"
+            stream_color = curses.color_pair(4)
+        elif raw_status == "offline":
+            stream_badge = "[STREAM: DISCONNECTED]"
+            stream_color = curses.color_pair(4)
+        else:
+            stream_badge = "[STREAM: RECONNECTING]"
+            stream_color = curses.color_pair(3)
+
+        title = " BridgeDev Activity Monitor "
+        self.safe_addstr(0, 2, title, curses.A_BOLD | curses.color_pair(1))
+        stat_badge = f" {status_str} ({pid_str}) "
+        stat_col = curses.color_pair(2) if status_str == "OK" else curses.color_pair(4)
+        self.safe_addstr(0, len(title) + 4, stat_badge, curses.A_BOLD | stat_col)
+        self.safe_addstr(0, len(title) + len(stat_badge) + 6, f"MODE: {mode_str}", curses.A_BOLD)
+        self.safe_addstr(0, max(0, w - len(stream_badge) - 2), stream_badge, curses.A_BOLD | stream_color)
+
+        # Sub-header
+        sub = f"Tunnel: {tunnel_str} │ Sessions: {sessions} │ Admin: http://127.0.0.1:{self.state.config.get('ADMIN_PORT', '3001')}/ui/"
+        self.safe_addstr(1, 2, sub, curses.A_DIM)
+
+        # A live MCP request is a tracked operation, not proof that the
+        # ChatGPT client is still composing or has received a response.
+        if active_requests:
+            latest = active_requests[-1]
+            tool_name = redact_sensitive(str(latest.get("tool") or "MCP tool"))[:42]
+            activity = f"MCP RUNNING: {len(active_requests)}  |  {tool_name}"
+            activity_style = curses.color_pair(3) | curses.A_BOLD
+        elif pending_jobs:
+            activity = f"UNVERIFIED PENDING JOBS: {len(pending_jobs)}  |  inspect Running Jobs"
+            activity_style = curses.color_pair(3)
+        else:
+            activity = "NO ACTIVE MCP CALL  |  ChatGPT response state unavailable"
+            activity_style = curses.A_DIM
+        self.safe_addstr(2, 2, activity, activity_style)
+
+        # Tab Navigation
+        tabs = [" 1: Activity Stream ", " 2: Running Jobs ", " 3: Gateway Health "]
+        tx = 2
+        for idx, tab_name in enumerate(tabs):
+            attr = curses.color_pair(7) | curses.A_BOLD if self.current_tab == idx else curses.A_DIM
+            self.safe_addstr(3, tx, tab_name, attr)
+            tx += len(tab_name) + 2
+
+        if self.state.filter_query:
+            f_str = f" Filter: '{self.state.filter_query}' (press 'c' to clear) "
+            self.safe_addstr(3, max(0, w - len(f_str) - 2), f_str, curses.color_pair(3))
+
+        # Main Content Area
+        table_top = 4
+        table_h = h - table_top - 2
+        table_w = w - 4
+
+        if self.current_tab == 0:
+            self.render_activity_tab(table_top, 2, table_h, table_w)
+        elif self.current_tab == 1:
+            self.render_jobs_tab(table_top, 2, table_h, table_w)
+        else:
+            self.render_health_tab(table_top, 2, table_h, table_w)
+
+        # Footer
+        footer_y = h - 2
+        selected_desc = self.get_current_selection_preview()
+        if selected_desc:
+            self.safe_addstr(footer_y, 2, selected_desc, curses.A_DIM)
+
+        help_bar = " [Tab] View  [j/k] Navigate  [Enter] Details  [/] Filter  [l] Log  [r] Refresh  [q] Quit"
+        if self.filter_mode:
+            help_bar = f" Filter: {self.state.filter_query}_ (Press Enter to apply, Esc to cancel)"
+        self.safe_addstr(h - 1, 0, help_bar.ljust(w - 1), curses.color_pair(8))
+
+        # Modals
+        if self.detail_open:
+            self.render_detail_modal(h, w)
+        elif self.log_open:
+            self.render_log_modal(h, w)
+
+        self.stdscr.refresh()
+
+    def get_current_selection_preview(self) -> str:
+        if self.current_tab == 0:
+            items = self.get_filtered_activities()
+            if items and 0 <= self.selected_index < len(items):
+                it = items[self.selected_index]
+                sum_text = redact_sensitive(it.get("summary") or str(it.get("details") or ""))
+                return f"Selected: {it.get('tool', 'event')} ─ {sum_text}"
+        elif self.current_tab == 1:
+            jobs = self.get_filtered_jobs()
+            if jobs and 0 <= self.selected_index < len(jobs):
+                j = jobs[self.selected_index]
+                cmd_text = redact_sensitive(j.get("command", ""))
+                return f"Selected Job {j.get('id')}: {cmd_text}"
+        return ""
+
+    def render_activity_tab(self, y: int, x: int, h: int, w: int) -> None:
+        self.draw_box(y, x, h, w, "Activity & Tool Calls")
+        items = self.get_filtered_activities()
+        if not items:
+            self.safe_addstr(y + 2, x + 4, "No recent activity recorded. Activity stream is listening...", curses.A_DIM)
+            return
+
+        visible_rows = h - 3
+        if self.selected_index >= len(items):
+            self.selected_index = max(0, len(items) - 1)
+        if self.selected_index < self.scroll_offset:
+            self.scroll_offset = self.selected_index
+        elif self.selected_index >= self.scroll_offset + visible_rows:
+            self.scroll_offset = self.selected_index - visible_rows + 1
+
+        # Table Header
+        header = f" {'TIME':<11} {'TOOL / EVENT':<20} {'STATUS':<10} {'DUR':<8} {'TARGET / SUMMARY'}"
+        self.safe_addstr(y + 1, x + 1, header.ljust(w - 2), curses.A_UNDERLINE | curses.A_BOLD)
+
+        for i in range(visible_rows):
+            idx = self.scroll_offset + i
+            if idx >= len(items):
+                break
+            row_y = y + 2 + i
+            entry = items[idx]
+
+            # Format time
+            t_str = entry.get("time", "")
+            try:
+                dt = datetime.fromisoformat(t_str.replace("Z", "+00:00")).astimezone()
+                time_disp = dt.strftime("%I:%M:%S %p")
+            except Exception:
+                time_disp = t_str[11:19] if len(t_str) >= 19 else "RECENT"
+
+            tool = (entry.get("tool") or entry.get("action") or entry.get("kind") or "event")[:19]
+            status = str(entry.get("status", "ok"))[:9]
+            dur = f"{entry.get('duration_ms')}ms" if entry.get("duration_ms") is not None else "-"
+            summary = redact_sensitive(entry.get("summary") or "")
+
+            color = curses.color_pair(1)
+            if any(k in tool for k in ["run", "command", "process", "shell"]):
+                color = curses.color_pair(3)
+            elif any(k in tool for k in ["write", "edit", "patch", "create", "delete"]):
+                color = curses.color_pair(2)
+            elif any(k in tool for k in ["mcp", "skill", "agent"]):
+                color = curses.color_pair(5)
+
+            if "denied" in status.lower() or "error" in status.lower() or "fail" in status.lower():
+                color = curses.color_pair(4)
+
+            line_str = f" {time_disp:<11} {tool:<20} {status:<10} {dur:<8} {summary}"
+
+            if idx == self.selected_index:
+                self.safe_addstr(row_y, x + 1, line_str.ljust(w - 3), curses.color_pair(6) | curses.A_BOLD)
+            else:
+                self.safe_addstr(row_y, x + 1, line_str.ljust(w - 3), color)
+
+    def render_jobs_tab(self, y: int, x: int, h: int, w: int) -> None:
+        self.draw_box(y, x, h, w, "Running Jobs & Execution Receipts")
+        jobs = self.get_filtered_jobs()
+        if not jobs:
+            self.safe_addstr(y + 2, x + 4, "No recent command jobs recorded in ~/.local/state/chatgpt-local-coder/jobs", curses.A_DIM)
+            return
+
+        visible_rows = h - 3
+        if self.selected_index >= len(jobs):
+            self.selected_index = max(0, len(jobs) - 1)
+        if self.selected_index < self.scroll_offset:
+            self.scroll_offset = self.selected_index
+        elif self.selected_index >= self.scroll_offset + visible_rows:
+            self.scroll_offset = self.selected_index - visible_rows + 1
+
+        header = f" {'JOB ID':<18} {'STATUS':<12} {'CREATED':<12} {'DIR':<20} {'COMMAND'}"
+        self.safe_addstr(y + 1, x + 1, header.ljust(w - 2), curses.A_UNDERLINE | curses.A_BOLD)
+
+        for i in range(visible_rows):
+            idx = self.scroll_offset + i
+            if idx >= len(jobs):
+                break
+            row_y = y + 2 + i
+            job = jobs[idx]
+
+            jid = job.get("id", "")[:17]
+            status = job.get("status", "UNKNOWN")[:11]
+            created = job.get("created_at", "")[11:19] if len(job.get("created_at", "")) >= 19 else "RECENT"
+            wdir = (job.get("working_directory", "") or "").replace(os.path.expanduser("~"), "~")[:19]
+            cmd = redact_sensitive(job.get("command", "")).replace("\n", " ")
+
+            col = curses.color_pair(2) if "COMPLETED" in status else (curses.color_pair(3) if "RUNNING" in status else curses.color_pair(4))
+            line_str = f" {jid:<18} {status:<12} {created:<12} {wdir:<20} {cmd}"
+
+            if idx == self.selected_index:
+                self.safe_addstr(row_y, x + 1, line_str.ljust(w - 3), curses.color_pair(6) | curses.A_BOLD)
+            else:
+                self.safe_addstr(row_y, x + 1, line_str.ljust(w - 3), col)
+
+    def render_health_tab(self, y: int, x: int, h: int, w: int) -> None:
+        self.draw_box(y, x, h, w, "Gateway Diagnostics & Runtime Hardening")
+        with self.state.lock:
+            health = dict(self.state.health)
+
+        rows = [
+            ("Gateway Status", str(health.get("status", "unknown")).upper()),
+            ("Application", f"{health.get('name', 'bridge-dev')} (PID {health.get('pid', '-')})"),
+            ("Commit Revision", str(health.get("commit", "unknown"))),
+            ("Security Mode", str(health.get("policy_mode") or health.get("security_mode") or "unknown").upper()),
+            ("Full Machine Access", str(health.get("full_machine_access", "unknown"))),
+            ("Admin Error", str(health.get("error", "none"))),
+            ("MCP Port / Public URL", f":{health.get('mcp_port', 3000)} -> {health.get('public_url', 'loopback')}"),
+            ("Active Sessions", str(health.get("active_sessions", 0))),
+            ("Default Workspace", str(health.get("default_cwd", "~/BridgeDevWorkspace"))),
+            ("Tool Profile", str((health.get("instructions") or {}).get("tool_profile", "slim"))),
+            ("Checkpoints Enabled", str((health.get("checkpoint") or {}).get("enabled", False))),
+            ("Upstream Providers", str(len(health.get("upstream") or []))),
+            ("Audit Ledger Path", AUDIT_LOG_PATH),
+        ]
+
+        for i, (k, v) in enumerate(rows):
+            row_y = y + 2 + i
+            if row_y >= y + h - 1:
+                break
+            self.safe_addstr(row_y, x + 3, f"{k:<24} : ", curses.A_BOLD | curses.color_pair(1))
+            self.safe_addstr(row_y, x + 30, redact_sensitive(v))
+
+    def render_detail_modal(self, screen_h: int, screen_w: int) -> None:
+        mw = min(120, screen_w - 6)
+        mh = min(32, screen_h - 4)
+        mx = (screen_w - mw) // 2
+        my = (screen_h - mh) // 2
+
+        self.draw_box(my, mx, mh, mw, "Details & Parameters (Esc to close)")
+
+        details_lines: List[str] = []
+        if self.current_tab == 0:
+            items = self.get_filtered_activities()
+            if items and 0 <= self.selected_index < len(items):
+                entry = items[self.selected_index]
+                formatted = json.dumps(entry, indent=2)
+                details_lines = redact_sensitive(formatted).split("\n")
+        elif self.current_tab == 1:
+            jobs = self.get_filtered_jobs()
+            if jobs and 0 <= self.selected_index < len(jobs):
+                job = jobs[self.selected_index]
+                formatted = json.dumps(job, indent=2)
+                details_lines = redact_sensitive(formatted).split("\n")
+
+        for i in range(mh - 2):
+            idx = self.log_offset + i
+            if idx >= len(details_lines):
+                break
+            line = details_lines[idx]
+            self.safe_addstr(my + 1 + i, mx + 2, line)
+
+    def render_log_modal(self, screen_h: int, screen_w: int) -> None:
+        mw = min(130, screen_w - 6)
+        mh = min(34, screen_h - 4)
+        mx = (screen_w - mw) // 2
+        my = (screen_h - mh) // 2
+
+        self.draw_box(my, mx, mh, mw, "Job Log Output (Esc to close, j/k to scroll)")
+
+        for i in range(mh - 2):
+            idx = self.log_offset + i
+            if idx >= len(self.log_lines):
+                break
+            line = self.log_lines[idx]
+            self.safe_addstr(my + 1 + i, mx + 2, line)
+
+    def handle_input(self) -> None:
+        try:
+            ch = self.stdscr.getch()
+        except Exception:
+            return
+
+        if ch == -1:
+            return
+
+        # Modal close
+        if self.detail_open or self.log_open:
+            if ch in [27, ord("q"), ord("c"), 10, 13]:  # Esc, q, Enter
+                self.detail_open = False
+                self.log_open = False
+                self.log_offset = 0
+            elif ch in [ord("j"), curses.KEY_DOWN]:
+                self.log_offset += 1
+            elif ch in [ord("k"), curses.KEY_UP]:
+                self.log_offset = max(0, self.log_offset - 1)
+            return
+
+        # Filter mode text entry
+        if self.filter_mode:
+            if ch in [10, 13]:  # Enter
+                self.filter_mode = False
+            elif ch == 27:      # Esc
+                self.filter_mode = False
+                self.state.filter_query = ""
+            elif ch in [curses.KEY_BACKSPACE, 127, 8]:
+                self.state.filter_query = self.state.filter_query[:-1]
+            elif 32 <= ch <= 126:
+                self.state.filter_query += chr(ch)
+            return
+
+        # Normal navigation
+        if ch == ord("q"):
+            self.state.running = False
+        elif ch in [ord("\t"), ord("1"), ord("2"), ord("3")]:
+            if ch == ord("1"):
+                self.current_tab = 0
+            elif ch == ord("2"):
+                self.current_tab = 1
+            elif ch == ord("3"):
+                self.current_tab = 2
+            else:
+                self.current_tab = (self.current_tab + 1) % 3
+            self.selected_index = 0
+            self.scroll_offset = 0
+        elif ch in [ord("j"), curses.KEY_DOWN]:
+            self.selected_index += 1
+        elif ch in [ord("k"), curses.KEY_UP]:
+            self.selected_index = max(0, self.selected_index - 1)
+        elif ch in [ord("g"), curses.KEY_HOME]:
+            self.selected_index = 0
+        elif ch in [ord("G"), curses.KEY_END]:
+            count = len(self.get_filtered_activities() if self.current_tab == 0 else self.get_filtered_jobs())
+            self.selected_index = max(0, count - 1)
+        elif ch in [10, 13, ord(" ")]:  # Enter / Space
+            self.detail_open = True
+            self.log_offset = 0
+        elif ch == ord("l"):  # Log viewer
+            if self.current_tab == 1:
+                jobs = self.get_filtered_jobs()
+                if jobs and 0 <= self.selected_index < len(jobs):
+                    log_p = jobs[self.selected_index].get("log_path", "")
+                    if os.path.exists(log_p):
+                        try:
+                            with open(log_p, "r", encoding="utf-8", errors="replace") as lf:
+                                self.log_lines = [redact_sensitive(l.rstrip()) for l in lf.readlines()]
+                        except Exception as e:
+                            self.log_lines = [f"Error reading log: {e}"]
+                    else:
+                        self.log_lines = ["No log output generated for this job."]
+                    self.log_open = True
+                    self.log_offset = 0
+        elif ch in [ord("/"), ord("f")]:
+            self.filter_mode = True
+        elif ch == ord("c"):
+            self.state.filter_query = ""
+        elif ch == ord("r"):
+            self.state.update_health()
+            self.state.fetch_recent_activities()
+            self.state.scan_jobs()
+
+
+def curses_main(stdscr: Any) -> None:
+    config = load_config()
+    state = MonitorState(config)
+
+    # Initial data fetch
+    state.update_health()
+    state.fetch_recent_activities()
+    state.scan_jobs()
+
+    # Launch background threads
+    t_vis = threading.Thread(target=visibility_worker, args=(state,), daemon=True)
+    t_sse = threading.Thread(target=sse_stream_worker, args=(state,), daemon=True)
+    t_poll = threading.Thread(target=poll_worker, args=(state,), daemon=True)
+
+    t_vis.start()
+    t_sse.start()
+    t_poll.start()
+
+    app = TuiApp(stdscr, state)
+    app.init_curses()
+
+    while state.running:
+        app.render()
+        app.handle_input()
+
+
+def main() -> None:
+    try:
+        with open("/tmp/bridge-dev-monitor-debug.log", "a") as f:
+            f.write(f"{datetime.now()}: main() invoked\n")
+        curses.wrapper(curses_main)
+        with open("/tmp/bridge-dev-monitor-debug.log", "a") as f:
+            f.write(f"{datetime.now()}: curses_main() exited cleanly\n")
+    except KeyboardInterrupt:
+        with open("/tmp/bridge-dev-monitor-debug.log", "a") as f:
+            f.write(f"{datetime.now()}: KeyboardInterrupt\n")
+    except Exception:
+        import traceback
+        try:
+            with open("/tmp/bridge-dev-monitor-crash.log", "w") as f:
+                f.write(traceback.format_exc())
+            with open("/tmp/bridge-dev-monitor-debug.log", "a") as f:
+                f.write(f"{datetime.now()}: Crashed: {traceback.format_exc()}\n")
+        except Exception:
+            pass
+
+
+if __name__ == "__main__":
+    main()
