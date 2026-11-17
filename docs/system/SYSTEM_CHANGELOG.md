@@ -13,6 +13,15 @@ Rules:
 - If a change alters current machine assumptions, also update `SYSTEM_CONTEXT.md`.
 
 ## 2026-11-13
+## 2026-11-17 (source-only, not applied)
+
+### BridgeDev monitor in-flight task visibility source
+
+- Added candidate chezmoi source `dot_local/bin/executable_bridge-dev-monitor` derived from the actual live Python TUI, retaining existing behavior and adding an optional top-line MCP running/idle banner.
+- Added an offline, network-free Python regression for the active-call API snapshot and idle/active rendering. This source commit does **not** apply chezmoi, update BridgeDev's live release, or restart the monitor.
+- The running monitor's effective behavior remains unverified until the operator applies and tests the source after server-side activity lifecycle deployment. See `docs/system/agent-control-plane.md`.
+
+
 
 ### Local Coder Policy Gateway production promotion and three-mode security architecture
 
