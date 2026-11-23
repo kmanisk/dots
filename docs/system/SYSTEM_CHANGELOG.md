@@ -14,6 +14,13 @@ Rules:
 
 ## 2026-11-23
 
+### Resolved GNOME Keyring autologin lock and decoupled Git credential helper
+
+- Diagnosed why GNOME Keyring was locked at boot: TTY1 passwordless autologin (`agetty --autologin onyx`) does not prompt for a user password, leaving PAM `pam_gnome_keyring.so` without authentication credentials (`gkr-pam: couldn't unlock the login keyring.`). As a result, `gnome-keyring-daemon` started with `login.keyring` locked, which caused non-interactive commands querying Secret Service (such as `gh auth git-credential` during `git push`) to hang indefinitely on D-Bus.
+- Converted `login.keyring` to a blank master password using helper `~/.local/bin/keyring-set-blank-password` (tracked in `dot_local/bin/executable_keyring-set-blank-password`). In compliance with Arch Linux autologin design, `login.keyring` now auto-unlocks at session startup (`Locked: 0`) without passwords, dialogs, or hanging D-Bus calls. Existing tokens in `login.keyring` were preserved.
+- Decoupled GitHub CLI and Git authentication from D-Bus/GNOME Keyring by populating `~/.config/gh/hosts.yml` with mode `0600` containing `oauth_token`. Git credential resolution now reads directly from disk and completes in <10ms.
+- Verified live: collection lock/unlock roundtrip succeeds with blank password, `gh auth status` resolves instantly via `hosts.yml`, `git push origin master` in `~/.local/share/chezmoi` published commit `24f9532` without prompts. Owner: `docs/system/gnome-keyring-autologin.md`.
+
 ### Restored canonical low-latency brightness with below-zero software dimming
 
 - Reverted `change-brightness` to the canonical chezmoi previous implementation (`d7e2efeb49a8739e7cc97aa77267fce72e739ace`), eliminating the laggy sysfs loop and redundant execution overhead introduced by the experimental clamp.
