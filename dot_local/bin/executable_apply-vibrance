@@ -16,18 +16,54 @@ log_debug() {
     fi
 }
 
-# 1. Determine GPU mode via supergfxctl (fallback to cached mode or Hybrid)
-GPU_MODE="Hybrid"
-if command -v supergfxctl >/dev/null 2>&1; then
-    GPU_MODE="$(supergfxctl -g 2>/dev/null || echo 'Hybrid')"
-elif [ -f "${XDG_RUNTIME_DIR:-/run/user/$UID}/gpu_mode" ]; then
-    GPU_MODE="$(cat "${XDG_RUNTIME_DIR:-/run/user/$UID}/gpu_mode" 2>/dev/null || echo 'Hybrid')"
+# 1. Determine active display hardware:
+# Look for a connected panel/display in DRM sysfs first.
+# This prevents misconfiguration when supergfxctl mode is changed but reboot is pending.
+ACTIVE_BACKEND=""
+for s in /sys/class/drm/card*-*/status; do
+    [ -f "$s" ] || continue
+    if [ "$(<"$s")" = "connected" ]; then
+        conn_dir="$(dirname "$s")"
+        conn_name="$(basename "$conn_dir")"
+        card_name="${conn_name%%-*}"
+        vendor="$(cat "/sys/class/drm/$card_name/device/vendor" 2>/dev/null || true)"
+        if [ "$vendor" = "0x10de" ]; then
+            ACTIVE_BACKEND="nvidia"
+            break
+        elif [ "$vendor" = "0x8086" ]; then
+            ACTIVE_BACKEND="intel"
+        fi
+    fi
+done
+
+# Fallback: check asus-armoury hardware MUX sysfs
+if [ -z "$ACTIVE_BACKEND" ] && [ -r /sys/class/firmware-attributes/asus-armoury/attributes/gpu_mux_mode/current_value ]; then
+    mux="$(cat /sys/class/firmware-attributes/asus-armoury/attributes/gpu_mux_mode/current_value 2>/dev/null || echo 1)"
+    if [ "$mux" = "0" ]; then
+        ACTIVE_BACKEND="nvidia"
+    else
+        ACTIVE_BACKEND="intel"
+    fi
 fi
 
-log_debug "Detected GPU mode: $GPU_MODE"
+# Fallback: check supergfxctl
+if [ -z "$ACTIVE_BACKEND" ]; then
+    GPU_MODE="Hybrid"
+    if command -v supergfxctl >/dev/null 2>&1; then
+        GPU_MODE="$(supergfxctl -g 2>/dev/null || echo 'Hybrid')"
+    elif [ -f "${XDG_RUNTIME_DIR:-/run/user/$UID}/gpu_mode" ]; then
+        GPU_MODE="$(cat "${XDG_RUNTIME_DIR:-/run/user/$UID}/gpu_mode" 2>/dev/null || echo 'Hybrid')"
+    fi
+    case "$GPU_MODE" in
+        AsusMuxDgpu) ACTIVE_BACKEND="nvidia" ;;
+        *) ACTIVE_BACKEND="intel" ;;
+    esac
+fi
 
-case "$GPU_MODE" in
-    AsusMuxDgpu)
+log_debug "Detected active display backend: $ACTIVE_BACKEND"
+
+case "$ACTIVE_BACKEND" in
+    nvidia)
         # Authoritative config: ~/.config/nvibrant
         CONFIG_FILE="$HOME/.config/nvibrant"
         if [ ! -f "$CONFIG_FILE" ]; then
@@ -44,20 +80,22 @@ case "$GPU_MODE" in
                 ;;
         esac
 
-        if ! command -v nvibrant >/dev/null 2>&1; then
-            log_debug "nvibrant command not found; doing nothing."
-            exit 0
+        NVIB_BIN="$HOME/.local/bin/nvibrant-current"
+        if [ ! -x "$NVIB_BIN" ]; then
+            echo "apply-vibrance: missing $NVIB_BIN" >&2
+            exit 1
         fi
 
-        log_debug "Applying nvibrant 0 0 $NVIB_VAL"
-        # Connector index 2 (argv[3]) corresponds to internal panel on RTX 5050 MUX
-        nvibrant 0 0 "$NVIB_VAL" >/dev/null 2>&1 || {
-            log_debug "nvibrant ioctl failed non-fatally."
-            exit 0
+        log_debug "Applying driver-matched nvibrant 0 0 $NVIB_VAL"
+        # Connector index 2 (argv[3]) corresponds to internal panel on RTX 5050 MUX.
+        # The wrapper fails closed if the loaded driver changes or the ioctl fails.
+        "$NVIB_BIN" 0 0 "$NVIB_VAL" >/dev/null || {
+            echo "apply-vibrance: failed to set hardware vibrance" >&2
+            exit 1
         }
         ;;
 
-    Hybrid|Integrated)
+    intel)
         # Authoritative config: ~/.config/vibrance
         CONFIG_FILE="$HOME/.config/vibrance"
         CTM_BIN="$HOME/.local/bin/ctm-test"
@@ -67,7 +105,7 @@ case "$GPU_MODE" in
             exit 0
         fi
 
-        VIB_VAL="1.3"
+        VIB_VAL="1.40"
         if [ -f "$CONFIG_FILE" ]; then
             RAW_VAL="$(tr -d '[:space:]' < "$CONFIG_FILE" 2>/dev/null || true)"
             [ -n "$RAW_VAL" ] && VIB_VAL="$RAW_VAL"
@@ -88,7 +126,7 @@ case "$GPU_MODE" in
         ;;
 
     *)
-        log_debug "Unknown GPU mode: '$GPU_MODE'; doing nothing safely."
+        log_debug "Unknown active display backend: '$ACTIVE_BACKEND'; doing nothing safely."
         exit 0
         ;;
 esac

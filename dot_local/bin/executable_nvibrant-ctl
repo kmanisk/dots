@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+# Immediate, serialized display vibrance. Exact-driver NVKMS (dGPU) + Intel CTM sync.
+# Caps+X/Z use one native ioctl per keypress in dGPU; synchronizes both configs.
+set -euo pipefail
+
+CONFIG_FILE="$HOME/.config/nvibrant"
+INTEL_CONFIG="$HOME/.config/vibrance"
+BACKEND="$HOME/.local/bin/nvibrant-current"
+
+saved() {
+    if [[ -r "$CONFIG_FILE" ]]; then
+        IFS= read -r current < "$CONFIG_FILE" || true
+    else
+        current=614
+    fi
+    [[ "$current" =~ ^-?[0-9]+$ ]] || current=614
+    (( current >= -1024 && current <= 1023 )) || current=614
+}
+
+raw_percent() {
+    # Integer-only approximation to nearest whole Windows-style percentage.
+    if (( current >= 0 )); then
+        percent=$((50 + (current * 50 + 511) / 1023))
+    else
+        percent=$((50 - ((-current * 50 + 511) / 1023)))
+    fi
+    (( percent < 0 )) && percent=0
+    (( percent > 100 )) && percent=100
+    return 0
+}
+
+percent_raw() {
+    # Snap Windows percentage to a 5% increment, preserving old behavior.
+    (( percent < 0 )) && percent=0
+    (( percent > 100 )) && percent=100
+    percent=$(((percent + 2) / 5 * 5))
+    delta=$(((percent - 50) * 1023))
+    if (( delta >= 0 )); then target=$(((delta + 25) / 50))
+    else target=$((-((-delta + 25) / 50)))
+    fi
+
+    # Synchronize Intel CTM scalar (1.00 neutral, 2.00 max, 0.00 mono)
+    if (( percent >= 50 )); then
+        local cents=$(( (percent - 50) * 2 ))
+        if (( cents >= 100 )); then
+            intel_scalar="2.00"
+        else
+            printf -v intel_scalar "1.%02d" "$cents"
+        fi
+    else
+        local cents=$(( percent * 2 ))
+        printf -v intel_scalar "0.%02d" "$cents"
+    fi
+    return 0
+}
+
+notify_level() {
+    # Notify outside the lock, and don't wait for the desktop notification.
+    notify-send -a Vibrance -t 700 -u low -i preferences-desktop-display \
+        -h string:x-canonical-private-synchronous:vibrance \
+        -h string:x-dunst-stack-tag:vibrance \
+        -h "int:value:$percent" "Vibrance: ${percent}%" >/dev/null 2>&1 &
+}
+
+usage() {
+    printf '%s\n' 'Usage: nvibrant-ctl get | inspect | set <raw-or-percent> | up [step] | down [step] | off' \
+        'Caps+X/Z: instantaneous 5% change, exact-driver NVKMS backend (dGPU) and Intel CTM sync (iGPU).'
+}
+
+case "${1:-get}" in
+    get)
+        saved
+        printf 'Configured vibrance: %s (raw NVKMS; no hardware readback)\n' "$current"
+        if [[ -r "$INTEL_CONFIG" ]]; then
+            printf 'Intel CTM scalar   : %s (~/.config/vibrance)\n' "$(<"$INTEL_CONFIG")"
+        fi
+        ;;
+    inspect)
+        saved
+        version="$(cat /sys/module/nvidia/version 2>/dev/null || echo "not loaded")"
+        printf 'Loaded NVIDIA driver: %s\n' "$version"
+        printf 'GPU mode: %s\n' "$(supergfxctl -g 2>/dev/null || echo unknown)"
+        binary="$HOME/.local/libexec/nvibrant/nvibrant-$version"
+        [[ -x "$binary" ]] && printf 'Driver-specific helper: %s (ready)\n' "$binary" || echo 'Missing native helper; run nvibrant-build-local'
+        printf 'Configured value: %s (raw NVKMS)\n' "$current"
+        if [[ -r "$INTEL_CONFIG" ]]; then
+            printf 'Intel CTM scalar: %s\n' "$(<"$INTEL_CONFIG")"
+        fi
+        ;;
+    up|down|set|off|reset)
+        operation=$1
+        # The lock serializes rapid key events: every +/- press is preserved,
+        # unlike racing invocations that read the same pre-update preference.
+        runtime="${XDG_RUNTIME_DIR:-/run/user/$UID}"
+        [[ -d "$runtime" ]] || { echo "nvibrant-ctl: missing runtime dir" >&2; exit 1; }
+        exec {lockfd}>"$runtime/nvibrant-ctl.lock"
+        flock -x -w 2 "$lockfd" || { echo 'nvibrant-ctl: keypress lock timeout' >&2; exit 1; }
+        saved
+        case "$operation" in
+            up|down)
+                step="${2:-5}"
+                [[ "$step" =~ ^[0-9]+$ ]] && ((step >= 1 && step <= 25)) || { echo 'Vibrance step must be 1..25%' >&2; exit 2; }
+                raw_percent
+                if [[ $operation == up ]]; then percent=$((percent + step)); else percent=$((percent - step)); fi
+                percent_raw
+                ;;
+            set)
+                [[ $# == 2 ]] || { usage >&2; exit 2; }
+                value=$2
+                if [[ "$value" == *% ]]; then
+                    amount=${value%%%}
+                    if [[ "$amount" =~ ^[0-9]+$ ]]; then
+                        percent=$amount
+                    elif [[ "$amount" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+                        percent=$(awk -v p="$amount" 'BEGIN {printf "%.0f", p}')
+                    else
+                        echo 'Invalid percentage' >&2;exit 2
+                    fi
+                    (( percent >= 0 && percent <= 100 )) || { echo 'Percentage must be 0..100' >&2;exit 2; }
+                    percent_raw
+                else
+                    [[ "$value" =~ ^-?[0-9]+$ ]] && ((value >= -1024 && value <= 1023)) || { echo 'Raw NVKMS value must be -1024..1023' >&2;exit 2; }
+                    current=$value
+                    raw_percent
+                    percent_raw
+                fi
+                ;;
+            off|reset)
+                target=0
+                percent=50
+                intel_scalar="1.00"
+                ;;
+        esac
+
+        # Check if NVIDIA currently has an active connected display panel
+        has_nv_display=0
+        for s in /sys/class/drm/card*-*/status; do
+            [[ -f "$s" && "$(<"$s")" == "connected" ]] || continue
+            # PCI vendor belongs to the DRM card, not the connector sysfs object.
+            connector="${s%/status}"
+            card="${connector##*/}"
+            card="${card%%-*}"
+            vendor_file="/sys/class/drm/$card/device/vendor"
+            if [[ -r "$vendor_file" && "$(<"$vendor_file")" == "0x10de" ]]; then
+                has_nv_display=1
+                break
+            fi
+        done
+
+        if [[ $has_nv_display -eq 1 ]]; then
+            if ! "$BACKEND" 0 0 "$target" >/dev/null 2>&1; then
+                notify-send -u critical -a Vibrance 'Vibrance not applied' 'Check NVIDIA driver-matched helper' >/dev/null 2>&1 &
+                echo 'nvibrant-ctl: NVKMS ioctl failed; preference unchanged' >&2
+                exit 1
+            fi
+            printf '%s\n' "$target" > "$CONFIG_FILE"
+            printf '%s\n' "$intel_scalar" > "$INTEL_CONFIG"
+            flock -u "$lockfd"
+            notify_level
+            printf 'Vibrance: %s%% (raw %s, immediate)\n' "$percent" "$target"
+        else
+            # Running on Intel iGPU (or no active NVIDIA display)
+            printf '%s\n' "$target" > "$CONFIG_FILE"
+            printf '%s\n' "$intel_scalar" > "$INTEL_CONFIG"
+            flock -u "$lockfd"
+            notify-send -a Vibrance -t 900 -u low -i preferences-desktop-display \
+                -h string:x-canonical-private-synchronous:vibrance \
+                -h string:x-dunst-stack-tag:vibrance \
+                -h "int:value:$percent" "Vibrance: ${percent}% (iGPU: ${intel_scalar})" >/dev/null 2>&1 &
+            printf 'Vibrance: %s%% (iGPU scalar %s, dGPU raw %s) — Saved for hardware latch\n' "$percent" "$intel_scalar" "$target"
+        fi
+        ;;
+    -h|--help|help) usage ;;
+    *) usage >&2; exit 2 ;;
+esac

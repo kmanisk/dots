@@ -12,11 +12,28 @@ export XDG_CURRENT_DESKTOP=sway
 export XDG_SESSION_DESKTOP=sway
 export XDG_SESSION_TYPE=wayland
 
-# Mode detection via supergfxctl (queried once at login; cached in env & tmpfs RAM)
+# Mode detection via supergfxctl with hardware sysfs reconciliation
 GPU_MODE="Hybrid"
 if command -v supergfxctl >/dev/null 2>&1; then
     GPU_MODE="$(supergfxctl -g 2>/dev/null || echo 'Hybrid')"
 fi
+
+# Reconcile with live ASUS hardware sysfs (handles pending reboot states cleanly)
+if [ -r /sys/class/firmware-attributes/asus-armoury/attributes/dgpu_disable/current_value ]; then
+    dgpu_off="$(cat /sys/class/firmware-attributes/asus-armoury/attributes/dgpu_disable/current_value 2>/dev/null || echo 0)"
+    if [ "$dgpu_off" = "1" ]; then
+        GPU_MODE="Integrated"
+    fi
+fi
+if [ "$GPU_MODE" != "Integrated" ] && [ -r /sys/class/firmware-attributes/asus-armoury/attributes/gpu_mux_mode/current_value ]; then
+    hw_mux="$(cat /sys/class/firmware-attributes/asus-armoury/attributes/gpu_mux_mode/current_value 2>/dev/null || echo "")"
+    if [ "$hw_mux" = "1" ] && [ "$GPU_MODE" = "AsusMuxDgpu" ]; then
+        GPU_MODE="Hybrid"
+    elif [ "$hw_mux" = "0" ]; then
+        GPU_MODE="AsusMuxDgpu"
+    fi
+fi
+
 export GPU_MODE
 echo "$GPU_MODE" > "${XDG_RUNTIME_DIR:-/run/user/$UID}/gpu_mode" 2>/dev/null || true
 
@@ -48,12 +65,19 @@ export PHOTOCRAFT_NATIVE_WAYLAND=1
 export WLR_NO_HARDWARE_CURSORS=1
 export XCURSOR_PATH="$HOME/.local/share/icons:$HOME/.icons:/usr/share/icons:/usr/share/pixmaps"
 
-# Pin Sway compositor directly to Intel iGPU in Hybrid/Integrated modes to ensure RTX 5050 suspends
+# Pin Sway compositor directly to Intel iGPU in Hybrid/Integrated modes to ensure RTX 5050 suspends.
+# Note: wlroots splits WLR_DRM_DEVICES on ':'. Never pass '/dev/dri/by-path/...' directly
+# because PCI identifiers contain colons (e.g. pci-0000:00:02.0-card), breaking wlroots path parsing.
+# Resolve the real device path without colons (e.g. /dev/dri/card1).
 if [ "$GPU_MODE" = "Hybrid" ] || [ "$GPU_MODE" = "Integrated" ]; then
+    INTEL_CARD=""
     if [ -e /dev/dri/by-path/pci-0000:00:02.0-card ]; then
-        export WLR_DRM_DEVICES=/dev/dri/by-path/pci-0000:00:02.0-card
+        INTEL_CARD="$(readlink -f /dev/dri/by-path/pci-0000:00:02.0-card 2>/dev/null || true)"
     elif [ -e /dev/dri/card1 ] && [ -e /dev/dri/card0 ]; then
-        export WLR_DRM_DEVICES=/dev/dri/card1
+        INTEL_CARD="/dev/dri/card1"
+    fi
+    if [ -n "$INTEL_CARD" ] && [ -e "$INTEL_CARD" ]; then
+        export WLR_DRM_DEVICES="$INTEL_CARD"
     fi
 fi
 

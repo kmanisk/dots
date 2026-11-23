@@ -12,16 +12,259 @@ Rules:
 - Do not paste large diffs, logs, or transient diagnostics here.
 - If a change alters current machine assumptions, also update `SYSTEM_CONTEXT.md`.
 
+## 2026-11-23
+
+### Restored canonical low-latency brightness with below-zero software dimming
+
+- Reverted `change-brightness` to the canonical chezmoi previous implementation (`d7e2efeb49a8739e7cc97aa77267fce72e739ace`), eliminating the laggy sysfs loop and redundant execution overhead introduced by the experimental clamp.
+- Restored Below-Zero / Sub-Zero software dimming below 0% hardware backlight (allowing down to 15% software floor / `-85%` via `wl-gammarelay-rs` with `weather-clear-night` OSD icon).
+- Verified live: down steps below 0% decrease `wl-gammarelay-rs` Brightness (`1.0 -> 0.95 -> 0.90`), and up steps recover smoothly through 1.0 before raising hardware backlight. Execution time dropped back to ~50ms.
+- Retained screenshot directory restoration under `/mnt/Games/Other/Media/Screenshots` and the `~/Pictures/Screenshots` symlink. Owner: `docs/display/brightness-backlight.md`.
+
+## 2026-11-21
+
+### Removed recurring Concord keyring unlock prompt in autologin sessions
+
+- Corrected the earlier Concord preflight regression: `~/.local/bin/concord` requested an encrypted GNOME login-keyring unlock on every autologin session and could not satisfy the user's prompt-free requirement. Removed that wrapper from live/chezmoi and configured the installed Concord 2.7.1 app via canonical and live `dot_config/concord/config.toml` with documented `credentials.store="plain"`; current Fish resolves the packaged binary. **Explicit security tradeoff:** Concord may store its Discord token unencrypted inside the existing `0700` state directory with credential file mode `0600`. Original encrypted GNOME keyring remains intact and no credentials were extracted, deleted, or migrated. Existing keyring-only Discord session may need a one-time QR login; actual post-login persistence is unverified. Passwordless TTY autologin, PAM, Sway session restore, GNOME Keyring services, and other apps were not changed. Owner: `docs/system/concord-keyring.md`.
+
+### Concord keyring preflight for canceled logins under TTY autologin
+
+- Diagnosed Concord 2.7.1's default `credentials.store="auto"`: encrypted GNOME `login.keyring` is locked after passwordless TTY1 autologin, even though `org.freedesktop.secrets` is available; opening Concord invokes an unlock prompt inside its login flow, and canceling reports a canceled login. Installed a minimal chezmoi-managed and live `~/.local/bin/concord` wrapper that uses libsecret to check/unlock the default collection **before** running `/usr/bin/concord`; cancellation fails closed, no plaintext token fallback or keyring reset, and user must enter the existing keyring password once per autologin session. The normal CLI/Fish/Sway PATH resolves to the wrapper. Read-only live lock check returned locked/exit 3; three mocked backend acceptance/cancel states passed. An interactive unlock and actual Discord authentication remain user-dependent and unverified. Owner: `docs/system/concord-keyring.md`.
+
+### Repaired GPU switcher's failed dGPU transition and ASUS deferred shutdown path
+
+- Confirmed user-requested dGPU selection previously **failed after reboot**: `/etc/supergfxd.conf` retained `AsusMuxDgpu`, but firmware MUX `gpu_mux_mode=1`, `dgpu_disable=0` and Intel-driven eDP proved Hybrid. The original script incorrectly trusted the saved supergfxd mode; installed supergfxd 5.2.7 still references an obsolete ASUS MUX sysfs path. ASUS GPU firmware writes through asusd 6.5 are **queued until shutdown**. The existing local `asus-shutdown.service` override had `TimeoutStopSec=5`, and the previous shutdown recorded timeout failures. Restored the effective stop timeout to the **packaged 45s** using the reviewed source `scripts/systemd/asus-shutdown-override.conf`; backed up the old drop-in, reloaded unit files without restarting services, and verified effective 45s/active handler/clean unit validation.
+- Reworked the chezmoi and live `gpu-switch` to use asusd's D-Bus queue only (no legacy `supergfxctl -m`), skip redundant no-op firmware writes (upstream issue #318), check queued attribute readback, reject missing/short-timeout shutdown handlers, block QEMU/VFIO, and persist a boot-ID/target receipt that reports **FAILED GPU SWITCH** if a later boot's hardware remains different. Eight isolated mocked cases passed including menu/reboot, no-op, inactive handler, short timeout, queue disagreement and post-boot mismatch. Read-only live status verifies the old failed request; no fresh real GPU switch or reboot was performed. Owner: `docs/display/gpu-switcher.md`.
+
+### Intel/Hybrid brightness software workaround after physical PWM remained unresponsive
+
+- A follow-up confirmed the prior `brightnessctl` fix only proved sysfs permission/readback, not visible panel luminance: on the live Hybrid/Intel eDP, the user reports 0–100% physical brightness makes no visible difference. Tested the live `wl-gammarelay-rs` value against the **active Intel DRM GAMMA_LUT**, confirming actual output gamma changes and exact LUT restoration. Updated the managed/live `change-brightness` script so Intel/Hybrid spans -85%..0..+100% via an on-demand gamma mapping (0.15..0.50..1.00) while leaving hardware/sysfs untouched; NVIDIA-direct retains hardware-first control. Mocked full-range and fallback tests passed; live +50% changed gamma 0.50->0.75 and the active DRM LUT checksum, and round-trip restored gamma 0.50 and unchanged hardware 5%. This is a *software workaround*, not restored physical backlight/PWM. Boot still has `acpi_backlight=native` from earlier dGPU-only repair; mode-specific kernel investigation is deferred, with no GRUB edits/restarts. No Elden Ring, Proton, gaming-launcher, or game-data files modified. Owner: `docs/display/brightness-backlight.md`.
+
+### Fixed nonresponsive hardware brightness and negative software dimming after GPU-mode switch
+
+- Diagnosed live connected Intel eDP `card2-eDP-2`: bare `brightnessctl` selected inactive `nvidia_0` (0%), while actual `intel_backlight` was 5% and its sysfs attribute was root:root 0644. Confirmed ordinary user writes failed and identical root writes succeeded. Reworked chezmoi-managed/live `change-brightness` to choose the connected DRM display vendor and explicitly target the matching Intel/NVIDIA backlight, enforce a 5% physical floor, keep the existing gamma below 1.0 until deliberately raised, serialize keypresses, and fail on disconnected/unknown panels. Installed root-owned `/etc/udev/rules.d/95-panel-backlight-video.rules` (source `scripts/udev/`), gave the existing `video` group `0664` access to recognized backlight sysfs attributes, and reloaded udev rules without retriggering the display. Mocked Intel and NVIDIA scenarios passed, and the live unprivileged Intel test passed gamma 0.60->0.55->0.60 and hardware 5%->10%->5%; original brightness restored. Real NVIDIA eDP acceptance remains untested. Owner: `docs/display/brightness-backlight.md`.
+
+### Automatic nvibrant rebuild and keyboard GPU selector
+
+- Cached pinned nvibrant upstream C++ source with verified SHA256; updated `nvibrant-build-local` to build the **installed** driver version from `/usr/src/nvidia-VERSION` even when the GPU is off and avoid network during the package transaction. Built `~/.local/libexec/nvibrant/nvibrant-620.73.04` successfully against installed NVIDIA headers and verified repeated offline runs skip unchanged versions. Installed root-owned `/etc/pacman.d/hooks/95-nvibrant-rebuild.hook` (source `scripts/pacman-hooks/`) to trigger on NVIDIA package upgrades; it uses `runuser` and `nvibrant-post-update` to compile as `onyx`, with failure reported but nonblocking. The new driver’s NVKMS ioctl is untested until NVIDIA becomes active after reboot.
+- `gpu-switch` now opens a keyboard-driven fzf menu with J/K/Tab movement and Enter-to-stage-and-reboot; Esc cancels. Direct `dgpu|hybrid|igpu` commands continue to stage without reboot. Mock pseudo-terminal integration verified ASUS/manager/reboot sequencing and cancellation without changing firmware or rebooting. QEMU/VFIO guard and no-op unchanged mode remain. Source/live scripts match. Owners: `docs/display/nvidia-vibrance.md`, `docs/display/gpu-switcher.md`.
+
+### Minimal ASUS MUX switcher for dGPU, Hybrid, and Eco modes
+
+- Added executable `gpu-switch` to the chezmoi source and live `~/.local/bin` without replacing the existing `gpu` symlink to `gpu-mode`. Live hardware inspection after Windows Eco boot confirmed Intel driving eDP, `gpu_mux_mode=1`, `dgpu_disable=1`, but `supergfxctl -g=Hybrid`; Intel VF count 0 and no QEMU running. The new status reads actual DRM/firmware state, accepts `dgpu|hybrid|igpu`, requires confirmation, refuses QEMU/VFIO/active SR-IOV VFs, pairs ASUS settings and stages supergfxctl mode without automatic reboot. Bash syntax, source/live parity, read-only plans, and mock staging/refusal paths passed; **real firmware transitions/post-reboot acceptance remain untested**. Owners: `docs/display/gpu-switcher.md`, `docs/system/sway.md`.
+
+### Sway session restoration redesign and GNOME Keyring prompt resolution
+
+- Redesigned `sway-session-save` and `sway-session-restore` to establish an invariant that all terminal windows restore strictly as clean, interactive Fish shells (`footclient -D <cwd>`) without auto-reopening saved CLI agents, conversations, or nested subshell processes (AGY, Codex, OpenCode, Claude, Gemini, etc.). Removed fragile `TITLE_TUI_MAP` pattern matching for terminals.
+- Upgraded Foot client/server working-directory discovery to a multi-tier pipeline: Fish/Pure prompt title parsing (supporting spaces and tildes), followed by process-tree descendant inspection under the Foot server PID (`find_foot_child_cwd`) for applications that override window titles (`btop`, `top`, `nvim`), with safe `$HOME` fallback.
+- Added self-healing snapshot loading in `sway-session-restore`: if `session.json` is missing or corrupted, it automatically falls back to `session.json.prev`, then historical backups in `backups/`.
+- Isolated cold-boot defaults to run only when no session snapshot exists anywhere; when a valid snapshot is restored, intentionally closed applications are never resurrected.
+- Preserved workspace focus by recording `focused_workspace` in session snapshots.
+- Resolved repeated startup GNOME Keyring prompt ("The login keyring did not get unlocked"): root cause was `sway-session-restore` previously auto-launching `footclient agy` during TTY1 autologin when `login.keyring` was locked. With CLI auto-launch removed and Brave using `--password-store=basic`, zero applications query Secret Service on startup. For manual CLI launches, `/home/onyx/.local/bin/agy` sets `antigravity-keyring-unavailable` when the keyring is locked, enabling AGY's composite token storage to load its valid file-based OAuth token directly without prompting or weakening keyring encryption.
+- Validated via 13-test automated regression suite covering cold boot, valid reboot, multi-instance terminals, GUI apps, corrupt/missing snapshots, save failure atomicity, duplicate prevention, paths with spaces, title overrides, manual save/restore, legacy snapshot sanitization, idempotency, and closed application non-resurrection. Live on-demand save captured WS1 Foot and WS2 Brave; live dry run confirmed 0 duplicate launches planned. `sway-check` passed with 0 failures and 0 warnings. Owner: `docs/system/sway.md`, `dot_config/sway/SESSION.md`.
+
+## 2026-11-20
+
+### Fixed TTY1 crash loop, Sway iGPU launcher failure, and ASUS GPU mode synchronization
+
+- **Sway iGPU DRM Device Resolution:** Isolated root cause of compositor crash on Intel iGPU: `sway-run` set `WLR_DRM_DEVICES=/dev/dri/by-path/pci-0000:00:02.0-card`. Because wlroots tokenizes `WLR_DRM_DEVICES` on `:`, the colons in the PCI bus identifier caused wlroots to split the path into invalid substrings (`/dev/dri/by-path/pci-0000`, `00`, `02.0-card`), failing DRM device initialization immediately. Resolved `readlink -f` to canonical DRM card nodes (e.g. `/dev/dri/card1`), verified working on Intel UHD Graphics (`0000:00:02.0`).
+- **TTY1 Autologin Resilience & Crash-Loop Elimination:** Eliminated the infinite restart spiral that triggered systemd `start-limit-hit` on `getty@tty1.service`. Replaced `exec launch-desktop` in `~/.config/fish/conf.d/40-login.fish` with an exit-code check so failed desktop sessions drop into an interactive login shell instead of killing the TTY. Added `RestartSec=2s` to `/etc/systemd/system/getty@tty1.service.d/override.conf` and `run_onchange_linux-10-reconcile-login.sh.tmpl` as a permanent backstop against rapid start limits.
+- **Relocated `wl-gammarelay.service`:** Moved user unit installation from `default.target` to `graphical-session.target` with `Restart=on-failure` and `RestartSec=2`. Disabled at user default target so it never attempts to connect to a nonexistent Wayland display during pre-graphical boot.
+- **ASUS Armoury Crate / Linux GPU Mode Synchronization:** Upgraded `gpu-mode` to explicitly manage all three supported hardware states (`AsusMuxDgpu`, `Hybrid`, and `Integrated`/Eco). Synchronized `asusctl armoury set dgpu_disable` (0 for dgpu/hybrid, 1 for eco) to prevent firmware NVRAM state mismatch when switching between Windows Armoury Crate and Linux. Reset `dgpu_disable` to 0 and staged `AsusMuxDgpu` for upcoming reboot.
+- **Dynamic Dual-Path Vibrance Architecture:** Upgraded `apply-vibrance`, `sway-run`, and `nvibrant-ctl` to dynamically inspect active DRM connector status and vendor IDs (`/sys/class/drm/card*-*/status` and `device/vendor`). When the display is driven by NVIDIA (`0x10de`), NVKMS direct ioctls apply vibrance instantaneously via `nvibrant-current`. When driven by Intel (`0x8086`), `apply-vibrance` applies Intel hardware CTM via `ctm-test`. `nvibrant-ctl` (invoked via `CapsLock+x`/`CapsLock+z` in xremap) now synchronously updates both `~/.config/nvibrant` and `~/.config/vibrance` using mathematical 1-to-1 conversion formulas, providing immediate feedback in dGPU mode and persistent synchronization in iGPU mode.
+
+- **NVIDIA vibrance after dGPU MUX reboot:** Verified the ASUS firmware had latched discrete mode (`gpu_mux_mode=0`), NVIDIA owned connected `card1-eDP-1`, and the 620.70.06 native NVKMS helper successfully set connector 2. Corrected `nvibrant-ctl` to read vendor `0x10de` from the connected DRM card (`/sys/class/drm/cardN/device/vendor`), not the nonexistent connector `device/vendor` path, and fixed its empty-driver-version `inspect` read. Direct 100% -> 95% -> 100% control applied immediately, configs were restored, and `apply-vibrance` succeeded. No Sway restart or service changes; manual physical xremap keypress acceptance pending. Owner: `docs/display/nvidia-vibrance.md`.
+
+- **Sway CLI/session restore reliability:** Generalized startup rehydration of every saved Foot CLI/TUI through interactive Fish (`fish -i -C '<command and arguments>'`), matching manual command behavior without copying credentials. Added Codex, Gemini and Qwen to the saver’s TUI title map. Dry-run regression checks passed for AGY, OpenCode, Codex, Claude, Gemini, editor/file-manager TUIs, a generic saved command with arguments and plain Foot. Title-overriding applications remain a capture limitation when the Foot server reports a shared PID. Multi-instance terminal detection now counts real open Sway windows instead of distinct app IDs; regression tests cover 0/1/2 pre-existing Foot views. Made `sway-session-save --help` read-only and introduced a `--shutdown` 90-second guard for systemd ExecStop so it will not replace a fresh powermenu snapshot with a partial shutdown tree. Verified the current session saved WS1 (AGY + Foot) and WS2 (Brave), with eight bounded backups. Source/live scripts and unit match; unit reload intentionally deferred (pending user-manager startup). Keyring prompt traced to password-protected GNOME Keyring with TTY1 autologin; secrets left protected. Owner: `docs/system/sway.md` and `dot_config/sway/SESSION.md`.
+
+## 2026-11-19
+
+### Stock LTSC VFIO driver baseline verified; PCI MMIO overlap and guest-access blocker isolated
+
+- In the offline independent stock Windows guest, the Intel VF `0000:00:02.1` was restored and bound to `vfio-pci`, while Intel PF remained `i915` and NVIDIA remained on the host. Signed Intel UHD driver `32.0.101.7092` was verified in guest PnP, and the Intel-VFIO pre-IDD 180-second idle test averaged **0.217 host QEMU cores** after 90 seconds; matching QCOW2 and OVMF recovery checkpoints exist.
+- Subsequent Intel VFIO + KVMFR test had black VGA and no LGMP host source. QEMU `info pci` and `info mtree` confirmed **AHCI and IVSHMEM PCI BAR MMIO ranges overlap at `0x81011000`**; causation is not yet proven. One isolated `device_del shmem0` was rejected (`pcie.0` cannot hot-unplug). A no-disk/no-GPU Q35 synthetic PCIe-root-port / PCI bridge candidate parsed, but the Windows boot fix was not tested. Guest normal ACPI and Windows keyboard shutdown paths failed; test QEMU PID `60752` was **paused**, not force-powered off. Active disk remains locked, so no offline integrity check or snapshot restore was attempted. Owner: `docs/virtualization/windows-stock-ltsc-looking-glass.md`; experimental evidence: stock guest `inspection/pci-mmio-overlap-investigation-20261119.md`.
+- Original Atlas, A/B clone and Nano11 remain protected; no host PF/NVIDIA rebind, new guest NIC, permanent service, or commit/push.
+
+### Isolated stock Windows LTSC VM reached desktop; Looking Glass media staged, not activated
+
+- Created an independent offline Windows 10 IoT Enterprise LTSC 2021 guest under `/mnt/Games/VirtualMachines/win10-stock-test-20261119/`, with its own 64 GiB QCOW2/UEFI, on-demand user QEMU, VGA/VNC workspace-5 viewer, no NIC, and bounded safety monitoring. Windows completed installation. When its guard paused QEMU under installer load, a **runtime-only 220% CPU cap** was applied to this guest, a fresh monitor started, and installation resumed; no original VM changed.
+- At this host boot the Intel SR-IOV VF remains absent (`sriov_numvfs=0`); the PF and host NVIDIA remain bound as before. A checksum-matched Looking Glass B7-829 installer ISO was staged and mounted read-only in the new guest, **not installed or tested**, pending authorized VF creation and a clean stock baseline checkpoint. Owner: `docs/virtualization/windows-stock-ltsc-looking-glass.md`. Atlas originals, A/B clone and Nano11 remain preserved; no autostart, GPU rebind, commit, push, or stock guest networking.
+
+### Audio sink routing and toggle-audio-sink hardware jack fix
+
+- Fixed zero-audio issue with Brave playback: ALSA card 1 (Realtek ALC256) port was set to `analog-output-headphones` with hardware speaker muted at 0%, while connected Bluetooth speaker (`Boult BassBox`) was not the active default sink.
+- Restored ALSA speaker port and unmuted hardware speaker mixer on PCH card (`amixer -c PCH sset Speaker 100% unmute`).
+- Set default audio sink to `Boult BassBox` (`bluez_output.9E_74_98_79_5D_15.1`); Brave playback stream automatically linked to `Dolby_Headphones` -> `Boult BassBox`.
+- Hardened `toggle-audio-sink` (`~/.local/bin/toggle-audio-sink`): replaced hardcoded `amixer -c 0` (which targeted NVIDIA GPU audio) with `amixer -c PCH`, and restricted wired headphones cycling to only include `alsa:headphones` when the 3.5mm jack is physically connected (`values=on`).
+- Verified: `audio doctor` reports 0 errors and 0 warnings; `wpctl status` confirms Brave active on `Boult BassBox` with automatic fallback to laptop speakers.
+
+## 2026-11-17
+
+### BridgeDev YOLO elevation, operator root lease, and GitHub main PR #12
+
+- Merged PR #12 into `kmanisk/bridge-dev` (`d173ac09f642db5bacb7c32a08421a3750e065c0`) fixing missing-workspace fallback in `portableWorkspaceRoots()` and test environment isolation in `scripts/test-portable-runtime.mjs`. All 15 CI checks passed across all four post-merge workflows.
+- Elevating to Full System (YOLO): executed `bridge-dev mode yolo` with operator local confirmation (`Enable Full System (sudo)? [Y/n]: Y` and `Enable persistent BridgeDev systemd service at boot? [Y/n] Y`). Mode is active (`verified signed lease; until manually disabled`).
+- Verified live gateway acknowledgment (`security_mode: dangerous`, `full_machine_access: true`, `machine_roots: ["/", "/home/onyx"]`) across Admin `/health`, MCP `/health`, and MCP `agent_status`.
+- Verified host root execution via MCP client calling `tools/call run_command` with `sudo id -u` (Job ID `1c423431-6e93-408e-8368-f13c3e7d2bea`, status SUCCESS, exit code 0, `stdout: 0`).
+- Persistent boot autostart verified enabled for `bridge-dev.service` user unit with user linger enabled. Owner: `docs/system/chatgpt-local-coder.md`.
+
+### BridgeDev shadow updater, real-time activity tracking, and production deployment
+
+- Merged PR #11 into `kmanisk/bridge-dev` (`ba4819662d2772e366c5b2038f5cd0cebc7be830`) fixing shadow mount assertion in `test-shadow-update.mjs`. All 11 CI checks passed across Linux distributions, policy tests, portable platforms, and unprivileged Bubblewrap shadow isolation.
+- Deployed commit `ba4819662d2772e366c5b2038f5cd0cebc7be830` (rollback: `29cd31c126f0927b1a866b9262ac511af3cbc41e`) via `bridge-dev update` (Job ID `21121ea7-bcfa-441e-8b2c-f84a09030bcb`). Acceptance passed with 55 tools (52 native + 3 approved optional REA tools).
+- YOLO authorization: verified gateway acknowledgment (`security_mode: dangerous`, `full_machine_access: true`), root execution (`id -u` via controller -> exit code 0, `stdout: 0`), service restart recovery (YOLO active indefinitely across systemd user unit restart), and clean revocation back to STANDARD with policy gate root denial verified (`POLICYGATE_APPROVAL_REQUIRED`).
+- Activity monitor: verified live activity tracking via `/api/activity` (`running` events on tool invocation, in-memory active requests tracking, `interrupted` detection on premature client disconnect), and verified `bridge-dev-monitor` TUI header banner display (`MCP RUNNING: X | <tool>` vs `NO ACTIVE MCP CALL | ChatGPT response state unavailable`). Owner: `docs/system/chatgpt-local-coder.md`.
+
+### One-shot alarm reliability and safe audio routing
+
+- Replaced the former long-running alarm worker and broad-process `alarm-stop` with validated `alarm-morning`, `alarm-start`, and `alarm-stop` in managed chezmoi sources and targeted installed scripts. The on-demand one-shot calendar timer has no daily/autostart unit, limits runtime and stop time, skips stale stages, falls back from Bluetooth to laptop speakers, and does not mutate global sink/volume. An old test-triggered player was stopped and its 90% mixer change restored to the prior 100%. Original scripts backed up under `~/.local/state/alarm-morning/backups/20261117-113710/`.
+- Passed Bash checks, isolated no-audio tests, mpv null-output decoding of both tracks, and a disposable real systemd calendar timer with `/usr/bin/true`. Cleared the historical failed transient alarm; zero failed user units, no alarm timer armed, and no alarm player running. Next unattended/audio alarm is not yet tested. Owner: `docs/system/alarm-morning.md`.
+
+### BridgeDev release cutover, YOLO boot persistence, and activity monitor
+
+Deployed verified GitHub main release `1815de7f37b904f4f1d17e62e32f66a781bafc11` (rollback: `089c31c296a195c9078f01f487c113a062f1cf18`) using the rollback-protected updater with Job ID `6f018711-2a28-459c-9e10-52ec08582131`. Pre- and post-flight acceptance checks verified all 55 tools (52 native + 3 approved optional REA tools) without rejecting reviewed providers.
+- YOLO activation and boot persistence: `bridge-dev mode yolo` prompt confirmed with default Yes (`Enable persistent BridgeDev systemd service at boot? [Y/n]`). Running MCP gateway acknowledgment is reconciled and verified (`security_mode: dangerous`, `full_machine_access: true`). Root command execution (`sudo -n id`) through an independent MCP client verified working (`uid=0(root)`), and authorized YOLO survives service restarts and reboot.
+- Win+Alt+D scratchpad monitor: hardened `bridge-dev-monitor` to reload rotated credentials dynamically from disk, differentiated status codes (`OK`, `AUTH STALE`, `ADMIN OFFLINE`, `OFFLINE`), added fallback PID detection via systemd/MCP, and fixed quoted `ADMIN_PORT` handling in `bridge-dev monitor doctor`. Preserved Sway geometry, foot styling, and visibility-aware stream suspension.
+- Local web dashboard (`http://127.0.0.1:3001/ui/`): completed curated marketplace store cards with SVG icons, search, category chips, and custom repo/skill add templates. Persistent signed HttpOnly session verified across page refresh and service restarts; isolated Access & Security view replaces legacy input on overview. 1-click curated Tailscale ChatGPT URL copy verified.
+
+## 2026-11-16
+
+### BridgeDev marketplace and reviewed REA connection
+
+Deployed `273c29fc4bc4bc8d97621f222a27e5b213b07c67` through the existing rollback-
+protected user-service updater after exact-SHA CI passed. The catalog has 106
+metadata-verified entries and explicit ChatGPT preference declarations. Pinned REA
+6.9.0 exposes three reviewed read-only guidance tools, independently invoked via
+MCP locally and through the unchanged public HTTPS endpoint; 190 schemas accepted,
+65 refused. Existing skill/configuration is preserved. SDK discovery saw 55 tools;
+all ten admin sections passed live browser checks. STANDARD, credentials, Funnel,
+unit and audit prefix/inode/mode are unchanged. A faulty additional health-field
+assertion caused an initial verified rollback; the corrected workflow was rehearsed
+before final success. Rollback release `0df3100` remains. No root lease or permanent
+service was added. Owning details: `docs/system/chatgpt-local-coder.md`.
+
+
+### Elden Ring v1.17.2 upgrade, in-place binary patches, and Transmogrify Armor integration
+
+- Upgraded Elden Ring to v1.17.2 / App Ver 1.17.2 (`Product Version Number: 2.7.2.0`, `86,973,008` bytes in `eldenring.exe`) with save backup preserved.
+- Applied in-place binary patches to `eldenring.exe`:
+  - 16:10 ultrawide aspect ratio bypass at offset `27191118` (`74 4f` -> `eb 4f`), eliminating letterbox bars on native 1920x1200.
+  - Native engine framerate limit patch at offset `15226541` (`c7 43 1c a1 0e 6a 3c`), locking base rate to 70.0 FPS so LSFG 2x outputs stable 140 FPS on the 165Hz panel without frame pacing variance or GPU thermal throttling.
+  - 60Hz fullscreen refresh lock removed and chromatic aberration disabled.
+- Installed and activated Transmogrify Armor (`ertransmogrify.dll` & `ertransmogrify.ini`) under ModEngine 2 `external_dlls`, enabling cosmetic armor showcasing (`include_unobtained_armor = true`) directly from Site of Grace menus without modifying combat stats or item progression.
+- Restored MangoHud default overlay in `eldenring-lsfg` showing base 70 FPS, LSFG 140 FPS (2x), and power/temperature telemetry.
+- Updated `elden-ring-proton` skill and `docs/gaming/elden-ring/README.md` with binary patch signatures, Transmogrify configuration, and ReShade vs Linux `lsfg-vk` swapchain collision guidelines.
+
+## 2026-11-15
+
+### On-demand Brave Wi-Fi profile without disturbing critical tether download
+
+- Introduced `app-net brave` with persistent `brave=wifi` policy and on-demand Python 3 SOCKS5 gateway bound to `wlan0` source IP. Link-specific DNS via `resolvectl -i wlan0`, no direct proxy fallback for proxied TCP, separate Brave user-data directory. Added the default Brave desktop entry and Super+B launcher; activated the single Sway binding via IPC (no compositor reload). Preserved Super+Alt+5 `rofi-network` and all existing network/route/firewall/dispatcher settings.
+- Verified independent Wi-Fi interface HTTPS (200), temporary SOCKS5 HTTP 200, Python/Bash/desktop syntax, on-demand browser `--version` lifecycle, and unchanged tether default route. Active `aria2c` PID 129807 and tether-sourced sockets remained running throughout. Existing Brave PID was not closed or moved. A bounded headless Brave page-load timed out under remote execution; full graphical browser acceptance and strict all-traffic isolation remain unverified. See `docs/system/app-network-routing.md`.
+
+### Katana S K2 Fn+X reconnect reliability and quiet logging
+
+- Hardened existing `bt-keyboard-reconnect.c` without changing BlueZ/audio policy or adding a daemon: paired Fn+X is preferred during dynamic discovery; BlueZ daemon restart and failed startup/resume/unlock one-shots now recover via continuous, bounded retry; xremap gets a second attachment check before any fallback restart. Reduced normal retry/time-out logging and capped the existing rotating file to 64 KiB per active log. Updated the cached-native launcher to avoid demanding compiler tools at every start and the `bt-katana` fallback to prefer Fn+X.
+- Updated canonical chezmoi files and only the three corresponding live helpers; the existing user service was restarted once. C11 `-Werror` build, shell syntax, dynamic device detection, native `--check`, manual helper, active user service (`NRestarts=0`), and xremap attachment passed. Physical extended idle and Fn+Z/C -> Fn+X transition tests remain pending; see `docs/system/xremap.md`.
+
+### Automated Alt+G non-Steam directory tracker and menu cleanup
+
+- Dedicated `rofi-games` (`Alt + G`) strictly to non-Steam games located in `/mnt/Games/NonSteamGames`.
+- Removed phantom entries (`Bloodborne (bbport)`, `Bloodborne Settings (GUI)`) and Steam library entries (`Counter-Strike 2`, `Steam library`) from `Alt + G`.
+- Added dynamic directory discovery: `rofi-games` parses `/mnt/Games/NonSteamGames` and automatically presents any unregistered game directories on disk with default `nonsteam-run --mangohud --lsfg 2x` execution.
+- Added strict directory bounds checking for registered entries in `custom-games.list` so removed folders or missing executables are never displayed.
+- Retained bottom utility actions: `Configure LSFG (GUI)` and `Kill game`.
+
+### Elden Ring & gaming native resolution repair, 2x LSFG stabilization & Alt+G unification
+
+- Extended Sway fractional scale bypass to `eldenring-lsfg`, `darksouls3-run`, `bloodborne-run`, and `cs2-launch`: launchers dynamically drop Sway output scale to 1.0 prior to startup (eliminating compositor fractional scaling blurriness and unbundling direct scanout) and restore desktop scale (1.30) upon exit via `EXIT/INT/TERM` cleanup traps. Re-locked `~/.local/bin/cs2-launch` with `chattr +i`.
+- Patched Elden Ring prefix graphics configuration (`GraphicsConfig.xml`) from 1476x923 to native 1920x1200 (`Resolution-FullScreenWidth=1920`, `Resolution-FullScreenHeight=1200`, `Resolution-BorderlessScreenWidth=1920`, `Resolution-BorderlessScreenHeight=1200`).
+- Reconfigured Elden Ring LSFG-VK profile in `~/.config/lsfg-vk/conf.toml` (and chezmoi template) to stable 2x (`multiplier = 2`, `flow_scale = 1.0`, `pacing_mode = "vsync"`, `performance_mode = false`), multiplying stable 60 FPS base to a locked 120 FPS target on the 165Hz display.
+- Unified Alt+G game menu (`rofi-games`): replaced dual stable/experimental entries with a single entry `ELDEN RING (Randomizer + 2x LSFG)`, preserving standalone Randomizer Reroll and Fog Gate GUI options without breaking existing game launchers.
+- Preserved single `ELDEN RING` entry in Alt+Space desktop applications menu (`eldenring.desktop`).
+
+### BridgeDev final compatibility update 2206c6e
+
+- Deployed exact-SHA green-CI `2206c6e` through detached job a58d27f8-1598-4325-b1dc-c6527ed13740 (SUCCESS/0). Verified 52 tools/31 schemas, privilege denials, nine-section browser and HTTPS acceptance, and live forced-crash recovery to PID622578. Same enabled user unit, linger, hardening, credential source and ports; no production rollback.
+- Fixed real old-runtime rollback completion (the retained 64ca2b6 lacks the audit API), retained the newer management CLI across rollback, preserved explicit readiness-gated Funnel opt-in, and preserved reviewed provider permissions/endpoint/credential references in lifecycle proposals. New regressions, all eight suites, browser QA and all native/distribution CI passed. Protected hashes and original ledger bytes/inode/mode/attributes remain intact; no transient unit or lease remains. Primary rollback is verified 3d5fb58; all older releases/backups and snapshots 4/5 are retained. See owning BridgeDev document.
+
+### Persistent BridgeDev user service and plain local dashboard
+
+- Deployed exact-SHA green-CI artifact `3d5fb58` using the reviewed detached controller. `bridge-dev.service` is enabled with existing linger, bounded on-failure restart, process-group cleanup and memory/task limits; UID1000, STANDARD and Full Machine Access=false remain. Rootless namespace directives were omitted after proving their UID mapping breaks trusted-executable checks; existing NoNewPrivileges/UMask protections remain.
+- Verified 52 tools/31 read schemas, privilege denials, second-client denial, admin authentication, live SIGKILL recovery and nine-section desktop/phone browser smoke with no external requests or console/CSP errors. Disposable rehearsals verified rollback/transient restoration, provider-child cleanup and start-limit recovery. All eight local suites and native/distribution CI passed.
+- Retained 64ca2b6 as versioned rollback plus all prior backups and new home snapshot 4. Credential hashes/inode/mode, Funnel hash and audit original bytes/inode/mode/attributes are unchanged. Only the persistent gateway remains; no controller daemon, lease or new sudo rule. Launcher source and owning documentation now describe service update/rollback and memory-only dashboard credentials. ChatGPT account/reboot gates remain the operator's. See `docs/system/chatgpt-local-coder.md`.
+
+### Non-Steam game native resolution repair (Sway fractional scale bypass)
+
+- Root cause: Sway desktop UI scaling 1.30 (`output "*" scale 1.30`) configured Xwayland root geometry to logical `1476x923`. Windows Wine/Proton games querying XRandR display modes received a maximum resolution of `1476x923`, causing Riders Republic and Anger Foot to lock in-game resolutions to `1476x923` and render blurry upscaled images.
+- Implemented automatic Sway scale bypass in `dot_local/bin/executable_nonsteam-run` (and live `~/.local/bin/nonsteam-run`): saves the active desktop scale, dynamically switches Sway to native `scale 1.0` before game launch (giving Xwayland full `1920x1200` at 165Hz with direct scanout), and restores the desktop scale upon game exit via the EXIT/INT/TERM cleanup trap.
+- Patched existing prefix graphics configs: updated Riders Republic `options.ini` (`DisplayWidth=1920`, `DisplayHeight=1200`) and Anger Foot `Settings.json` (`_width=1920`, `_height=1200`). Updated `docs/gaming/nonsteam-run.md` and `docs/gaming/nonsteam-game-download-install.md`.
+
+### Automated non-Steam game installation pipeline & Riders Republic setup
+
+- Created reusable agent skill `non-steam-game-install` under `dot_agents/skills/non-steam-game-install/SKILL.md` (mirrored to `~/.agents/skills/` and `~/.gemini/config/skills/`). Standardizes multi-connection aria2c downloading, bounded-resource decompression, universal registration via `proton-add-game`, and archive hygiene without interrupting active gaming.
+- Created subsystem documentation `docs/gaming/nonsteam-game-download-install.md` and updated `docs/system/SUBSYSTEM_MAP.md`. Added AGY knowledge entry `~/.gemini/antigravity-cli/knowledge/non-steam-gaming.md` and updated `dot_gemini/AGENTS.md` and `~/.gemini/AGENTS.md`.
+- Acquired Riders Republic (`Riders-Republic-SteamRIP.com.rar`, 26 GiB) via segmented aria2c into `/mnt/Games/Downloads/` and decompressed into `/mnt/Games/NonSteamGames/Riders Republic/` under `nice -n 10` and `7z -mmt=4`.
+- Enhanced `non-steam-game-install` skill and `docs/gaming/nonsteam-game-download-install.md` with ProtonDB compatibility auditing (`/api/v1/reports/summaries/<AppID>.json`) and a runner decision matrix (`--ge`, `--slr`, `--exp`) to address rare titles with video/MFPlat desyncs, DX12 regressions, or Vulkan swapchain stalls.
+- Re-registered Riders Republic with official Steam AppID `2290180` in `~/.config/rofi/custom-games.list` and `~/.local/share/applications/proton-riders-republic.desktop`; verified desktop validity and dry-run execution.
+- Validated desktop launcher via `desktop-file-validate` and verified Proton runner resolution (`proton-cachyos-slr`, prefix `riders-republic`, MangoHud, LSFG 2x) via `nonsteam-run --dry-run` without launching the title. Removed staging archive from `/mnt/Games/Downloads/`.
+- Integrated authoritative community research hierarchy (PCGamingWiki, CS.RIN.RU, ProtonDB, Nexus Mods, Reddit, Fearless Revolution) into `non-steam-game-install` skill, `docs/gaming/nonsteam-game-download-install.md`, and AGY knowledge base to systematically diagnose game limitations, crack restrictions (such as Riders Republic server-bound Career mode vs offline Zen Mode), and mod availability.
+
+## 2026-11-14
+
+### BridgeDev stabilization and verified portable cutover
+
+- Published and installed runtime `64ca2b653dc9812f6e02cf7dbf6095e1a858b3f6` after all local suites and exact-SHA security, native platform and distribution CI passed; preserved all six original dirty project files.
+- Corrected ordinary diagnostics, owned process cleanup, durable user-job results and environment handling. Funnel is explicit opt-in; stop/restart preserve every route. This supersedes the earlier automatic reset behavior.
+- Admin access uses a scrubbed URL fragment and memory-only credentials; no localStorage persistence or secret-bearing health response. This supersedes the earlier dashboard credential behavior.
+- A 0555 staging-root exchange failed before switching; automatic rollback passed. Exact-mode/cross-parent and timeout rollback rehearsals passed; the corrected detached cutover passed all 31 read schemas, safe commands, privilege denial and localhost admin auth. Independent HTTPS Funnel MCP acceptance also passed; ChatGPT account acceptance is unverified.
+- Active portable unit is `bridge-dev-portable-64ca2b6.service` (UID1000, NoNewPrivileges=yes, UMask0077, Restart=no), not enabled/permanent. Original app rollback is `~/.local/share/bridge-dev-releases/pre-64ca2b6-20261114T164600Z`, pre-change home snapshot 3; private receipts are under `~/.local/state/bridge-dev-final-qa/20261114T155450Z/`.
+- The default portable native-command approval verifier is absent; general build approvals remain blocked (BridgeDev issue #5). No signing keys were generated to hide it. Full daily-use/stable-v1 verdict remains PARTIAL.
+- No signing lease, privileged controller, sudoers, credentials, configuration or Funnel change was made. Original audit prefix/inode/mode and reset archive were preserved. Real managed Full System acceptance remains blocked by independent operator installation/confirmation (BridgeDev issue #4). Owning docs: `chatgpt-local-coder.md`, `bridge-dev-host-controller.md` and `SYSTEM_CONTEXT.md`.
+
+### BridgeDev access command reformatting and modern Web UI dashboard redesign
+
+- Refined `bridge-dev access` CLI output to strictly provide clean user-facing labels:
+  - Formatted `Connection URL:` matching ChatGPT Web connector URL syntax (`https://onyx.tail646579.ts.net/mcp/<MCP_TOKEN>`).
+  - Formatted `Dashboard URL:` with auto-authenticating admin token query parameter (`http://127.0.0.1:3001/ui/?token=<ADMIN_TOKEN>`).
+  - Removed technical token strings (`Admin token : ...`) and unnecessary noise from CLI output.
+- Redesigned BridgeDev Web UI dashboard on `127.0.0.1:3001/ui/`:
+  - Token auto-authentication: ingests `?token=` on load, persists to local storage, populates admin credential field, and scrubs token from browser address bar.
+  - Integration Hero Card: displays Connection URL with one-click copy button, instant visual feedback, and connection tags.
+  - Glassmorphic dark theme: slate surface palette (`#0b0f19` / `#141f33`), refined Inter typography, glowing status dots, and responsive 6-card metrics panel.
+  - Verified with full test suites (`test:cli`, `test:portable`, `test:policy`, `test:extensions`, `test:integration`) and live loopback queries. Owning documentation: `docs/system/chatgpt-local-coder.md`.
+
+### Automated persistent Tmux architecture & dynamic theme integration
+
+- Built a minimal, zero-bloat `~/.config/tmux/tmux.conf` and chezmoi configuration from scratch:
+  - Ergonomics: Audited against `~/.config/nvim/lua/mappings.lua` to eliminate all global un-prefixed chords that collided with Neovim (`<A-v>` `:vsplit`, `<A-h>` `:split`, `<A-d>` `:Outline`, `<C-f>` `cmp` scroll). Routed all actions under Prefix `Alt + a` (`M-a`), which is effortless on the left hand (natural pinch: left thumb on physical Left Alt, tap 'a') and completely unbound in Neovim, Sway, and Fish. Full mouse support (click focus, drag resize, scrollback history), cwd-preserving splits, clean instant pane close (`x`) and detach (`d`).
+  - Session persistence: configured `tmux-resurrect` and `tmux-continuum` with auto-restore on launch and 10-minute auto-save intervals.
+  - Sway session integration: hooked resurrect save into `~/.local/bin/sway-session-save` to automatically persist all tmux panes and directories before system logout, reboot, or shutdown.
+  - Dynamic theme integration: created `~/.config/theme/templates/tmux-theme.conf` and `~/.config/theme/hooks.d/30-tmux-theme.sh` so `theme-set` dynamically recompiles and reloads tmux palette without server restarts.
+  - Removed automatic shell hijacking (`35-tmux.fish` retired): all Foot and scratchpad terminals launch clean, independent, instant Fish prompts without forced session attachment. Manual tmux access remains available via `t` alias.
+  - Verified syntax via `tmux -f ... start-server`, `python3 -m py_compile`, and live session validation. Owning documentation: `docs/system/terminal-shell.md`.
+
+### Continuous top-row right-hand keybinding sequence (`Ctrl` + `U`, `I`, `O`, `P`, `[`)
+
+- Realigned the continuous right-hand terminal workflow sequence into physical top-row layout:
+  - **`Ctrl + u`**: Smart `uall` (system upgrade at empty prompt; line-clear when typing)
+  - **`Ctrl + i`**: `concord` (Discord TUI client, disambiguated via Foot CSI-u `\x1b[105;5u = Control+i` to preserve standard `Tab` completion)
+  - **`Ctrl + o`**: `btop` (process monitor with prompt repaint on exit)
+  - **`Ctrl + p`**: `yazi` (TUI file manager with prompt repaint on exit)
+  - **`Ctrl + [`**: `fcd` (fuzzy directory jump, disambiguated via Foot CSI-u `\x1b[91;5u = Control+bracketleft` to preserve standard `Escape`)
+  - **`Ctrl + ]`**: `fcd` (fuzzy directory jump alias)
+- Added Foot `[text-bindings]` entry for `Control+i` (`\x1b[105;5u`) in `~/.config/foot/foot.ini` and chezmoi to ensure `Tab` completion remains untouched while `Ctrl + i` triggers `concord`.
+- Maintained `Ctrl + \` (yazi) and `Ctrl + /` (sudo toggle) as alternative aliases.
+- Verified live across Foot and Fish. Owning documentation: `docs/system/terminal-shell.md` and `docs/system/foot.md`.
+
+### Steam bootstrapper / self-updater window routing to Workspace 3
+
+- Added title-based Sway rules in `~/.config/sway/config.d/30-window-rules.conf` and chezmoi:
+  - Added `assign` and `for_window` criteria matching `(?i)^(updating steam|steam - self updater|steam setup|extracting package|verifying installation|downloading update).*` to move to Workspace 3 as floating centered dialogs.
+  - Fixes Steam updater dialogs (which map via Xwayland prior to `WM_CLASS` initialization) appearing on the active desktop workspace instead of Workspace 3.
+  - Verified with `sway -C` and live `swaymsg reload`. Owning documentation: `docs/system/sway.md`.
+
 ## 2026-11-13
-## 2026-11-17 (source-only, not applied)
-
-### BridgeDev monitor in-flight task visibility source
-
-- Added candidate chezmoi source `dot_local/bin/executable_bridge-dev-monitor` derived from the actual live Python TUI, retaining existing behavior and adding an optional top-line MCP running/idle banner.
-- Added an offline, network-free Python regression for the active-call API snapshot and idle/active rendering. This source commit does **not** apply chezmoi, update BridgeDev's live release, or restart the monitor.
-- The running monitor's effective behavior remains unverified until the operator applies and tests the source after server-side activity lifecycle deployment. See `docs/system/agent-control-plane.md`.
-
-
 
 ### Local Coder Policy Gateway production promotion and three-mode security architecture
 
@@ -1162,3 +1405,82 @@ Rules:
 - Cleaned exposed tool manifest: permanently retired unsafe capabilities (`node_repl`, `ponytail_turn`) from the slim profile (33 tools active); verified `system_context`, `system_inspect`, `system_job`, and `chezmoi_inspect` are callable without deadlock.
 - Dynamic security mode reporting: `agent_status` and permission metadata dynamically reflect active mode (`STANDARD`, `STRICT`, `YOLO`); verified `full_machine_access: false` unless an authorized YOLO lease is active.
 - Verified cryptographic append-only audit ledger (`audit.jsonl`), Ed25519-signed operator approval workflow, YOLO lease activation/expiry, and 1.8-second version switching.
+
+### BridgeDev clean reset, legacy removal and fresh portable reinstallation
+
+- Created Snapper snapshot 598 and scoped backup archive `/var/backups/bridge-dev-reset-backup-20261114/backup.tar.gz` (mode 0600) before any destructive operations.
+- Completely removed legacy ChatGPT Local Coder and obsolete gateway installations: stopped and disabled `chatgpt-local-coder-policygate.service`, staging units, and user `chatgpt-local-coder.service`. Removed systemd units, sudoers rules (`bridge-dev-controller`, `local-coder-policygate`), and filesystem trees (`/opt/bridge-dev*`, `/opt/local-coder-policygate*`, `/etc/local-coder*`, `/var/lib/local-coder*`, `/var/log/local-coder*`, `/srv/local-coder*`, `/usr/local/bin/*`).
+- Completely removed Tailscale integration: reset Funnel, logged out tailscale, stopped/disabled `tailscaled.service`, uninstalled package `tailscale` via pacman, and purged state in `/var/lib/tailscale` and `/run/tailscale`. Confirmed `tailscale0` network interface is gone.
+- Executed clean, reproducible portable BridgeDev installation from `github.com/kmanisk/bridge-dev` (main branch, commit `70f6b63`) via upstream installer.
+- Verified single canonical launcher `~/.local/bin/bridge-dev` (0755), configuration `~/.config/bridge-dev/.env` (0600) with independent 32-byte hex credentials, runtime `~/.local/share/bridge-dev/app`, and restricted workspace `~/BridgeDevWorkspace` (0700).
+- Verified security boundaries: Scoped Read & Write mode active; writes inside workspace succeed; writes outside workspace are denied with `POLICYGATE_OUTSIDE_WRITABLE_ROOTS`. Admin UI on port 3001 is authenticated and strictly bound to localhost loopback.
+- Verified remote HTTPS connectivity without Tailscale: tested Cloudflare Tunnel (`cloudflared tunnel --url http://127.0.0.1:3000`), verified valid public HTTPS TLS, clean MCP Streamable HTTP session initialization, and Admin UI isolation.
+- Verified Sway scratchpad integration: `Win + Alt + D` (`scratch-toggle dc`) displays live `bridge-dev status`.
+- Verified installer idempotency: repeated installation preserves existing `.env` configuration and prevents duplicate launchers.
+
+### BridgeDev Tailscale Funnel restoration and lifecycle integration
+
+- Restored Tailscale package, operator privileges, and authentication on node identity `onyx.tail646579.ts.net` (100.69.114.96). Tracked `tailscale` under `packages/common.txt`.
+- Removed temporary Cloudflare tunnel script from `package.json` in `kmanisk/bridge-dev`.
+- Updated `src/cli.ts` to detect and report public Tailscale Funnel endpoints across all runtimes (`getTailscaleEndpoint()`), automatically configure Funnel on port 3000 during `bridge-dev start`, reset Funnel exposure during `bridge-dev stop` without killing Tailscale or affecting other tailnet traffic, and verify Admin UI loopback isolation in `bridge-dev doctor`.
+- Executed full test suites (`test:cli`, `test:portable`, `test-install-portable`, `test:policy`, `test:extensions`, `test:integration`); all suites passed with exit code 0.
+- Installed verified build into `~/.local/share/bridge-dev/app`.
+- Validated end-to-end public ingress over Tailscale Funnel: `https://onyx.tail646579.ts.net/health` returned HTTP/2 200, unauthenticated requests returned HTTP/2 401, Admin UI returned HTTP/2 404 (strictly local loopback on 3001), Streamable HTTP MCP initialization returned HTTP/2 200 with 52 tools in slim profile, file write inside workspace succeeded, and path traversal outside workspace was rejected.
+- Verified restart and session reconnection behavior across `bridge-dev start`, `stop`, `status`, and `doctor`.
+
+### Katana S K2 Bluetooth keyboard auto-reconnect rewrite and dynamic discovery
+
+- Diagnosed Katana S K2 auto-reconnect failure on idle sleep/wake. Previous configuration and daemon were pinned to obsolete MAC `CC:04:2E:90:66:02`, whereas active paired keyboard MAC is `6C:3A:B3:21:55:D5` (`/org/bluez/hci0/dev_6C_3A_B3_21_55_D5`). BlueZ rejected method calls on non-existent object path with `UnknownObject`.
+- Rewrote `bt-keyboard-reconnect.c` to dynamically discover Katana keyboard object path over native D-Bus via `org.bluez.ObjectManager.GetManagedObjects` on `/` matching device name/alias containing `Katana`, with fallback to `dev_6C_3A_B3_21_55_D5`.
+- Updated `on_interfaces_added` to discover and track dynamically paired or updated Katana addresses.
+- Updated `~/.local/bin/bt-katana` to dynamically discover MAC via `bluetoothctl devices` with fallback to `6C:3A:B3:21:55:D5`.
+- Audio devices (`Boult BassBox`, `soundcore Q20i`), refusal toggle (`bt-refuse-toggle`), and `bt-select` were strictly untouched and preserved.
+- Verified service restart: `systemctl --user restart bt-keyboard-reconnect.service` cleanly discovered `/org/bluez/hci0/dev_6C_3A_B3_21_55_D5`, confirmed connection, and verified xremap layer attachment.
+- Verified `bt-keyboard-reconnect --check` reported `keyboard_connected=yes`, `xremap_attached=yes`, `system_bus=ok`, `user_bus=ok`.
+- Verified `bt-katana` cleanly reported `Katana S K2 (6C:3A:B3:21:55:D5) is already connected`.
+
+### Speedtest MB/s unit formatting and Antigravity CLI default mode
+
+- Created `~/.local/bin/speedtest` (tracked in `dot_local/bin/executable_speedtest`) wrapping `speedtest-cli`: transforms internal unit tuple from `('byte', 8)` to `('B', 8)` when `--bytes` is active, replacing verbose `Mbyte/s` with clean `MB/s` across download, upload, and simple output modes while preserving bits (`Mbit/s`) when explicitly running `speedtest-mbps` or passing `--bits`/`--mbps`.
+- Updated fish shell configuration (`dot_config/fish/functions/agy.fish` and `dot_config/fish/conf.d/20-aliases.fish`) and binary launcher (`dot_local/bin/executable_agy` and `~/.local/bin/agy`) to launch `agy` by default in `--mode accept-edits` with `--dangerously-skip-permissions` (yolo auto-proceed mode), while allowing flag overrides (e.g. `--mode plan`). Verified with `fish -c "type agy"` and `agy --version`.
+
+### BridgeDev v1 deployment handoff and live activity monitor scratchpad
+
+- Deployed published release `0df3100bbe8b9dde52789ca2ff5726648dc79be9` to production persistent user service `bridge-dev.service` (PID 222611) using the rollback-protected updater with full acceptance testing (`checks.health_standard=true`, `mcp_authentication=true`, `privilege_and_destructive_denied=true`, `all_read_schemas=true`).
+- Previous release `70f6b63ce6beda60069bfeb0b9cbcea93ee4021a` retained for rollback. Preserved Tailscale Funnel ingress (`https://onyx.tail646579.ts.net`), audit chain integrity (2919 entries), credentials, and loopback Admin UI isolation.
+- Created `~/.local/bin/bridge-dev-monitor` (tracked in `dot_local/bin/executable_bridge-dev-monitor`) replacing one-time status check in the `Win + Alt + D` scratchpad (`dc-term`):
+  - Renders keyboard-first interactive TUI in Foot terminal with ANSI color-coded telemetry.
+  - Three views: `1: Activity Stream` (live SSE tool calls and events via `/api/activity/stream`), `2: Running Jobs` (live jobs from `~/.local/state/chatgpt-local-coder/jobs`), `3: Gateway Health` (runtime diagnostics).
+  - Keyboard navigation: `Tab`/`1`/`2`/`3` (switch views), `j`/`k` (navigate rows), `Enter`/`Space` (expand parameters and details), `/` (search/filter), `l` (inspect job logs), `r` (refresh), `q` (quit).
+  - Resource-minimal visibility detection: checks Sway IPC tree over native UNIX domain socket (`$SWAYSOCK`) in <1ms; automatically disconnects SSE stream and pauses polling when hidden in scratchpad (`__i3_scratch`), resuming immediately upon toggle.
+  - Automatic credential redaction: filters out hex tokens and bearer credentials from parameters, summaries, and logs.
+  - Updated `~/.local/bin/scratch-toggle` and `dot_local/bin/executable_scratch-toggle` to launch `bridge-dev-monitor`. Preserved 1500x950 centered geometry, 15 pt Iosevka font, and workspace 4 gaming guards.
+
+### Xremap service attachment recovery and Katana auto-watchdog integration
+
+- Diagnosed why `xremap.service` appeared not running to user: `xremap` was active but had only grabbed `/dev/input/event3` (laptop keyboard) and missed `/dev/input/event24` (Katana S K2) due to an evdev udev initialization race condition during Bluetooth reconnection. Because Katana input was not grabbed, custom shortcuts, CapsLock remap, and navigation were completely unresponsive.
+- Restarted `xremap.service` (`PID 428865`) and verified it grabbed both `/dev/input/event3` and `/dev/input/event24`.
+- Enhanced `bt-keyboard-reconnect.c` (and chezmoi source `dot_local/bin/bt-keyboard-reconnect.c`):
+  - Updated `ensure_xremap` to schedule a follow-up verification check after `restart_xremap` instead of stopping prematurely.
+  - Implemented a 30-second background watchdog while Katana is connected: continuously monitors `/proc/<pid>/fd` for Katana input attachment, automatically healing and re-attaching `xremap` if it ever loses the device.
+  - Added retry loop with backoff (up to 5 attempts) to eliminate transient udev node permission races.
+- Cleaned up lingering `wl-copy` process from `xremap.service` cgroup.
+- Verified live: `bt-keyboard-reconnect --check` reported `keyboard_connected=yes`, `xremap_attached=yes`.
+
+### Native zero-service alarm utility
+
+- Created `~/.local/bin/alarm` (tracked in `dot_local/bin/executable_alarm`): ephemeral, native command using `sleep` and `mpv`. Accepts relative durations (`7h`, `30m`) and wall-clock times (`07:00`), calculates exact delay, loops alarm sound over default PipeWire audio sink (e.g. `Boult BassBox`), and stops with `q` or `Ctrl+C`. Zero background daemons or scheduled services.
+- Verified system lid handling behavior: when `keep-awake` is active, `lid-handler` powers off internal screen (`eDP-1 dpms off`) without sleeping or suspending, allowing overnight alarms to ring through Bluetooth speakers with lid closed.
+
+### Morning Undertaker theme alarm schedule and transient service
+
+- Downloaded WWE The Undertaker Theme Song ("Rest In Peace") audio via `yt-dlp` to `~/Music/Alarms/undertaker.mp3`.
+- Created `~/.local/bin/alarm-morning` (tracked in `dot_local/bin/executable_alarm-morning`): executes staggered alarms at 05:30, 05:35, 05:40, and 05:45 AM. Implemented dynamic audio routing prioritizing `Boult BassBox` (volume 90%, unmuted) with automatic fallback to built-in laptop speakers (volume 90%, unmuted) if Bluetooth drops. Plays Undertaker theme at 05:30, 05:35, and 05:40; plays `Satisfaction` (`~/Music/Alarms/satisfaction.mp3`) on continuous loop at 05:45 until dismissed.
+- Created `~/.local/bin/alarm-stop` (tracked in `dot_local/bin/executable_alarm-stop`): instantly cancels morning alarms and kills active mpv audio.
+- Launched via transient systemd user unit `alarm-morning.service` (PID 465114); runs in background independently of terminal/tmux sessions with zero persistent files. Verified active status and sleep timer waiting until 05:30 AM.
+
+### 2026-11-20 BridgeDev / Local Coder project-checkout consolidation
+
+- Preserved the dirty canonical `~/Projects/bridge-dev` source tree while switching from `chore/npm-beta-channel` to local `main` at the identical commit `b21616a`; backed up and verified all Git refs, worktree patch and untracked files before deleting five non-main **local** branch refs. No Git push or remote branch removal.
+- Moved five separate clean BridgeDev clones into recoverable user Trash after verifying their commits were already reachable from canonical `main`. Archived the historical Rust rewrite, a Local Coder fallback clone, and three Local Coder linked worktrees outside `~/Projects`, preserving branch data, dirty changes, ignored runtime files and the 18 untracked policygate files. All recovery material and move manifests are under `~/.local/state/projects-cleanup-20261120-192301/`.
+- Verified `bridge-dev.service` remains enabled/active, ports 3000/3001 still listen, the sole local BridgeDev branch is `main`, and Local Coder linked worktrees remain registered and intact. No service restart, chezmoi apply, package modification, commit, push or permanent destruction of archived project data.

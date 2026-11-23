@@ -14,6 +14,7 @@
  * Build: gcc -O2 -o ~/.local/bin/ctm-test ~/.local/bin/ctm-test.c $(pkg-config --cflags --libs libdrm) -lm
  */
 #define _POSIX_C_SOURCE 200809L
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -97,17 +98,50 @@ static void on_sig(int sig) {
 }
 
 static int open_intel(void) {
-    int fd = open(INTEL_CARD, O_RDWR | O_CLOEXEC);
+    char card_path[64];
+    int fd = -1;
+
+    /* First, check Intel PCI path by-path */
+    char resolved[PATH_MAX];
+    if (realpath("/dev/dri/by-path/pci-0000:00:02.0-card", resolved) != NULL) {
+        fd = open(resolved, O_RDWR | O_CLOEXEC);
+        if (fd >= 0) {
+            drmVersionPtr v = drmGetVersion(fd);
+            if (v) {
+                if (strcmp(v->name, "i915") == 0 || strcmp(v->name, "xe") == 0) {
+                    drmFreeVersion(v);
+                    goto init_caps;
+                }
+                drmFreeVersion(v);
+            }
+            close(fd);
+            fd = -1;
+        }
+    }
+
+    /* Fallback: scan /dev/dri/card0 through card9 for i915 or xe driver */
+    for (int i = 0; i < 10; i++) {
+        snprintf(card_path, sizeof(card_path), "/dev/dri/card%d", i);
+        int candidate = open(card_path, O_RDWR | O_CLOEXEC);
+        if (candidate < 0) continue;
+        drmVersionPtr v = drmGetVersion(candidate);
+        if (v) {
+            if (strcmp(v->name, "i915") == 0 || strcmp(v->name, "xe") == 0) {
+                drmFreeVersion(v);
+                fd = candidate;
+                break;
+            }
+            drmFreeVersion(v);
+        }
+        close(candidate);
+    }
+
     if (fd < 0) {
-        fprintf(stderr, "open %s: %s\n", INTEL_CARD, strerror(errno));
+        fprintf(stderr, "open Intel card: no i915/xe device found\n");
         return -1;
     }
-    drmVersionPtr v = drmGetVersion(fd);
-    if (v) {
-        if (strcmp(v->name, "i915") != 0)
-            fprintf(stderr, "warn: driver is '%s', expected 'i915'\n", v->name);
-        drmFreeVersion(v);
-    }
+
+init_caps:
     if (drmSetClientCap(fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1) != 0) {
         fprintf(stderr, "warn: drmSetClientCap(UNIVERSAL_PLANES): %s\n", strerror(errno));
     }
@@ -117,7 +151,7 @@ static int open_intel(void) {
     return fd;
 }
 
-/* Find eDP-1 connector + its driving CRTC. Returns 0 on success. */
+/* Find connected eDP connector + its driving CRTC. Returns 0 on success. */
 static int find_edp(int fd, uint32_t *conn_id, uint32_t *crtc_id) {
     drmModeRes *res = drmModeGetResources(fd);
     if (!res) { fprintf(stderr, "GetResources: %s\n", strerror(errno)); return -1; }
@@ -131,7 +165,7 @@ static int find_edp(int fd, uint32_t *conn_id, uint32_t *crtc_id) {
             c->connector_type == DRM_MODE_CONNECTOR_DisplayPort ? "DP" :
             c->connector_type == DRM_MODE_CONNECTOR_HDMIA ? "HDMI" : "OTHER",
             c->connector_type_id);
-        if (strcmp(name, WANT_CONN) == 0 && c->connection == DRM_MODE_CONNECTED) {
+        if ((c->connector_type == DRM_MODE_CONNECTOR_eDP || strcmp(name, WANT_CONN) == 0) && c->connection == DRM_MODE_CONNECTED) {
             *conn_id = c->connector_id;
             /* preferred: encoder's crtc */
             uint32_t crtc = 0;
